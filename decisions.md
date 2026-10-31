@@ -221,3 +221,28 @@ Implement `kamish-checkers` as a shared auditing suite used during test scenario
 
 ### Compliance with `project.md`
 - **§3.5.3 & §4.4:** Full automated validation for core invariants.
+
+---
+
+## ADR-0011: 24-Hour Hackathon Developer B Interface Contracts & Demo Orchestrator
+
+### Context
+To support parallel 2-developer velocity without merge conflicts or interface drift, Developer B is responsible for:
+1. Region Topology (`RegionId`: `US_EAST`, `EU_WEST`, `AP_SOUTH`) and residency policies (`StrictLocal`, `RestrictedReplication`, `GlobalCleartext`, `SealedCiphertext`).
+2. Canonical `StreamEvent` and `PolicyEngine` trait contract.
+3. Observability metrics ($\text{ReplicationLag} = \text{LocalCommittedOffset} - \text{RemoteAckedOffset}$) and link RTT monitoring.
+4. Synthetic Chaos Proxy / WAN latency injector for testing under degraded network conditions.
+5. Automated demonstration runner (`scripts/run_demo.sh`) validating Scenarios A (Gate 2), B (Gate 3), and C (Gate 4).
+
+### Decision
+1. Implement canonical types and trait in `crates/kamish-meta`:
+   - `PolicyEngine` trait with `validate_ingestion` and `validate_replication`.
+   - `KamishPolicyEngine` recording security violations to the tamper-evident hash-chained audit log.
+   - `ReplicationMetricsTracker` exposing exact offset lag.
+   - `SyntheticChaosInjector` non-blockingly simulating WAN latency and partitions via Tokio timers.
+2. Build `crates/kamish-meta/tests/developer_b_scenarios.rs` executing automated Scenarios A, B, and C.
+3. Finalize 1-click executable demo script `scripts/run_demo.sh` with ANSI terminal output.
+
+### Compliance with `project.md`
+- **FR-01, FR-04, FR-08, FR-10, FR-13:** Complete policy validation, audit logging, and automated checkers.
+- **INV-1 through INV-9:** All invariants preserved and verified across normal, slow-link, and partition scenarios.
