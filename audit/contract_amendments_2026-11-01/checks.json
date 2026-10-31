@@ -1,0 +1,18 @@
+{
+  "checked_at_utc": "2026-10-31T21:08:20.610541+00:00",
+  "base_revision": "9955f77e28236149a9d4fedde6c513689d25bd01",
+  "checks": [
+    {
+      "command": "git diff --check -- '*.md'",
+      "exit_code": 0,
+      "output": "docs-whitespace.txt"
+    },
+    {
+      "command": "git diff --exit-code 9955f77 -- cmd crates packages frontend early_research/probes scripts proto Cargo.toml Cargo.lock result.txt",
+      "exit_code": 0,
+      "output": "runtime-unchanged.txt"
+    }
+  ],
+  "probe_byte_identical": true,
+  "probe_sha256": "d6248f162eace5d5c403e9bcc9946d90b91f056459f2f53fec35b541b82d284e"
+}

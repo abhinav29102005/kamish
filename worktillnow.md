@@ -22,7 +22,7 @@
 | Public-production release status | **BLOCKED / FAIL** |
 | Known extended contract tests still failing | **2: distributed ownership and trusted audit completeness** |
 | Changes performed for this document | Documentation only; application code was not changed |
-| Current phase | Phase 0 contract proposed; maintainer approval required before Phase 1 |
+| Current phase | Phase 0 approved with amendments; Phase 1 preparation awaiting consensus pick and timing/consistency decisions |
 
 The original walkthrough describes `170de8e`, whose change clarifies PowerShell
 demo output. A fresh baseline at `77bb051` additionally includes frontend logo
@@ -35,7 +35,11 @@ Older CLI/browser/advisory results below retain their original dates and scope.
 **Phase 0 deliverable:** [docs/CONTRACT.md](docs/CONTRACT.md), with choices in
 [ADR-0015](decisions.md#adr-0015-phase-0-contract-and-approval-gates). Modes,
 durability, watermark identity, audit witness/coverage and revocation semantics
-are proposals awaiting approval. **No W01–W38 item is newly completed.** Both
+have maintainer approval with amendments: use time-limited quorum-issued leases
+without per-write metadata calls; option 1 payload quorum follows Phase 1; source
+identity/generation come from the quorum; cancel in-flight work on revocation.
+The proposed audit entry cap and global revocation boundary still require answers.
+**No W01–W38 item is newly completed.** Both
 extended failures remain; no tests or application code changed in Phase 0.
 
 ---
@@ -444,6 +448,27 @@ rather than assuming task numbers alone uniquely identify every change.
 - Phase 1 awaits approval. The contract document's eventual commit is discoverable
   with `git log -1 --format='%H %s' -- docs/CONTRACT.md`; the tested implementation
   revision remains `77bb051`, not the documentation commit.
+
+### 3.13 Phase 0 approval amendments and Phase 1 preparation
+
+- Maintainer approved the contract with amendments after proposal commit `9955f77`.
+- The earlier per-write metadata completion recommendation is superseded by
+  time-limited metadata-issued ownership leases validated locally on writes.
+  NFR-01 remains open until implementation/testing; pinned writers cannot continue
+  indefinitely after their leases expire.
+- Approved order: W01/W02/W05, then W08, then the three-replica/two-durable-ACK
+  payload contract. Synchronous K-region durability remains an optional later mode.
+- Watermark source identity/generation must be issued through committed metadata.
+  Revocation must cancel in-flight use/egress; the global activation boundary under
+  partitioned leases requires explicit clarification.
+- Proposed maximum unanchored audit suffix is 128 entries, pending numeric
+  confirmation; a 1-second scheduling target is not a guaranteed exposure time.
+  Independent failure-domain assumptions and key/majority/host limits are explicit.
+- Audit fixture changes must accompany W08 in the same commit, preserve the tamper
+  assertion, and include untouched, unwitnessed-tail, anchored-tamper and
+  unanchored-window controls. No probe changed in the documentation amendments.
+- Phase 1 preparation may compare consensus candidates. Wait for the maintainer's
+  library/service pick and relevant lease/consistency decisions before implementation.
 
 ---
 
@@ -2773,8 +2798,9 @@ source-inspected follow-up risks. Only the first two have the specific still-fai
 extended probe names listed in the current report; the list is broader than those
 two tests.
 
-**Current approved scope:** only Phase 0 documentation is underway; its contract
-still awaits approval. The user's later phases narrow W23 to a read-only live
+**Current approved scope:** Phase 0 amendments are accepted; Phase 1 preparation
+awaits the consensus selection and relevant unresolved parameters before coding.
+The user's later phases narrow W23 to a read-only live
 watermark/lag/audit gateway with a visible LIVE/DEMO distinction; authentication
 and Contact remain demo. W24/W25/W35/W36/W37/W38 are outside the requested
 implementation unless separately authorized. Their original backlog descriptions
@@ -2852,8 +2878,9 @@ These cautions explain why a green main test suite is not a universal safety res
 ## 26. Recommended Implementation Sequence
 
 **Execution gate added 1 November 2026:** the user's Phase 0–5 protocol takes
-precedence over the older broad Phase A–F roadmap below. Phase 0 is the pending
-[contract proposal](docs/CONTRACT.md); stop for approval before authority work.
+precedence over the older broad Phase A–F roadmap below. Phase 0's
+[contract](docs/CONTRACT.md) is approved with amendments; wait for the consensus
+pick and relevant timing/consistency answers before authority implementation.
 Each later phase also stops for review. Current test failures and W-item status
 are unchanged by writing a proposal.
 
