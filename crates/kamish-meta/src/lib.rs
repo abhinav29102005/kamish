@@ -609,6 +609,17 @@ impl MetadataStore {
             .cloned()
     }
 
+    /// Execute against a stable in-process ownership view. The read guard
+    /// prevents local ownership changes during an append/ack operation. This
+    /// does NOT turn this store into a distributed metadata quorum.
+    pub fn with_ownership<R>(
+        &self, topic: &str, partition: u32,
+        operation: impl FnOnce(Option<&PartitionOwnership>) -> R,
+    ) -> R {
+        let inner = self.inner.read().unwrap();
+        operation(inner.ownerships.get(&(topic.to_string(), partition)))
+    }
+
     pub fn update_watermark(&self, topic: &str, partition: u32, region: &str, watermark: u64) {
         let mut inner = self.inner.write().unwrap();
         let key = (topic.to_string(), partition, region.to_string());

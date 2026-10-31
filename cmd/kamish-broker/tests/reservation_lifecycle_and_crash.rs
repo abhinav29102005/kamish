@@ -134,7 +134,7 @@ fn test_reservation_lifecycle_and_accounting_invariants() {
         payload: vec![b'Z'; 286], // 286 + 64 = 350 bytes
         is_sealed: false,
     };
-    res2.commit(range);
+    res2.commit(range).unwrap();
 
     // Queued bytes adjusted from 300 to actual 350 bytes!
     assert_eq!(outbox.queued_bytes(), 350);
@@ -145,7 +145,7 @@ fn test_reservation_lifecycle_and_accounting_invariants() {
     assert_eq!(outbox.queued_bytes(), 350);
 
     // Trim range via watermark advance
-    outbox.advance_watermark(1);
+    outbox.advance_watermark(1).unwrap();
     assert_eq!(outbox.queued_bytes(), 0);
     assert_eq!(outbox.next_transfer_batch(10).len(), 0);
 }
@@ -176,7 +176,7 @@ async fn test_producer_cancellation_releases_reservation() {
             payload: vec![0; 236],
             is_sealed: false,
         };
-        reservation.commit(range);
+        reservation.commit(range).unwrap();
     });
 
     // Wait until reservation is held

@@ -20,7 +20,7 @@ struct Args {
     #[arg(short, long, default_value = "8080")]
     port: u16,
 
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
     #[arg(long, value_delimiter = ',')]
@@ -34,19 +34,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(region = %args.region, host = %args.host, port = %args.port, peers = ?args.peers, "Starting Kamish broker");
 
-    let audit_log = AuditLog::open(format!("{}/audit.log", args.data_dir))
-        .unwrap_or_else(|_| AuditLog::new_in_memory());
+    std::fs::create_dir_all(&args.data_dir)?;
+    let audit_log = AuditLog::open(format!("{}/audit.log", args.data_dir))?;
     let policy_cache = Arc::new(RwLock::new(PolicyCache::new(HashSet::new())));
     let enforcer = Arc::new(Enforcer::new(&args.region, policy_cache, audit_log));
     let meta = Arc::new(MetadataStore::new());
 
-    let broker = Arc::new(BrokerServer::new(
+    let broker = Arc::new(BrokerServer::try_new(
         &args.region,
         enforcer,
         meta,
         args.peers,
         &args.data_dir,
-    ));
+    )?);
 
     let bind_addr = format!("{}:{}", args.host, args.port);
     let (addr, server_task) = broker.start_tcp_listener(&bind_addr).await?;
@@ -70,4 +70,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_arguments_are_valid() {
+        Args::command().debug_assert();
+        let error = Args::try_parse_from(["kamish-broker", "--help"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+    }
 }

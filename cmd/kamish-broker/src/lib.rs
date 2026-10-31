@@ -15,14 +15,14 @@
 
 use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
-use kamish_log::{LogError, PartitionLog, RecordEnvelope, SessionError, SessionManager};
+use kamish_log::{LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager};
 use kamish_meta::{MetadataStore, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -180,6 +180,12 @@ impl<K: Eq + Hash + Clone, V: Clone> StripedStore<K, V> {
         guard.get(key).cloned()
     }
 
+    pub fn keys(&self) -> Vec<K> {
+        self.stripes.iter().flat_map(|stripe| {
+            stripe.read().unwrap().keys().cloned().collect::<Vec<_>>()
+        }).collect()
+    }
+
     pub fn get_or_insert_with<F: FnOnce() -> V>(&self, key: K, default_fn: F) -> V {
         let idx = self.get_stripe_index(&key);
         {
@@ -190,6 +196,20 @@ impl<K: Eq + Hash + Clone, V: Clone> StripedStore<K, V> {
         }
         let mut guard = self.stripes[idx].write().unwrap();
         guard.entry(key).or_insert_with(default_fn).clone()
+    }
+
+    pub fn get_or_try_insert_with<E>(
+        &self, key: K, create: impl FnOnce() -> Result<V, E>,
+    ) -> Result<V, E> {
+        let idx = self.get_stripe_index(&key);
+        let mut guard = self.stripes[idx].write().unwrap();
+        if let Some(value) = guard.get(&key) {
+            return Ok(value.clone());
+        }
+        // Exactly one initializer may recover/open a given physical log.
+        let value = create()?;
+        guard.insert(key, value.clone());
+        Ok(value)
     }
 }
 
@@ -205,6 +225,7 @@ pub struct BrokerServer {
     data_dir: PathBuf,
     logs: Arc<StripedStore<(String, u32), PartitionLog>>,
     sessions: Arc<StripedStore<(String, u32), SessionManager>>,
+    partition_operations: Arc<StripedStore<(String, u32), Arc<Mutex<()>>>>,
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
 }
 
@@ -216,10 +237,23 @@ impl BrokerServer {
         known_peers: Vec<String>,
         data_dir: P,
     ) -> Self {
+        Self::try_new(region, enforcer, meta, known_peers, data_dir)
+            .expect("broker storage initialization failed; use try_new to handle the error")
+    }
+
+    /// Opens existing partition logs and rebuilds bounded pending work before
+    /// serving requests. Daemons must use this fallible constructor.
+    pub fn try_new<P: AsRef<Path>>(
+        region: impl Into<String>,
+        enforcer: Arc<Enforcer>,
+        meta: Arc<MetadataStore>,
+        known_peers: Vec<String>,
+        data_dir: P,
+    ) -> Result<Self, BrokerError> {
         let region_str = region.into();
         let region_id = parse_region_id(&region_str);
         let data_dir_buf = data_dir.as_ref().to_path_buf();
-        let _ = std::fs::create_dir_all(&data_dir_buf);
+        std::fs::create_dir_all(&data_dir_buf)?;
 
         let mut outboxes_map = HashMap::new();
         for peer in &known_peers {
@@ -229,7 +263,7 @@ impl BrokerServer {
             );
         }
 
-        Self {
+        let broker = Self {
             region: region_str,
             region_id,
             enforcer,
@@ -239,8 +273,25 @@ impl BrokerServer {
             data_dir: data_dir_buf,
             logs: Arc::new(StripedStore::new()),
             sessions: Arc::new(StripedStore::new()),
+            partition_operations: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
+        };
+        for entry in std::fs::read_dir(&broker.data_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() { continue; }
+            if !entry.path().join("partition.data").exists() { continue; }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let (topic, partition) = name.rsplit_once('-')
+                .ok_or_else(|| std::io::Error::other("invalid stored partition directory"))?;
+            let partition = partition.parse::<u32>()
+                .map_err(|_| std::io::Error::other("invalid stored partition number"))?;
+            let log = broker.get_or_create_log(topic, partition, 1)?;
+            broker.get_or_create_session(topic, partition, &log);
         }
+        for peer in &broker.known_peers {
+            broker.refill_outbox(peer)?;
+        }
+        Ok(broker)
     }
 
     /// Attaches a concrete PolicyEngine instance for ingress and egress policy enforcement (§3.B).
@@ -257,14 +308,48 @@ impl BrokerServer {
     /// Handles record ingestion with Ingress Interceptor Hooks, E1/E2 policy enforcement,
     /// deduplication, disk persistence, and outbox egress replication planning.
     pub fn produce(&self, req: ProduceRequest) -> Result<ProduceResponse, BrokerError> {
-        // 1. Resolve canonical StreamEvent for the PolicyEngine trait contract
-        let residency = req.residency_rule.clone().unwrap_or_else(|| {
-            if req.class_id.contains("strict") || req.class_id.contains("local") {
-                ResidencyPolicy::StrictLocal
-            } else {
-                ResidencyPolicy::GlobalCleartext
+        Self::validate_topic(&req.topic)?;
+        let operation = self.partition_operations.get_or_insert_with(
+            (req.topic.clone(), req.partition), || Arc::new(Mutex::new(())),
+        );
+        // Session check + durable append + session update + outbox publication
+        // form one operation, not separate independently thread-safe steps.
+        let _operation = operation.lock().unwrap();
+        let topic = req.topic.clone();
+        let partition = req.partition;
+        self.meta.with_ownership(&topic, partition, |ownership| {
+            if let Some(owner) = ownership {
+                let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+                if owner.owner_region != self.region || now >= owner.lease_expiry_ns {
+                    return Err(BrokerError::PolicyDenied("not_current_partition_owner".into()));
+                }
             }
-        });
+            // Preserve the existing unregistered, single-node prototype mode.
+            // Multi-region authority still requires consensus-backed registration.
+            let epoch = ownership.map_or(1, |owner| owner.epoch);
+            let response = self.produce_at_epoch(req, epoch)?;
+            if let Some(owner) = ownership {
+                let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+                if now >= owner.lease_expiry_ns {
+                    // Append may have committed; never send a successful ACK
+                    // after lease expiry. The client must resolve/retry identity.
+                    return Err(BrokerError::PolicyDenied("lease_expired_outcome_unknown".into()));
+                }
+            }
+            Ok(response)
+        })
+    }
+
+    fn produce_at_epoch(&self, req: ProduceRequest, epoch: u64) -> Result<ProduceResponse, BrokerError> {
+        // 1. Resolve canonical StreamEvent for the PolicyEngine trait contract
+        // Class rules remain authoritative; an optional producer restriction may
+        // only narrow them. Never infer authorization from class-name substrings.
+        let residency = req.residency_rule.clone().unwrap_or(ResidencyPolicy::GlobalCleartext);
+        if matches!(residency, ResidencyPolicy::SealedCiphertext(_)) {
+            return Err(BrokerError::PolicyDenied("sealed_replication_not_configured".into()));
+        }
+        let request_policy = serde_json::to_string(&residency)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
 
         let stream_event = StreamEvent::new(
             req.sequence_base as u64,
@@ -313,13 +398,21 @@ impl BrokerServer {
             });
         }
 
-        let epoch = 1; // Default partition epoch
-        let session_mgr = self.get_or_create_session(&req.topic, req.partition);
+        let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
+        let session_mgr = self.get_or_create_session(&req.topic, req.partition, &log);
 
         // 3. Idempotent Producer Session Deduplication (INV-6, FR-02)
         if let Some(cached_offset) =
             session_mgr.check_sequence(req.producer_id, req.producer_epoch, req.sequence_base)?
         {
+            let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
+            let records = log.read(cached_offset, 1);
+            if !records.first().is_some_and(|record| {
+                record.payload == req.payload && record.class_id == req.class_id
+                    && record.context.as_ref().is_some_and(|ctx| ctx.request_policy == request_policy)
+            }) {
+                return Err(BrokerError::PolicyDenied("producer_sequence_content_conflict".into()));
+            }
             return Ok(ProduceResponse {
                 base_offset: cached_offset,
                 count: 1,
@@ -339,6 +432,15 @@ impl BrokerServer {
 
         for peer in &self.known_peers {
             let target_region_id = parse_region_id(peer);
+            let producer_allows = match &stream_event.residency_rule {
+                ResidencyPolicy::StrictLocal => target_region_id == self.region_id,
+                ResidencyPolicy::GlobalCleartext => true,
+                ResidencyPolicy::RestrictedReplication(regions)
+                | ResidencyPolicy::SealedCiphertext(regions) => regions.contains(&target_region_id),
+            };
+            if !producer_allows {
+                continue;
+            }
             #[allow(clippy::collapsible_if)]
             if let Some(ref engine) = self.policy_engine {
                 if engine
@@ -357,6 +459,11 @@ impl BrokerServer {
             );
             let send_decision = self.enforcer.decide(send_req);
             if send_decision.allowed {
+                // Fail closed until an authenticated encryption/key-custody
+                // integration exists. A boolean flag is not encryption.
+                if send_decision.mode == DestinationMode::SealedOnly {
+                    return Err(BrokerError::PolicyDenied("sealed_replication_not_configured".into()));
+                }
                 let outbox = self.get_or_create_outbox(peer);
                 match outbox.reserve_capacity(estimated_range_size) {
                     Ok(reservation) => {
@@ -394,11 +501,20 @@ impl BrokerServer {
         // 4. Append to persistent segmented commit log with fsync durability (INV-1, INV-2)
         // Note: If log.append fails, `reservations` is dropped and capacity is safely rolled back via RAII.
         let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
-        let offset = log.append(
+        let context = RecordContext {
+            producer_id: req.producer_id,
+            producer_epoch: req.producer_epoch,
+            sequence: req.sequence_base,
+            origin_region: self.region.clone(),
+            request_policy,
+            replication_targets: reservations.iter().map(|(peer, _, _)| peer.clone()).collect(),
+        };
+        let offset = log.append_with_context(
             epoch,
             &req.class_id,
             decision.policy_version,
             req.payload.clone(),
+            Some(context),
         )?;
 
         // Update session state
@@ -421,7 +537,7 @@ impl BrokerServer {
                 payload: req.payload.clone(),
                 is_sealed,
             };
-            reservation.commit(range);
+            reservation.commit(range)?;
         }
 
         Ok(ProduceResponse {
@@ -449,6 +565,20 @@ impl BrokerServer {
 
         let log = self.get_or_create_log(&req.topic, req.partition, 1)?;
         let records = log.read(req.start_offset, req.max_records);
+        // Caller-supplied class is not authority for the records on disk. Deny
+        // the entire response if any actual record cannot be served; do not leak
+        // a permitted prefix before discovering a later restricted record.
+        for record in &records {
+            if record.class_id != req.class_id {
+                return Err(BrokerError::PolicyDenied("fetch_class_mismatch".into()));
+            }
+            let decision = self.enforcer.decide(EnforcementRequest::new(
+                AuditAction::ConsumerFetch, &record.class_id, &self.region, &self.region,
+            ));
+            if !decision.allowed {
+                return Err(BrokerError::PolicyDenied(decision.reason));
+            }
+        }
         Ok(FetchResponse {
             high_watermark: log.high_watermark(),
             records,
@@ -460,6 +590,11 @@ impl BrokerServer {
         &self,
         req: ReplicationRequest,
     ) -> Result<ReplicationResponse, BrokerError> {
+        Self::validate_topic(&req.topic)?;
+        let operation = self.partition_operations.get_or_insert_with(
+            (req.topic.clone(), req.partition), || Arc::new(Mutex::new(())),
+        );
+        let _operation = operation.lock().unwrap();
         // E5: Replication Receiver Policy Check
         let enf_req = EnforcementRequest::new(
             AuditAction::ReplicationReceiver,
@@ -473,6 +608,12 @@ impl BrokerServer {
                 accepted: false,
                 applied_watermark: 0,
                 reason: decision.reason,
+            });
+        }
+        if req.is_sealed || decision.mode == DestinationMode::SealedOnly {
+            return Ok(ReplicationResponse {
+                accepted: false, applied_watermark: 0,
+                reason: "sealed_replication_not_configured".into(),
             });
         }
 
@@ -566,6 +707,11 @@ impl BrokerServer {
         partition: u32,
         target_region: &str,
     ) -> Result<usize, BrokerError> {
+        Self::validate_topic(topic)?;
+        let operation = self.partition_operations.get_or_insert_with(
+            (topic.to_string(), partition), || Arc::new(Mutex::new(())),
+        );
+        let _operation = operation.lock().unwrap();
         let outbox = self.get_or_create_outbox(target_region);
         let start_offset = outbox.durable_partition_watermark(topic, partition);
 
@@ -576,40 +722,69 @@ impl BrokerServer {
             return Ok(0);
         }
 
-        let records = log.read_range(start_offset, hwm);
         let mut staged_count = 0;
-
-        for record in records {
-            if outbox.contains_partition_offset(topic, partition, record.base_offset) {
-                continue;
-            }
-
-            // Check residency / egress policy for target_region
-            let send_req = EnforcementRequest::new(
-                AuditAction::ReplicationSender,
-                &record.class_id,
-                &self.region,
-                target_region,
-            );
-            let send_decision = self.enforcer.decide(send_req);
-            if send_decision.allowed {
-                let range = OutboxRange {
-                    topic: topic.to_string(),
-                    partition,
-                    epoch: record.epoch,
-                    start_offset: record.base_offset,
-                    end_offset: record.base_offset + 1,
-                    class_id: record.class_id.clone(),
-                    payload: record.payload.clone(),
-                    is_sealed: send_decision.mode == DestinationMode::SealedOnly,
+        let mut next = start_offset;
+        while next < hwm {
+            for record in log.read(next, 128) {
+                next = record.base_offset + 1;
+                // Old envelopes did not preserve producer-supplied restrictions.
+                // They cannot be reconstructed under a guessed class policy.
+                let Some(context) = record.context.as_ref() else {
+                    tracing::warn!(topic, partition, offset = record.base_offset,
+                        "Skipping outbound recovery of legacy/replica record without admission context");
+                    continue;
                 };
-                if outbox.enqueue(range).is_ok() {
-                    staged_count += 1;
+                if context.origin_region != self.region
+                    || !context.replication_targets.iter().any(|r| r == target_region)
+                {
+                    continue;
+                }
+                if outbox.contains_partition_offset(topic, partition, record.base_offset) {
+                    continue;
+                }
+
+                let send_req = EnforcementRequest::new(
+                    AuditAction::ReplicationSender,
+                    &record.class_id,
+                    &self.region,
+                    target_region,
+                );
+                let send_decision = self.enforcer.decide(send_req);
+                if send_decision.allowed {
+                    if send_decision.mode != DestinationMode::Cleartext {
+                        continue; // Never reconstruct plaintext as a sealed range.
+                    }
+                    let range = OutboxRange {
+                        topic: topic.to_string(),
+                        partition,
+                        epoch: record.epoch,
+                        start_offset: record.base_offset,
+                        end_offset: record.base_offset + 1,
+                        class_id: record.class_id.clone(),
+                        payload: record.payload.clone(),
+                        is_sealed: false,
+                    };
+                    match outbox.enqueue(range) {
+                        Ok(()) => staged_count += 1,
+                        Err(OutboxError::QueueCapacityExceeded { .. }) => return Ok(staged_count),
+                        Err(error) => return Err(error.into()),
+                    }
                 }
             }
         }
 
         Ok(staged_count)
+    }
+
+    /// Refill after draining a bounded recovery page; no full-log payload clone.
+    pub fn refill_outbox(&self, target_region: &str) -> Result<usize, BrokerError> {
+        let mut count = 0;
+        let mut streams = self.logs.keys();
+        streams.sort();
+        for (topic, partition) in streams {
+            count += self.repopulate_outbox_from_log(&topic, partition, target_region)?;
+        }
+        Ok(count)
     }
 
     fn get_or_create_outbox(&self, target_region: &str) -> DestinationOutbox {
@@ -634,21 +809,47 @@ impl BrokerServer {
         partition: u32,
         epoch: u64,
     ) -> Result<PartitionLog, BrokerError> {
+        Self::validate_topic(topic)?;
         let key = (topic.to_string(), partition);
         if let Some(log) = self.logs.get(&key) {
             return Ok(log);
         }
-
-        // Open outside of holding any map locks, eliminating contention across partitions
-        let part_dir = self.data_dir.join(format!("{}-{}", topic, partition));
-        let log = PartitionLog::open(part_dir, epoch)?;
-        let log = self.logs.get_or_insert_with(key, || log);
-        Ok(log)
+        self.logs.get_or_try_insert_with(key, || {
+            let part_dir = self.data_dir.join(format!("{}-{}", topic, partition));
+            Ok(PartitionLog::open(part_dir, epoch)?)
+        })
     }
 
-    fn get_or_create_session(&self, topic: &str, partition: u32) -> SessionManager {
+    fn validate_topic(topic: &str) -> Result<(), BrokerError> {
+        // Topic names are a single bounded path component, never a path. Keep
+        // the existing on-disk naming scheme while rejecting traversal and
+        // absolute paths before any directory creation/open.
+        if topic.is_empty() || topic.len() > 249 || topic == "." || topic == ".."
+            || !topic.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        {
+            return Err(BrokerError::PolicyDenied("invalid_topic_name".into()));
+        }
+        Ok(())
+    }
+
+    fn get_or_create_session(&self, topic: &str, partition: u32, log: &PartitionLog) -> SessionManager {
         let key = (topic.to_string(), partition);
-        self.sessions.get_or_insert_with(key, SessionManager::new)
+        self.sessions.get_or_insert_with(key, || {
+            let sessions = SessionManager::new();
+            let mut offset = 0;
+            while offset < log.high_watermark() {
+                for record in log.read(offset, 128) {
+                    if let Some(context) = &record.context {
+                        if context.origin_region == self.region {
+                            sessions.update(context.producer_id, context.producer_epoch,
+                                context.sequence, record.base_offset);
+                        }
+                    }
+                    offset = record.base_offset + 1;
+                }
+            }
+            sessions
+        })
     }
 
     /// Dispatches a high-level request to the appropriate internal engine handler.
@@ -941,6 +1142,13 @@ mod tests {
             },
         );
 
+        classes.insert("sealed-data".into(), ClassRule {
+            class_id: "sealed-data".into(), description: "Requires unavailable sealed integration".into(),
+            legal_regions: ["region-eu".into(), "region-us".into()].into(),
+            destination_modes: [("region-eu".into(), DestinationMode::Cleartext),
+                ("region-us".into(), DestinationMode::SealedOnly)].into(),
+            ack_mode: AckMode::LocalMajority, failover_candidates: vec![], transit_allowed: false,
+        });
         let policy_doc = PolicyDocument {
             policy_id: "pol-test".to_string(),
             version: 1,
@@ -1017,6 +1225,124 @@ mod tests {
 
         // Egress hook permitted US_EAST: exactly 1 batch queued!
         assert_eq!(us_outbox.next_transfer_batch(10).len(), 1);
+    }
+
+    #[test]
+    fn fetch_cannot_relabel_stored_records() {
+        let (broker, _dir) = setup_test_broker("region-eu", vec![]);
+        broker.produce(ProduceRequest {
+            topic: "restricted".into(), partition: 0, producer_id: 1, producer_epoch: 1,
+            sequence_base: 0, class_id: "eu-strict".into(), payload: b"private".to_vec(),
+            residency_rule: None,
+        }).unwrap();
+        let error = broker.fetch(FetchRequest {
+            topic: "restricted".into(), partition: 0, class_id: "global-data".into(),
+            start_offset: 0, max_records: 10,
+        }).unwrap_err();
+        assert!(matches!(error, BrokerError::PolicyDenied(reason) if reason == "fetch_class_mismatch"));
+    }
+
+    #[test]
+    fn simultaneous_retries_append_once_and_reject_changed_payload() {
+        let (broker, _dir) = setup_test_broker("region-eu", vec![]);
+        let broker = Arc::new(broker);
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let request = ProduceRequest {
+            topic: "concurrent-retry".into(), partition: 0, producer_id: 1, producer_epoch: 1,
+            sequence_base: 0, class_id: "global-data".into(), payload: vec![7; 100_000],
+            residency_rule: None,
+        };
+        let workers: Vec<_> = (0..8).map(|_| {
+            let broker = broker.clone();
+            let barrier = barrier.clone();
+            let request = request.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                broker.produce(request).unwrap()
+            })
+        }).collect();
+        for worker in workers {
+            assert_eq!(worker.join().unwrap().base_offset, 0);
+        }
+        assert_eq!(broker.fetch(FetchRequest {
+            topic: request.topic.clone(), partition: 0, class_id: request.class_id.clone(),
+            start_offset: 0, max_records: 100,
+        }).unwrap().records.len(), 1);
+        let mut changed = request;
+        changed.payload = b"different".to_vec();
+        assert!(broker.produce(changed).is_err());
+    }
+
+    #[test]
+    fn topic_paths_cannot_escape_data_directory() {
+        let (broker, dir) = setup_test_broker("region-eu", vec![]);
+        for topic in ["../escape", "/absolute", "a/b", "a\\b", "", ".", ".."] {
+            assert!(broker.fetch(FetchRequest {
+                topic: topic.into(), partition: 0, class_id: "global-data".into(),
+                start_offset: 0, max_records: 1,
+            }).is_err(), "{topic}");
+        }
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn startup_restores_sessions_and_preserves_narrowing_without_optional_hook() {
+        let (mut broker, dir) = setup_test_broker("region-eu", vec!["region-us".into()]);
+        broker.policy_engine = None;
+        let request = ProduceRequest {
+            topic: "restart".into(), partition: 0, producer_id: 42, producer_epoch: 1,
+            sequence_base: 0, class_id: "global-data".into(), payload: b"local".to_vec(),
+            residency_rule: Some(ResidencyPolicy::StrictLocal),
+        };
+        assert_eq!(broker.produce(request.clone()).unwrap().base_offset, 0);
+        let enforcer = broker.enforcer.clone();
+        drop(broker);
+        let restarted = BrokerServer::try_new("region-eu", enforcer,
+            Arc::new(MetadataStore::new()), vec!["region-us".into()], dir.path()).unwrap();
+        assert_eq!(restarted.produce(request.clone()).unwrap().base_offset, 0);
+        assert!(restarted.get_outbox("region-us").unwrap().next_transfer_batch(10).is_empty());
+        let mut changed = request;
+        changed.residency_rule = Some(ResidencyPolicy::GlobalCleartext);
+        assert!(restarted.produce(changed).is_err());
+    }
+
+    #[test]
+    fn unsupported_sealed_replication_fails_before_storage_even_with_forged_flag() {
+        let (source, _a) = setup_test_broker("region-eu", vec!["region-us".into()]);
+        let (target, _b) = setup_test_broker("region-us", vec![]);
+        let result = source.produce(ProduceRequest {
+            topic: "sealed".into(), partition: 0, producer_id: 1, producer_epoch: 1,
+            sequence_base: 0, class_id: "sealed-data".into(), payload: b"sensitive".to_vec(),
+            residency_rule: None,
+        });
+        assert!(matches!(result, Err(BrokerError::PolicyDenied(reason)) if reason == "sealed_replication_not_configured"));
+        assert!(source.get_outbox("region-us").unwrap().next_transfer_batch(10).is_empty());
+        for is_sealed in [false, true] {
+            let response = target.handle_replication(ReplicationRequest {
+                topic: "sealed".into(), partition: 0, source_region: "region-eu".into(),
+                target_region: "region-us".into(), class_id: "sealed-data".into(), epoch: 1,
+                from_offset: 0, to_offset: 1, payload: b"sensitive".to_vec(), is_sealed,
+            }).unwrap();
+            assert!(!response.accepted);
+        }
+        assert_eq!(target.get_watermark("sealed", 0, "region-eu"), 0);
+    }
+
+    #[test]
+    fn registered_wrong_or_expired_owner_cannot_acknowledge() {
+        let (broker, _dir) = setup_test_broker("region-eu", vec![]);
+        let req = ProduceRequest {
+            topic: "owned".into(), partition: 0, producer_id: 1, producer_epoch: 1,
+            sequence_base: 0, class_id: "global-data".into(), payload: vec![1], residency_rule: None,
+        };
+        broker.meta.set_ownership("owned", 0, "region-us", 7, 60_000).unwrap();
+        assert!(broker.produce(req.clone()).is_err());
+        broker.meta.set_ownership("owned", 0, "region-eu", 8, -1).unwrap();
+        assert!(broker.produce(req.clone()).is_err());
+        broker.meta.set_ownership("owned", 0, "region-eu", 9, 60_000).unwrap();
+        let response = broker.produce(req).unwrap();
+        assert_eq!(response.committed_epoch, 9);
+        assert_eq!(response.base_offset, 0);
     }
 
     #[test]
@@ -1160,7 +1486,7 @@ mod tests {
             };
             let rep_res = broker_b.handle_replication(rep_req).unwrap();
             assert!(rep_res.accepted);
-            outbox_a.advance_watermark(rep_res.applied_watermark);
+            outbox_a.advance_watermark(rep_res.applied_watermark).unwrap();
         }
 
         // 3. Verify Broker A outbox is fully drained (watermark = 3)
@@ -1226,7 +1552,7 @@ mod tests {
             };
             let rep_res = broker_b.handle_replication(rep_req).unwrap();
             assert!(rep_res.accepted);
-            outbox_a.advance_watermark(rep_res.applied_watermark);
+            outbox_a.advance_watermark(rep_res.applied_watermark).unwrap();
         }
 
         assert_eq!(outbox_a.durable_watermark(), 5);

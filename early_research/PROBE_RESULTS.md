@@ -1,5 +1,9 @@
 # Research probe results
 
+**Historical baseline below.** Subsequent stages now pass 11/11 probes; see
+[LOOPHOLE_CLOSURE.md](LOOPHOLE_CLOSURE.md) for exact closure scope and test changes.
+Sealed mode passes by explicit safe rejection, not successful encrypted transfer.
+
 **Run date:** 2026-10-31
 
 **Implementation revision:** `4ebfb74375ed2c6ba84e0fdbb4a0d864bb5cc86a`

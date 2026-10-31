@@ -5,6 +5,10 @@ Research update: **31 October 2026**. Implementation reviewed at commit
 
 ## Start here
 
+**Implementation progress:** [Loophole closure ledger](LOOPHOLE_CLOSURE.md) tracks
+the subsequent fixes, safe containment, format migrations and remaining work.
+The research reports below retain their original revision-specific findings.
+
 1. [Loopholes and design review](LOOPHOLES_REVIEW.md): implementation counterexamples, unresolved semantics, and corrections to the original research.
 2. [Configuration and experiment roadmap](CONFIGURATION_ROADMAP.md): settings available today, proposed settings, architecture choices, and prioritized experiments.
 3. [Sources and prior-art comparison](SOURCES_AND_PRIOR_ART.md): dated primary sources and a five-system comparison.

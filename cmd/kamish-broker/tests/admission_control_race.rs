@@ -292,7 +292,7 @@ fn test_producer_retry_after_rejection_no_duplicates() {
 
     // 3. Remote broker drains outbox (advances watermark to 1)
     let outbox = broker.get_outbox("US_EAST").unwrap();
-    outbox.advance_watermark(1);
+    outbox.advance_watermark(1).unwrap();
     assert_eq!(outbox.queued_bytes(), 0);
 
     // 4. Producer retries the exact same request (same producer_id, epoch, sequence_base)
@@ -408,7 +408,7 @@ fn test_broker_restart_with_pending_replication_obligations() {
 
         // Simulate US_EAST only having caught up to offset 2
         let outbox = broker.get_outbox("US_EAST").unwrap();
-        outbox.advance_watermark(2);
+        outbox.advance_partition_watermark("audit-stream", 0, 2);
         assert_eq!(outbox.durable_watermark(), 2);
     }
     // Broker 1 is dropped (simulating dirty kill / process restart)
@@ -435,7 +435,9 @@ fn test_broker_restart_with_pending_replication_obligations() {
 
         // Advance restarted outbox watermark to 2 (learned via remote handshake)
         let outbox = broker_restarted.get_outbox("US_EAST").unwrap();
-        outbox.advance_watermark(2);
+        assert_eq!(outbox.next_transfer_batch(10).len(), 5,
+            "Startup must reconstruct pending work without an explicit recovery call");
+        outbox.advance_partition_watermark("audit-stream", 0, 2);
 
         // Repopulate pending replication obligations from disk commit log
         let staged = broker_restarted
@@ -443,8 +445,8 @@ fn test_broker_restart_with_pending_replication_obligations() {
             .expect("Repopulate should succeed");
 
         assert_eq!(
-            staged, 3,
-            "Expected exactly 3 records repopulated (offsets 2, 3, 4)"
+            staged, 0,
+            "Startup already reconstructed work; a second recovery must be idempotent"
         );
 
         // Verify the staged ranges match offsets 2, 3, 4
@@ -507,7 +509,7 @@ fn test_destination_recovery_after_saturation() {
     let outbox = broker.get_outbox("US_EAST").unwrap();
     let batch = outbox.next_transfer_batch(10);
     assert_eq!(batch.len(), 2);
-    outbox.advance_watermark(2);
+    outbox.advance_watermark(2).unwrap();
     assert_eq!(outbox.queued_bytes(), 0);
 
     // 4. Ingress immediately recovers and accepts new produce requests

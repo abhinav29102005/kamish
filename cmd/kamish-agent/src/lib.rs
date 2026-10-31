@@ -196,6 +196,7 @@ impl ReplicationAgent {
         target_region: &str,
         max_ranges: usize,
     ) -> Result<usize, AgentError> {
+        self.local_broker.refill_outbox(target_region)?;
         let outbox = match self.local_broker.get_outbox(target_region) {
             Some(o) => o,
             None => return Ok(0),
@@ -475,9 +476,7 @@ impl ReplicationAgent {
             .update_watermark(topic, partition, target_region, remote_watermark);
 
         // Repopulate outbox from disk log if there are committed records ahead of remote watermark
-        let _ = self
-            .local_broker
-            .repopulate_outbox_from_log(topic, partition, target_region);
+        self.local_broker.repopulate_outbox_from_log(topic, partition, target_region)?;
 
         info!(
             target = %target_region,
@@ -492,6 +491,7 @@ impl ReplicationAgent {
 
     /// Performs a single replication drain pass for a target region (§2.7.3, §3.4.5).
     pub fn step_replication(&self, target_region: &str) -> Result<TransferSummary, AgentError> {
+        self.local_broker.refill_outbox(target_region)?;
         let peer_broker = {
             let peers = self.peer_brokers.read().unwrap();
             peers
@@ -606,6 +606,7 @@ impl ReplicationAgent {
         &self,
         target_region: &str,
     ) -> Result<TransferSummary, AgentError> {
+        self.local_broker.refill_outbox(target_region)?;
         let addr = {
             let addrs = self.peer_addresses.read().unwrap();
             addrs

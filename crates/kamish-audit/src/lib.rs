@@ -20,6 +20,12 @@ pub const GENESIS_PREV_HASH: [u8; 32] = [0u8; 32];
 
 #[derive(Debug, Error)]
 pub enum AuditError {
+    #[error("Unsupported audit format {0}; legacy logs must be archived, not silently rewritten")]
+    UnsupportedFormat(u32),
+
+    #[error("Audit writer failed previously; reopen and verify the log before continuing")]
+    WriterFailed,
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -87,6 +93,8 @@ pub enum DecisionOutcome {
 /// Note: Contains NO message payload data, preserving sovereignty (§4.7.1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditEntry {
+    #[serde(default)]
+    pub format_version: u32,
     pub sequence: u64,
     pub timestamp_ns: i64,
     pub prev_hash: String,
@@ -116,21 +124,19 @@ impl AuditEntry {
         reason: &str,
     ) -> String {
         let mut hasher = Sha256::new();
-        hasher.update(sequence.to_be_bytes());
-        hasher.update(timestamp_ns.to_be_bytes());
-        hasher.update(prev_hash.as_bytes());
-        hasher.update(format!("{:?}", action).as_bytes());
-        hasher.update(class_id.as_bytes());
-        hasher.update(source_region.as_bytes());
-        hasher.update(target_region.as_bytes());
-        hasher.update(policy_version.to_be_bytes());
-        hasher.update(format!("{:?}", outcome).as_bytes());
-        hasher.update(reason.as_bytes());
+        hasher.update(b"kamish-audit-v2\0");
+        hasher.update(serde_json::to_vec(&(
+            sequence, timestamp_ns, prev_hash, action, class_id, source_region,
+            target_region, policy_version, outcome, reason,
+        )).expect("audit fields contain only serializable primitive values"));
         hex::encode(hasher.finalize())
     }
 
     /// Verifies the internal integrity of this specific entry.
     pub fn verify_self(&self) -> bool {
+        if self.format_version != 2 {
+            return false;
+        }
         let computed = Self::compute_hash(
             self.sequence,
             self.timestamp_ns,
@@ -154,6 +160,7 @@ pub struct AuditLog {
 }
 
 struct AuditLogInner {
+    writer_failed: bool,
     file_path: Option<PathBuf>,
     last_hash: String,
     next_sequence: u64,
@@ -165,6 +172,7 @@ impl AuditLog {
     pub fn new_in_memory() -> Self {
         Self {
             inner: Arc::new(Mutex::new(AuditLogInner {
+                writer_failed: false,
                 file_path: None,
                 last_hash: hex::encode(GENESIS_PREV_HASH),
                 next_sequence: 0,
@@ -191,6 +199,9 @@ impl AuditLog {
                     continue;
                 }
                 let entry: AuditEntry = serde_json::from_str(&line_str)?;
+                if entry.format_version != 2 {
+                    return Err(AuditError::UnsupportedFormat(entry.format_version));
+                }
 
                 // Sequence verification
                 if entry.sequence != next_sequence {
@@ -237,8 +248,16 @@ impl AuditLog {
             }
         }
 
+        // Verify the sink is writable before admitting traffic. Never silently
+        // downgrade a configured disk audit to an in-memory log.
+        let file = OpenOptions::new().create(true).append(true).open(&path_buf)?;
+        file.sync_all()?;
+        #[cfg(unix)]
+        File::open(path_buf.parent().filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new(".")))?.sync_all()?;
         Ok(Self {
             inner: Arc::new(Mutex::new(AuditLogInner {
+                writer_failed: false,
                 file_path: Some(path_buf),
                 last_hash,
                 next_sequence,
@@ -260,6 +279,9 @@ impl AuditLog {
         reason: impl Into<String>,
     ) -> Result<AuditEntry, AuditError> {
         let mut inner = self.inner.lock().unwrap();
+        if inner.writer_failed {
+            return Err(AuditError::WriterFailed);
+        }
 
         let sequence = inner.next_sequence;
         let timestamp_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -283,6 +305,7 @@ impl AuditLog {
         );
 
         let entry = AuditEntry {
+            format_version: 2,
             sequence,
             timestamp_ns,
             prev_hash,
@@ -298,10 +321,17 @@ impl AuditLog {
 
         // Write to disk if persistence is configured
         if let Some(ref path) = inner.file_path {
-            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-            let serialized = serde_json::to_string(&entry)?;
-            writeln!(file, "{}", serialized)?;
-            file.flush()?;
+            let result = (|| -> Result<(), AuditError> {
+                let mut file = OpenOptions::new().append(true).open(path)?;
+                let serialized = serde_json::to_string(&entry)?;
+                writeln!(file, "{}", serialized)?;
+                file.sync_all()?;
+                Ok(())
+            })();
+            if let Err(error) = result {
+                inner.writer_failed = true;
+                return Err(error);
+            }
         }
 
         inner.last_hash = entry_hash;

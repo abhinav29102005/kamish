@@ -42,19 +42,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Starting Kamish replication agent"
     );
 
-    let audit_log = AuditLog::open(format!("{}/audit.log", args.data_dir))
-        .unwrap_or_else(|_| AuditLog::new_in_memory());
+    std::fs::create_dir_all(&args.data_dir)?;
+    let audit_log = AuditLog::open(format!("{}/agent-audit.log", args.data_dir))?;
     let policy_cache = Arc::new(RwLock::new(PolicyCache::new(HashSet::new())));
     let enforcer = Arc::new(Enforcer::new(&args.local_region, policy_cache, audit_log));
     let meta = Arc::new(MetadataStore::new());
 
-    let broker = Arc::new(BrokerServer::new(
+    let broker = Arc::new(BrokerServer::try_new(
         &args.local_region,
         enforcer.clone(),
         meta.clone(),
         args.target_region.iter().cloned().collect(),
         &args.data_dir,
-    ));
+    )?);
 
     let router = RouteSelector::new(&args.local_region, (*enforcer).clone());
     let agent = Arc::new(ReplicationAgent::new(

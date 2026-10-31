@@ -16,6 +16,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum OutboxError {
+    #[error("An unscoped watermark requires exactly one known stream; use advance_partition_watermark")]
+    AmbiguousStream,
     #[error("Outbox queue capacity exceeded: current bytes {current}, max {max}")]
     QueueCapacityExceeded { current: usize, max: usize },
 
@@ -85,20 +87,27 @@ impl OutboxReservation {
     /// Commits this reservation by enqueueing the provided range.
     ///
     /// Adjusts `queued_bytes` if the actual range size differs from the initial reservation estimate.
-    pub fn commit(mut self, range: OutboxRange) {
-        self.committed = true;
+    pub fn commit(mut self, range: OutboxRange) -> Result<(), OutboxError> {
         let actual_size = range.byte_size();
         let mut inner = self.outbox.inner.write().unwrap();
         if actual_size != self.reserved_bytes {
             if actual_size > self.reserved_bytes {
-                inner.queued_bytes += actual_size - self.reserved_bytes;
+                let additional = actual_size - self.reserved_bytes;
+                if additional > inner.max_bytes.saturating_sub(inner.queued_bytes) {
+                    return Err(OutboxError::QueueCapacityExceeded {
+                        current: inner.queued_bytes, max: inner.max_bytes,
+                    });
+                }
+                inner.queued_bytes += additional;
             } else {
                 inner.queued_bytes = inner
                     .queued_bytes
                     .saturating_sub(self.reserved_bytes - actual_size);
             }
         }
+        self.committed = true;
         inner.ranges.push_back(range);
+        Ok(())
     }
 }
 
@@ -143,7 +152,7 @@ impl DestinationOutbox {
         additional_bytes: usize,
     ) -> Result<OutboxReservation, OutboxError> {
         let mut inner = self.inner.write().unwrap();
-        if inner.queued_bytes + additional_bytes > inner.max_bytes {
+        if additional_bytes > inner.max_bytes.saturating_sub(inner.queued_bytes) {
             return Err(OutboxError::QueueCapacityExceeded {
                 current: inner.queued_bytes,
                 max: inner.max_bytes,
@@ -162,8 +171,7 @@ impl DestinationOutbox {
     pub fn enqueue(&self, range: OutboxRange) -> Result<(), OutboxError> {
         let range_size = range.byte_size();
         let reservation = self.reserve_capacity(range_size)?;
-        reservation.commit(range);
-        Ok(())
+        reservation.commit(range)
     }
 
     /// Retrieves pending ranges starting strictly from the durable watermark (§3.4.5, INV-5).
@@ -178,7 +186,7 @@ impl DestinationOutbox {
                     .watermarks
                     .get(&(r.topic.clone(), r.partition))
                     .copied()
-                    .unwrap_or(inner.durable_watermark);
+                    .unwrap_or(0);
                 r.end_offset > wm
             })
             .take(max_ranges)
@@ -214,24 +222,23 @@ impl DestinationOutbox {
         inner.queued_bytes = inner.queued_bytes.saturating_sub(trimmed_bytes);
     }
 
-    /// Acknowledges receiver progress across all partitions, trimming applied ranges (§3.3.2, INV-6).
-    pub fn advance_watermark(&self, new_watermark: u64) {
+    /// Compatibility helper for single-stream outboxes. Never broadcast an ACK
+    /// to unrelated partitions. Multi-stream callers must specify the stream.
+    pub fn advance_watermark(&self, new_watermark: u64) -> Result<(), OutboxError> {
         let mut inner = self.inner.write().unwrap();
-        if new_watermark <= inner.durable_watermark {
-            return; // no-op on duplicate or regressing ack (INV-6)
+        let streams: std::collections::HashSet<_> = inner.watermarks.keys().cloned()
+            .chain(inner.ranges.iter().map(|r| (r.topic.clone(), r.partition))).collect();
+        if streams.len() != 1 {
+            return Err(OutboxError::AmbiguousStream);
         }
-
-        inner.durable_watermark = new_watermark;
-
-        for val in inner.watermarks.values_mut() {
-            if *val < new_watermark {
-                *val = new_watermark;
-            }
-        }
-
+        let key = streams.into_iter().next().unwrap();
+        let current = inner.watermarks.get(&key).copied().unwrap_or(0);
+        if new_watermark <= current { return Ok(()); }
+        inner.watermarks.insert(key.clone(), new_watermark);
+        inner.durable_watermark = inner.durable_watermark.max(new_watermark);
         let mut trimmed_bytes = 0;
         inner.ranges.retain(|r| {
-            if r.end_offset <= new_watermark {
+            if r.topic == key.0 && r.partition == key.1 && r.end_offset <= new_watermark {
                 trimmed_bytes += r.byte_size();
                 false
             } else {
@@ -239,6 +246,7 @@ impl DestinationOutbox {
             }
         });
         inner.queued_bytes = inner.queued_bytes.saturating_sub(trimmed_bytes);
+        Ok(())
     }
 
     pub fn queued_bytes(&self) -> usize {
@@ -247,7 +255,7 @@ impl DestinationOutbox {
 
     pub fn has_capacity(&self, additional_bytes: usize) -> bool {
         let inner = self.inner.read().unwrap();
-        inner.queued_bytes + additional_bytes <= inner.max_bytes
+        additional_bytes <= inner.max_bytes.saturating_sub(inner.queued_bytes)
     }
 
     pub fn max_bytes(&self) -> usize {
@@ -268,7 +276,7 @@ impl DestinationOutbox {
             .watermarks
             .get(&(topic.to_string(), partition))
             .copied()
-            .unwrap_or(inner.durable_watermark)
+            .unwrap_or(0)
     }
 
     pub fn target_region(&self) -> &str {
@@ -294,7 +302,7 @@ impl DestinationOutbox {
             .watermarks
             .get(&(topic.to_string(), partition))
             .copied()
-            .unwrap_or(inner.durable_watermark);
+            .unwrap_or(0);
         if offset < wm {
             return true;
         }
@@ -343,18 +351,18 @@ mod tests {
         assert_eq!(outbox.next_transfer_batch(10).len(), 2);
 
         // Advance watermark to 5 (r1 trimmed, r2 retained)
-        outbox.advance_watermark(5);
+        outbox.advance_watermark(5).unwrap();
         assert_eq!(outbox.durable_watermark(), 5);
         let batch = outbox.next_transfer_batch(10);
         assert_eq!(batch.len(), 1);
         assert_eq!(batch[0].start_offset, 5);
 
         // Duplicate ack is a no-op (INV-6)
-        outbox.advance_watermark(5);
+        outbox.advance_watermark(5).unwrap();
         assert_eq!(outbox.durable_watermark(), 5);
 
         // Advance to 10 (all trimmed)
-        outbox.advance_watermark(10);
+        outbox.advance_watermark(10).unwrap();
         assert_eq!(outbox.next_transfer_batch(10).len(), 0);
         assert_eq!(outbox.queued_bytes(), 0);
     }
@@ -410,7 +418,7 @@ mod tests {
             payload: vec![0; 86], // 86 + 64 = 150 bytes
             is_sealed: false,
         };
-        res3.commit(r);
+        res3.commit(r).unwrap();
 
         assert_eq!(outbox.queued_bytes(), 150);
         assert_eq!(outbox.next_transfer_batch(10).len(), 1);

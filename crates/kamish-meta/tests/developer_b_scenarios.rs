@@ -188,7 +188,7 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
             .append(1, "tx", 1, format!("tx-{}", i).into_bytes())
             .unwrap();
     }
-    outbox_to_b.advance_watermark(10);
+    outbox_to_b.advance_watermark(10).unwrap();
     metrics.set_local_committed("tx", 0, 10);
     metrics.set_remote_acked("tx", 0, RegionId::UsEast, 10);
     assert_eq!(metrics.get_replication_lag("tx", 0, &RegionId::UsEast), 0);
@@ -236,7 +236,7 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
 
     // Advance watermark and trim outbox
     let final_b_offset = remote_log_b.next_offset();
-    outbox_to_b.advance_watermark(final_b_offset);
+    outbox_to_b.advance_watermark(final_b_offset).unwrap();
     metrics.set_remote_acked("tx", 0, RegionId::UsEast, final_b_offset);
 
     // Zero replication lag and zero data loss!

@@ -7,12 +7,12 @@
 //! - §3.4.3: Reference Pseudocode for Route Scoring with Hard Policy Filter.
 //! - NFR-04: Route changes require smoothed, windowed evidence.
 
-use chrono::Utc;
 use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 /// Circuit breaker state per link (§3.3.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +53,18 @@ pub struct PathCandidate {
 }
 
 impl PathCandidate {
+    fn same_route(&self, other: &Self) -> bool {
+        self.target_region == other.target_region && self.relay_region == other.relay_region
+    }
+
+    fn valid_metrics(&self) -> bool {
+        let m = self.metrics;
+        [m.rtt_ms, m.loss_rate, m.queue_delay_ms, m.cost_weight, m.congestion_risk]
+            .iter().all(|v| v.is_finite() && *v >= 0.0)
+            && m.loss_rate <= 1.0 && m.congestion_risk <= 1.0
+            && self.compute_cost().is_finite()
+    }
+
     /// Cost formula from §3.4.3:
     /// cost = W1*RTT + W2*Loss + W3*QueueDelay + W4*Cost + W5*CongestionRisk
     pub fn compute_cost(&self) -> f64 {
@@ -76,14 +88,15 @@ pub struct RouteSelector {
     local_region: String,
     enforcer: Enforcer,
     hysteresis_margin: f64,
-    min_dwell_ms: i64,
+    min_dwell: Duration,
     inner: Arc<RwLock<RouterInner>>,
 }
 
 struct RouterInner {
-    current_paths: HashMap<String, PathCandidate>,
-    last_switch_time_ms: HashMap<String, i64>,
-    breaker_states: HashMap<String, CircuitBreakerState>,
+    // Authorization context includes class, destination and payload mode.
+    // Policy updates are handled by filtering fresh candidates on every call.
+    current_paths: HashMap<(String, String, bool), PathCandidate>,
+    last_switch: HashMap<(String, String, bool), Instant>,
 }
 
 impl RouteSelector {
@@ -92,11 +105,10 @@ impl RouteSelector {
             local_region: local_region.into(),
             enforcer,
             hysteresis_margin: 0.15, // 15% margin required to switch paths (§3.4.3)
-            min_dwell_ms: 5000,      // Minimum dwell time before route switch (NFR-04)
+            min_dwell: Duration::from_secs(5),
             inner: Arc::new(RwLock::new(RouterInner {
                 current_paths: HashMap::new(),
-                last_switch_time_ms: HashMap::new(),
-                breaker_states: HashMap::new(),
+                last_switch: HashMap::new(),
             })),
         }
     }
@@ -108,14 +120,34 @@ impl RouteSelector {
         class_id: &str,
         candidates: &[PathCandidate],
     ) -> Option<PathCandidate> {
-        let now_ms = Utc::now().timestamp_millis();
+        // Callers that have not established ciphertext may only use direct paths.
+        self.pick_path_for_payload(dest_region, class_id, candidates, false)
+    }
+
+    /// Route planning for a payload whose representation was established by the
+    /// caller. This does not encrypt bytes or authenticate a network envelope.
+    pub fn pick_path_for_payload(
+        &self,
+        dest_region: &str,
+        class_id: &str,
+        candidates: &[PathCandidate],
+        is_ciphertext: bool,
+    ) -> Option<PathCandidate> {
+        let now = Instant::now();
+        let key = (dest_region.to_string(), class_id.to_string(), is_ciphertext);
 
         // 1. HARD POLICY FILTER FIRST (§2.2, §2.7.4 Process 4.3.3)
         // Only evaluate candidates where every hop is legally permitted by policy
         let permitted_candidates: Vec<&PathCandidate> = candidates
             .iter()
             .filter(|cand| {
+                if cand.target_region != dest_region || !cand.valid_metrics() {
+                    return false;
+                }
                 if let Some(ref relay) = cand.relay_region {
+                    if !is_ciphertext {
+                        return false;
+                    }
                     // Check relay transit hop (E10)
                     let transit_req = EnforcementRequest::new(
                         AuditAction::RelayTransit,
@@ -123,7 +155,7 @@ impl RouteSelector {
                         &self.local_region,
                         relay,
                     )
-                    .with_ciphertext(true);
+                    .with_ciphertext(is_ciphertext);
                     let transit_dec = self.enforcer.decide(transit_req);
                     if !transit_dec.allowed {
                         return false;
@@ -138,11 +170,14 @@ impl RouteSelector {
                     &cand.target_region,
                 );
                 let send_dec = self.enforcer.decide(send_req);
-                send_dec.allowed
+                send_dec.allowed && (is_ciphertext || send_dec.mode != kamish_policy::DestinationMode::SealedOnly)
             })
             .collect();
 
         if permitted_candidates.is_empty() {
+            let mut inner = self.inner.write().unwrap();
+            inner.current_paths.remove(&key);
+            inner.last_switch.remove(&key);
             // No legal alternate exists (§1.4.1 FR-09 per-class degradation)
             return None;
         }
@@ -152,62 +187,42 @@ impl RouteSelector {
             .into_iter()
             .map(|cand| (cand, cand.compute_cost()))
             .collect();
-        scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| a.1.total_cmp(&b.1));
 
         let best_candidate = scored[0].0.clone();
         let best_cost = scored[0].1;
 
         let mut inner = self.inner.write().unwrap();
-        let current = inner.current_paths.get(dest_region).cloned();
-
-        match current {
-            Some(curr) => {
-                let curr_cost = curr.compute_cost();
-                let last_switch = inner
-                    .last_switch_time_ms
-                    .get(dest_region)
-                    .copied()
-                    .unwrap_or(0);
-                let dwell_satisfied = now_ms - last_switch >= self.min_dwell_ms;
-                let hysteresis_satisfied = best_cost < curr_cost * (1.0 - self.hysteresis_margin);
-
-                // Check if current breaker is open
-                let breaker = inner
-                    .breaker_states
-                    .get(dest_region)
-                    .copied()
-                    .unwrap_or(CircuitBreakerState::Closed);
-                let breaker_allows_switch = breaker != CircuitBreakerState::Closed
-                    || (dwell_satisfied && hysteresis_satisfied);
-
-                if breaker_allows_switch && best_candidate != curr {
-                    inner
-                        .current_paths
-                        .insert(dest_region.to_string(), best_candidate.clone());
-                    inner
-                        .last_switch_time_ms
-                        .insert(dest_region.to_string(), now_ms);
-                    Some(best_candidate)
-                } else {
-                    Some(curr)
-                }
+        let previous = inner.current_paths.get(&key).cloned();
+        // Resolve the old route against this call's freshly authorized candidates
+        // and measurements. Never let hysteresis retain a revoked/missing route.
+        let current = previous.as_ref().and_then(|old| {
+            scored.iter().find(|(candidate, _)| candidate.same_route(old))
+                .map(|(candidate, _)| (*candidate).clone())
+        });
+        let chosen = if let Some(current) = current {
+            let dwell = inner.last_switch.get(&key)
+                .is_none_or(|last| now.duration_since(*last) >= self.min_dwell);
+            if dwell && best_cost < current.compute_cost() * (1.0 - self.hysteresis_margin) {
+                best_candidate
+            } else {
+                current
             }
-            None => {
-                inner
-                    .current_paths
-                    .insert(dest_region.to_string(), best_candidate.clone());
-                inner
-                    .last_switch_time_ms
-                    .insert(dest_region.to_string(), now_ms);
-                Some(best_candidate)
-            }
+        } else {
+            best_candidate
+        };
+        if previous.as_ref().is_none_or(|old| !old.same_route(&chosen)) {
+            inner.last_switch.insert(key.clone(), now);
         }
+        inner.current_paths.insert(key, chosen.clone());
+        Some(chosen)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
     use kamish_policy::{

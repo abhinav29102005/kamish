@@ -17,6 +17,21 @@ use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
 pub const RECORD_MAGIC_V1: u16 = 0x4859; // "HY"
+pub const RECORD_MAGIC_V2: u16 = 0x485A;
+
+/// Persisted with the payload in one checksummed/fsynced record, never in a
+/// separate session file that could get ahead of or behind the commit log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordContext {
+    pub producer_id: u64,
+    pub producer_epoch: u64,
+    pub sequence: u32,
+    pub origin_region: String,
+    pub request_policy: String,
+    /// Snapshot of permitted destinations at admission. Recovery intersects
+    /// this list with current policy; it cannot invent new destinations.
+    pub replication_targets: Vec<String>,
+}
 
 #[derive(Debug, Error)]
 pub enum LogError {
@@ -50,6 +65,8 @@ pub struct RecordEnvelope {
     pub base_offset: u64,
     pub payload: Vec<u8>,
     pub checksum: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<RecordContext>,
 }
 
 impl RecordEnvelope {
@@ -71,6 +88,7 @@ impl RecordEnvelope {
             base_offset,
             payload,
             checksum,
+            context: None,
         }
     }
 
@@ -92,14 +110,23 @@ impl RecordEnvelope {
     }
 
     pub fn verify_checksum(&self) -> bool {
-        let computed = Self::compute_checksum(
-            self.epoch,
-            &self.class_id,
-            self.policy_version,
-            self.base_offset,
-            &self.payload,
-        );
-        computed == self.checksum
+        self.expected_checksum().is_some_and(|computed| computed == self.checksum)
+    }
+
+    fn expected_checksum(&self) -> Option<u32> {
+        match (self.magic, &self.context) {
+            (RECORD_MAGIC_V1, None) => Some(Self::compute_checksum(
+                self.epoch, &self.class_id, self.policy_version, self.base_offset, &self.payload,
+            )),
+            (RECORD_MAGIC_V2, Some(context)) => {
+                let bytes = serde_json::to_vec(&(
+                    self.magic, self.epoch, &self.class_id, self.policy_version,
+                    self.base_offset, &self.payload, context,
+                )).ok()?;
+                Some(crc32fast::hash(&bytes))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -157,13 +184,8 @@ impl PartitionLog {
 
                 match bincode_deserialize_envelope(&mut cursor) {
                     Ok(envelope) => {
-                        let computed = RecordEnvelope::compute_checksum(
-                            envelope.epoch,
-                            &envelope.class_id,
-                            envelope.policy_version,
-                            envelope.base_offset,
-                            &envelope.payload,
-                        );
+                        let computed = envelope.expected_checksum()
+                            .ok_or(LogError::InvalidMagic(envelope.magic))?;
                         if computed != envelope.checksum {
                             return Err(LogError::ChecksumMismatch {
                                 offset: envelope.base_offset,
@@ -203,11 +225,12 @@ impl PartitionLog {
         }
 
         let high_watermark = records.len() as u64;
+        let recovered_epoch = records.iter().map(|record| record.epoch).max().unwrap_or(initial_epoch);
 
         Ok(Self {
             inner: Arc::new(RwLock::new(PartitionLogInner {
                 dir: dir_buf,
-                current_epoch: initial_epoch,
+                current_epoch: initial_epoch.max(recovered_epoch),
                 next_offset,
                 high_watermark,
                 records,
@@ -230,6 +253,17 @@ impl PartitionLog {
         policy_version: u64,
         payload: Vec<u8>,
     ) -> Result<u64, LogError> {
+        self.append_with_context(epoch, class_id, policy_version, payload, None)
+    }
+
+    pub fn append_with_context(
+        &self,
+        epoch: u64,
+        class_id: impl Into<String>,
+        policy_version: u64,
+        payload: Vec<u8>,
+        context: Option<RecordContext>,
+    ) -> Result<u64, LogError> {
         // 1. Serialize writers to guarantee continuous monotonic sequence numbering (INV-1)
         let mut file_guard = self.writer_lock.lock().unwrap();
 
@@ -248,7 +282,12 @@ impl PartitionLog {
             (inner.next_offset, inner.dir.clone())
         };
 
-        let envelope = RecordEnvelope::new(epoch, class_id, policy_version, offset, payload);
+        let mut envelope = RecordEnvelope::new(epoch, class_id, policy_version, offset, payload);
+        if context.is_some() {
+            envelope.magic = RECORD_MAGIC_V2;
+            envelope.context = context;
+            envelope.checksum = envelope.expected_checksum().expect("valid v2 envelope");
+        }
 
         // 3. Open or reuse persistent segment file
         if file_guard.is_none() {
@@ -258,6 +297,8 @@ impl PartitionLog {
                 .append(true)
                 .open(log_path)?;
             *file_guard = Some(file);
+            #[cfg(unix)]
+            File::open(&dir)?.sync_all()?;
         }
 
         let serialized = serde_json::to_vec(&envelope)
@@ -491,6 +532,8 @@ mod tests {
 
 #[derive(Debug, Error)]
 pub enum SessionError {
+    #[error("Producer sequence exhausted; begin a new producer epoch")]
+    SequenceExhausted,
     #[error("Out of order sequence: expected {expected}, received {received}")]
     OutOfOrderSequence { expected: u32, received: u32 },
 
@@ -537,14 +580,21 @@ impl SessionManager {
                 });
             }
 
+            if producer_epoch > state.producer_epoch {
+                return if seq == 0 { Ok(None) } else {
+                    Err(SessionError::OutOfOrderSequence { expected: 0, received: seq })
+                };
+            }
+
             if seq == state.last_seq {
                 // Duplicate retry: return cached offset without appending (INV-6)
                 return Ok(Some(state.last_offset));
             }
 
-            if seq != state.last_seq + 1 {
+            let expected = state.last_seq.checked_add(1).ok_or(SessionError::SequenceExhausted)?;
+            if seq != expected {
                 return Err(SessionError::OutOfOrderSequence {
-                    expected: state.last_seq + 1,
+                    expected,
                     received: seq,
                 });
             }

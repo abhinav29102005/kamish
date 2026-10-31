@@ -10,7 +10,7 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -20,6 +20,15 @@ pub enum PolicyError {
 
     #[error("Cryptographic signature error: {0}")]
     SignatureError(String),
+
+    #[error("Unsupported policy signature format {0}; re-sign with format 2")]
+    UnsupportedFormat(u32),
+
+    #[error("Policy identity changed without an explicit migration")]
+    IdentityChanged,
+
+    #[error("Policy version {0} was reused for different content")]
+    VersionConflict(u64),
 
     #[error("Policy is stale: current time {now_sec} exceeds expiry {expiry_sec}")]
     PolicyStale { now_sec: i64, expiry_sec: i64 },
@@ -97,10 +106,40 @@ pub struct PolicyDocument {
 }
 
 impl PolicyDocument {
-    /// Computes the SHA-256 canonical digest of the policy payload (excluding signature).
+    /// Format 2: typed JSON with fixed struct fields, sorted maps and sorted sets.
+    /// Ordered lists (including failover preference) retain their order. This is
+    /// a versioned Kamish encoding, not RFC 8785/JCS; u64 values remain exact.
     pub fn canonical_digest(&self) -> Vec<u8> {
-        let serialized = serde_json::to_vec(self).expect("Failed to serialize policy for signing");
+        #[derive(Serialize)]
+        struct CanonicalClass<'a> {
+            class_id: &'a str,
+            description: &'a str,
+            legal_regions: BTreeSet<&'a str>,
+            destination_modes: BTreeMap<&'a str, DestinationMode>,
+            ack_mode: AckMode,
+            failover_candidates: &'a [String],
+            transit_allowed: bool,
+        }
+        let classes: BTreeMap<_, _> = self.classes.iter().map(|(id, rule)| {
+            (id.as_str(), CanonicalClass {
+                class_id: &rule.class_id,
+                description: &rule.description,
+                legal_regions: rule.legal_regions.iter().map(String::as_str).collect(),
+                destination_modes: rule.destination_modes.iter().map(|(r, m)| (r.as_str(), *m)).collect(),
+                ack_mode: rule.ack_mode,
+                failover_candidates: &rule.failover_candidates,
+                transit_allowed: rule.transit_allowed,
+            })
+        }).collect();
+        let transit: BTreeMap<_, BTreeSet<_>> = self.transit_rules.iter().map(|(source, regions)| {
+            (source.as_str(), regions.iter().map(String::as_str).collect())
+        }).collect();
+        let serialized = serde_json::to_vec(&(
+            &self.policy_id, self.version, self.issued_at_sec, self.ttl_seconds,
+            &self.issuer_pubkey_hex, classes, transit,
+        )).expect("policy contains only serializable primitive values");
         let mut hasher = Sha256::new();
+        hasher.update(b"kamish-policy-signature-v2\0");
         hasher.update(&serialized);
         hasher.finalize().to_vec()
     }
@@ -109,6 +148,8 @@ impl PolicyDocument {
 /// Enveloped policy including signature for wire transfer and storage (INV-9).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SignedPolicy {
+    #[serde(default)]
+    pub signature_format: u32,
     pub policy: PolicyDocument,
     pub signature_hex: String,
 }
@@ -119,6 +160,7 @@ impl SignedPolicy {
         let digest = policy.canonical_digest();
         let signature = signing_key.sign(&digest);
         Self {
+            signature_format: 2,
             policy,
             signature_hex: hex::encode(signature.to_bytes()),
         }
@@ -126,6 +168,9 @@ impl SignedPolicy {
 
     /// Verifies the signature against the issuer public key declared in the policy (INV-9).
     pub fn verify_signature(&self) -> Result<(), PolicyError> {
+        if self.signature_format != 2 {
+            return Err(PolicyError::UnsupportedFormat(self.signature_format));
+        }
         let pubkey_bytes = hex::decode(&self.policy.issuer_pubkey_hex)
             .map_err(|e| PolicyError::SignatureError(format!("Invalid pubkey hex: {}", e)))?;
         let pubkey_arr: [u8; 32] = pubkey_bytes
@@ -149,8 +194,13 @@ impl SignedPolicy {
 
     /// Checks if the policy is currently within its validity time window.
     pub fn is_fresh(&self, now_sec: i64) -> bool {
-        let expiry = self.policy.issued_at_sec + (self.policy.ttl_seconds as i64);
-        now_sec >= self.policy.issued_at_sec && now_sec <= expiry
+        self.expires_at().is_some_and(|expiry| {
+            self.policy.ttl_seconds > 0 && now_sec >= self.policy.issued_at_sec && now_sec < expiry
+        })
+    }
+
+    fn expires_at(&self) -> Option<i64> {
+        self.policy.issued_at_sec.checked_add(i64::try_from(self.policy.ttl_seconds).ok()?)
     }
 }
 
@@ -186,6 +236,17 @@ impl PolicyCache {
         // 2. Cryptographic signature check (INV-9)
         signed.verify_signature()?;
 
+        if let Some(current) = &self.current {
+            if current.policy.policy_id != signed.policy.policy_id {
+                return Err(PolicyError::IdentityChanged);
+            }
+            if current.policy.version == signed.policy.version
+                && current.policy.canonical_digest() != signed.policy.canonical_digest()
+            {
+                return Err(PolicyError::VersionConflict(signed.policy.version));
+            }
+        }
+
         // 3. Version rollback prevention (INV-9, §3.3.3)
         if signed.policy.version < self.highest_seen_version {
             return Err(PolicyError::VersionRollback {
@@ -198,7 +259,7 @@ impl PolicyCache {
         if !signed.is_fresh(now_sec) {
             return Err(PolicyError::PolicyStale {
                 now_sec,
-                expiry_sec: signed.policy.issued_at_sec + signed.policy.ttl_seconds as i64,
+                expiry_sec: signed.expires_at().unwrap_or(signed.policy.issued_at_sec),
             });
         }
 

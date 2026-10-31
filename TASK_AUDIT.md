@@ -443,3 +443,19 @@ This ledger records every engineering task, cross-referencing requirements, comp
   4. Preserved a portable, isolated research harness for policy, recovery, stream cursor, session, ownership and audit counterexamples.
 * **Verification:** `cargo test --workspace`: 61 passed. Research harness: 11 checks, 1 passed and 10 failed as documented in [PROBE_RESULTS.md](early_research/PROBE_RESULTS.md). Broker and producer CLI help checks still panic on duplicate short flags. Local research-document links and proposed TOML syntax validated.
 * **Status:** RESEARCH COMPLETE; documented implementation failures remain open. External systems were reviewed through documentation, not deployed or benchmarked in this task.
+
+### TASK-0026: Loophole Remediation — Integrity and Local Recovery Stages
+* **Timestamp:** 2026-10-31
+* **Components:** policy, audit, enforcement, route, log, outbox, metadata, broker, agent, CLI and research probes
+* **Base Revision:** `e0cd260`; verification against working-tree changes
+* **Actions Taken:** Added versioned deterministic signatures/audit encoding; fail-closed audit errors; fixed CLI arguments, fetch relabeling, path validation, cached-route authorization and relay allowlists. Serialized per-partition operations; persisted v2 producer/admission context; rebuilt sessions and pending work on startup; isolated partition watermarks and bounded reservation growth. Added local ownership checks and explicit rejection of unsupported sealed replication.
+* **Verification:** 99 application tests passed; 11 research probes passed with documented scoped-API/safe-rejection adjustments; broker and producer CLI help passed; `git diff --check` passed. Rustfmt/Clippy unavailable.
+* **Compatibility:** Policies must be re-signed for format 2. Legacy audit files are rejected without mutation. v1 records remain readable but are not automatically replicated without known admission context. Earlier benchmarks were not rerun and do not characterize the new fsync/locking behavior.
+* **Status:** STAGES 1–2 IMPLEMENTED; **not all architectural loopholes closed**. [Closure ledger](early_research/LOOPHOLE_CLOSURE.md) explicitly tracks partial ownership/cursor/deployment work, disabled sealing, and outstanding consensus, transport, storage, policy-lifecycle and evidence requirements.
+
+### TASK-0027: Experimental Node.js TypeScript SDK
+* **Timestamp:** 2026-10-31
+* **Components:** `packages/kamish-client`, `crates/kamish-client/examples/sdk_test_broker.rs`
+* **Actions Taken:** Created an ESM Node.js 22.12+ client with TypeScript declarations, produce/fetch/watermark/ping operations, lossless bigint wire handling, typed errors, cancellation, deadlines and bounded framing/concurrency. Added per-stream producer sequencing and explicit retry of retained uncertain writes without automatic write retries. Documented plaintext transport opt-in, broker limitations, session-recovery boundaries, alpha compatibility and release gates.
+* **Verification:** TypeScript build/typecheck and 23 TCP/protocol/producer tests passed. A real loopback Rust broker integration passed binary payload, maximum-u64 identity, concurrent partition, rejection and restart-deduplication checks. An npm tarball was installed into an isolated temporary consumer; public ESM exports and TypeScript declarations passed. Package allowlist check passed (25 files). `npm install` reported zero dependency vulnerabilities; no runtime dependencies added.
+* **Publication Status:** NOT PUBLISHED. Provisional name `@kamish/client`, version `0.1.0-alpha.1`, protected by `private: true`. Scope ownership, protocol release pinning and security/release approval remain required.

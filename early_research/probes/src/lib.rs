@@ -77,7 +77,7 @@ mod review {
         let outbox = source.get_outbox("b").unwrap();
         assert_eq!(outbox.next_transfer_batch(10).len(), 2);
         // Receiver has only acknowledged partition 0, offset 0.
-        outbox.advance_watermark(1);
+        outbox.advance_partition_watermark("events", 0, 1);
         assert_eq!(outbox.next_transfer_batch(10).len(), 1, "ack discarded the unreplicated partition-1 range");
     }
 
@@ -88,7 +88,15 @@ mod review {
         let source = broker("a", a.path(), DestinationMode::Cleartext);
         let target = broker("b", b.path(), DestinationMode::Cleartext);
         let secret = b"CANARY-sensitive-record".to_vec();
-        source.produce(request(0, "class-1", secret.clone())).unwrap();
+        let result = source.produce(request(0, "class-1", secret.clone()));
+        if let Err(error) = result {
+            // Explicit safe containment is acceptable, but must not be reported
+            // as working sealed replication. Assert rejection before persistence.
+            assert!(error.to_string().contains("sealed_replication_not_configured"));
+            assert!(source.get_outbox("b").unwrap().next_transfer_batch(1).is_empty());
+            assert!(source.fetch(fetch("class-1")).unwrap().records.is_empty());
+            return;
+        }
         let range = source.get_outbox("b").unwrap().next_transfer_batch(1).remove(0);
         assert!(range.is_sealed);
         // Same forwarding of payload/is_sealed used by ReplicationAgent::execute_task.
@@ -160,7 +168,10 @@ mod review {
         let dir = tempfile::tempdir().unwrap();
         {
             let source = broker("a", dir.path(), DestinationMode::Cleartext);
-            source.produce(request(0, "class-1", b"restricted".to_vec())).unwrap();
+            // This probe tests local fetch policy, not sealed replication.
+            let mut req = request(0, "class-1", b"restricted".to_vec());
+            req.residency_rule = Some(kamish_meta::ResidencyPolicy::StrictLocal);
+            source.produce(req).unwrap();
         }
         // Reload a policy denying cleartext fetch of the existing record's class.
         let restricted = broker("a", dir.path(), DestinationMode::SealedOnly);

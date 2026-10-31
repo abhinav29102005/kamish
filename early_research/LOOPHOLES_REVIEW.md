@@ -2,6 +2,10 @@
 
 **Date:** 2026-10-31 · **Revision:** `4ebfb74375ed2c6ba84e0fdbb4a0d864bb5cc86a`
 
+**Historical findings:** see [the closure ledger](LOOPHOLE_CLOSURE.md) for fixes
+and remaining gaps in the subsequent implementation. This report is not a claim
+that every counterexample below still reproduces on the current working tree.
+
 Inputs: all four original `early_research/` documents, `project.md`, core Rust modules, frontend state, and milestone 2/3 reports. External sources are indexed in [the source register](SOURCES_AND_PRIOR_ART.md). Reproductions are in [PROBE_RESULTS.md](PROBE_RESULTS.md).
 
 ## 1. Findings that change the plan
