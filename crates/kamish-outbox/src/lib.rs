@@ -52,6 +52,11 @@ impl OutboxRange {
     pub fn byte_size(&self) -> usize {
         self.payload.len() + 64
     }
+
+    /// Computes the exact capacity required in an outbox for a range with the given payload length.
+    pub fn required_capacity(payload_len: usize) -> usize {
+        payload_len + 64
+    }
 }
 
 /// Bounded durable outbox per destination region (§2.2, §3.3.2).
@@ -84,6 +89,14 @@ pub struct OutboxReservation {
 impl OutboxReservation {
     pub fn reserved_bytes(&self) -> usize {
         self.reserved_bytes
+    }
+
+    /// Checks whether committing the given range is guaranteed to be infallible.
+    ///
+    /// Commitment is infallible whenever `range.byte_size() <= self.reserved_bytes`,
+    /// because sufficient capacity was already pre-allocated under the reservation lock.
+    pub fn is_infallible(&self, range: &OutboxRange) -> bool {
+        range.byte_size() <= self.reserved_bytes
     }
 
     /// Commits this reservation by enqueueing the provided range.

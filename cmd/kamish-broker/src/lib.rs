@@ -477,7 +477,7 @@ impl BrokerServer {
         // Check policy and atomically reserve capacity in all permitted destination outboxes.
         // If ANY destination outbox has insufficient capacity, all reservations are rolled back
         // and the write is rejected BEFORE appending to the local commit log.
-        let estimated_range_size = req.payload.len() + 64;
+        let required_range_size = OutboxRange::required_capacity(req.payload.len());
         let mut reservations = Vec::new();
 
         for peer in &self.known_peers {
@@ -517,7 +517,7 @@ impl BrokerServer {
                     ));
                 }
                 let outbox = self.get_or_create_outbox(peer);
-                match outbox.reserve_capacity(estimated_range_size) {
+                match outbox.reserve_capacity(required_range_size) {
                     Ok(reservation) => {
                         let is_sealed = send_decision.mode == DestinationMode::SealedOnly;
                         reservations.push((peer.clone(), reservation, is_sealed));
@@ -596,7 +596,7 @@ impl BrokerServer {
         );
 
         // 5. Commit all reserved outbox ranges (§3.B)
-        for (_peer, reservation, is_sealed) in reservations {
+        for (peer, reservation, is_sealed) in reservations {
             let range = OutboxRange {
                 topic: req.topic.clone(),
                 partition: req.partition,
@@ -607,7 +607,16 @@ impl BrokerServer {
                 payload: req.payload.clone(),
                 is_sealed,
             };
-            reservation.commit(range)?;
+            if let Err(e) = reservation.commit(range) {
+                tracing::warn!(
+                    topic = %req.topic,
+                    partition = req.partition,
+                    offset = offset,
+                    peer = %peer,
+                    error = %e,
+                    "Reservation commit growth exceeded outbox capacity post-append; obligation retained in durable WAL for backlog refill"
+                );
+            }
         }
 
         Ok(ProduceResponse {

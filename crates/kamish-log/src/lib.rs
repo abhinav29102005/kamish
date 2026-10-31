@@ -53,6 +53,173 @@ pub enum LogError {
 
     #[error("Offset gap detected: expected monotonic offset {expected}, but received {received}")]
     NonMonotonicOffset { expected: u64, received: u64 },
+
+    #[error("Partition log writer is fenced: {0}")]
+    WriterFenced(String),
+}
+
+/// Abstract storage writer supporting atomic fsync, truncation repair, and length queries.
+pub trait StorageWriter: Send + std::io::Write {
+    fn sync_all(&mut self) -> std::io::Result<()>;
+    fn set_len(&mut self, size: u64) -> std::io::Result<()>;
+    fn file_len(&mut self) -> std::io::Result<u64>;
+    fn seek_end(&mut self) -> std::io::Result<u64>;
+}
+
+impl StorageWriter for std::fs::File {
+    fn sync_all(&mut self) -> std::io::Result<()> {
+        std::fs::File::sync_all(self)
+    }
+
+    fn set_len(&mut self, size: u64) -> std::io::Result<()> {
+        std::fs::File::set_len(self, size)
+    }
+
+    fn file_len(&mut self) -> std::io::Result<u64> {
+        self.metadata().map(|m| m.len())
+    }
+
+    fn seek_end(&mut self) -> std::io::Result<u64> {
+        use std::io::Seek;
+        self.seek(std::io::SeekFrom::End(0))
+    }
+}
+
+/// Deterministic failure injection points for StorageWriter testing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultInjectionPoint {
+    LengthWrite,
+    BodyWrite,
+    Flush,
+    Sync,
+    TruncationRepair,
+    RepairSync,
+}
+
+/// Test utility wrapping a `StorageWriter` to simulate deterministic I/O failures.
+pub struct FaultInjectingWriter<W: StorageWriter> {
+    inner: W,
+    fault: Option<FaultInjectionPoint>,
+    write_count: usize,
+    in_repair: bool,
+    partial_bytes: usize,
+}
+
+impl<W: StorageWriter> FaultInjectingWriter<W> {
+    pub fn new(inner: W, fault: FaultInjectionPoint, partial_bytes: usize) -> Self {
+        Self {
+            inner,
+            fault: Some(fault),
+            write_count: 0,
+            in_repair: false,
+            partial_bytes,
+        }
+    }
+
+    pub fn inner_mut(&mut self) -> &mut W {
+        &mut self.inner
+    }
+
+    pub fn into_inner(self) -> W {
+        self.inner
+    }
+
+    pub fn clear_fault(&mut self) {
+        self.fault = None;
+        self.in_repair = false;
+        self.write_count = 0;
+    }
+}
+
+impl<W: StorageWriter> std::io::Write for FaultInjectingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self.fault {
+            Some(FaultInjectionPoint::LengthWrite) => {
+                if self.partial_bytes > 0 {
+                    let to_write = self.partial_bytes.min(buf.len());
+                    let _ = self.inner.write_all(&buf[..to_write]);
+                }
+                self.fault = None;
+                Err(std::io::Error::other("simulated length-write I/O failure"))
+            }
+            Some(FaultInjectionPoint::BodyWrite) => {
+                if self.write_count == 0 {
+                    self.write_count += 1;
+                    self.inner.write_all(buf)?;
+                    Ok(buf.len())
+                } else {
+                    if self.partial_bytes > 0 {
+                        let to_write = self.partial_bytes.min(buf.len());
+                        let _ = self.inner.write_all(&buf[..to_write]);
+                    }
+                    self.fault = None;
+                    Err(std::io::Error::other("simulated body-write I/O failure"))
+                }
+            }
+            Some(FaultInjectionPoint::TruncationRepair) | Some(FaultInjectionPoint::RepairSync) => {
+                if self.partial_bytes > 0 {
+                    let to_write = self.partial_bytes.min(buf.len());
+                    let _ = self.inner.write_all(&buf[..to_write]);
+                }
+                Err(std::io::Error::other(
+                    "simulated initial write failure to trigger repair",
+                ))
+            }
+            _ => self.inner.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.fault == Some(FaultInjectionPoint::Flush) {
+            self.fault = None;
+            return Err(std::io::Error::other("simulated flush I/O failure"));
+        }
+        self.inner.flush()
+    }
+}
+
+impl<W: StorageWriter> StorageWriter for FaultInjectingWriter<W> {
+    fn sync_all(&mut self) -> std::io::Result<()> {
+        if self.in_repair {
+            if self.fault == Some(FaultInjectionPoint::RepairSync) {
+                self.fault = None;
+                return Err(std::io::Error::other("simulated repair sync I/O failure"));
+            }
+            return self.inner.sync_all();
+        }
+
+        if self.fault == Some(FaultInjectionPoint::Sync) {
+            self.fault = None;
+            return Err(std::io::Error::other("simulated sync_all I/O failure"));
+        }
+
+        self.inner.sync_all()
+    }
+
+    fn set_len(&mut self, size: u64) -> std::io::Result<()> {
+        self.in_repair = true;
+        if self.fault == Some(FaultInjectionPoint::TruncationRepair) {
+            self.fault = None;
+            return Err(std::io::Error::other("simulated truncation repair failure"));
+        }
+        self.inner.set_len(size)
+    }
+
+    fn file_len(&mut self) -> std::io::Result<u64> {
+        self.inner.file_len()
+    }
+
+    fn seek_end(&mut self) -> std::io::Result<u64> {
+        self.inner.seek_end()
+    }
+}
+
+#[derive(Debug)]
+enum AppendStageError {
+    LengthWrite(std::io::Error),
+    BodyWrite(std::io::Error),
+    Flush(std::io::Error),
+    Sync(std::io::Error),
 }
 
 /// Standard Hydra Stream record envelope (§3.5.2).
@@ -145,7 +312,7 @@ impl RecordEnvelope {
 #[derive(Clone)]
 pub struct PartitionLog {
     inner: Arc<RwLock<PartitionLogInner>>,
-    writer_lock: Arc<std::sync::Mutex<Option<File>>>,
+    writer_lock: Arc<std::sync::Mutex<Option<Box<dyn StorageWriter>>>>,
 }
 
 impl std::fmt::Debug for PartitionLog {
@@ -156,6 +323,7 @@ impl std::fmt::Debug for PartitionLog {
             .field("current_epoch", &inner.current_epoch)
             .field("next_offset", &inner.next_offset)
             .field("high_watermark", &inner.high_watermark)
+            .field("fenced", &inner.fenced_reason.is_some())
             .finish()
     }
 }
@@ -166,6 +334,7 @@ struct PartitionLogInner {
     next_offset: u64,
     high_watermark: u64,
     records: Vec<RecordEnvelope>,
+    fenced_reason: Option<String>,
 }
 
 impl PartitionLog {
@@ -250,6 +419,7 @@ impl PartitionLog {
                 next_offset,
                 high_watermark,
                 records,
+                fenced_reason: None,
             })),
             writer_lock: Arc::new(std::sync::Mutex::new(None)),
         })
@@ -280,8 +450,18 @@ impl PartitionLog {
         payload: Vec<u8>,
         context: Option<RecordContext>,
     ) -> Result<u64, LogError> {
+        // Fast-path: reject immediately if log writer is fenced
+        if let Some(reason) = self.fenced_reason() {
+            return Err(LogError::WriterFenced(reason));
+        }
+
         // 1. Serialize writers to guarantee continuous monotonic sequence numbering (INV-1)
-        let mut file_guard = self.writer_lock.lock().unwrap();
+        let mut writer_guard = self.writer_lock.lock().unwrap();
+
+        // Double check fence under writer_lock to prevent race conditions
+        if let Some(reason) = self.fenced_reason() {
+            return Err(LogError::WriterFenced(reason));
+        }
 
         // 2. Validate epoch and reserve next offset under brief write lock
         let (offset, dir) = {
@@ -298,6 +478,7 @@ impl PartitionLog {
             (inner.next_offset, inner.dir.clone())
         };
 
+        // 3. Construct and serialize envelope BEFORE modifying the file
         let mut envelope = RecordEnvelope::new(epoch, class_id, policy_version, offset, payload);
         if context.is_some() {
             envelope.magic = RECORD_MAGIC_V2;
@@ -305,32 +486,53 @@ impl PartitionLog {
             envelope.checksum = envelope.expected_checksum().expect("valid v2 envelope");
         }
 
-        // 3. Open or reuse persistent segment file
-        if file_guard.is_none() {
-            let log_path = dir.join("partition.data");
-            let file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_path)?;
-            *file_guard = Some(file);
-            #[cfg(unix)]
-            File::open(&dir)?.sync_all()?;
-        }
-
         let serialized = serde_json::to_vec(&envelope)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let len_bytes = (serialized.len() as u32).to_be_bytes();
 
-        let file = file_guard.as_mut().unwrap();
-        file.write_all(&len_bytes)?;
-        file.write_all(&serialized)?;
-        file.flush()?;
+        // 4. Open or reuse storage writer
+        if writer_guard.is_none() {
+            let log_path = dir.join("partition.data");
+            let mut file = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(&log_path)?;
+            use std::io::Seek;
+            file.seek(std::io::SeekFrom::End(0))?;
+            #[cfg(unix)]
+            File::open(&dir)?.sync_all()?;
+            *writer_guard = Some(Box::new(file));
+        }
 
-        // Genuine fsync flush to hardware storage controller before acknowledging append (INV-2).
-        // Readers can read concurrently during this fsync with zero lock contention!
-        file.sync_all()?;
+        let writer = writer_guard.as_mut().unwrap();
 
-        // 4. Once crash-durable on disk, publish record to in-memory committed log and advance HWM (INV-4)
+        // Ensure writer is positioned at the end of the file
+        writer.seek_end()?;
+
+        // 5. Capture the original on-disk file length before writing
+        let original_len = writer.file_len()?;
+
+        // 6. Explicitly write length-prefix, body, flush, and sync_all.
+        // We do NOT use bare `?` on operations that can mutate disk state without rollback.
+        let write_result: Result<(), AppendStageError> = (|| {
+            writer
+                .write_all(&len_bytes)
+                .map_err(AppendStageError::LengthWrite)?;
+            writer
+                .write_all(&serialized)
+                .map_err(AppendStageError::BodyWrite)?;
+            writer.flush().map_err(AppendStageError::Flush)?;
+            writer.sync_all().map_err(AppendStageError::Sync)?;
+            Ok(())
+        })();
+
+        if let Err(stage_err) = write_result {
+            return self.handle_append_failure(writer_guard, original_len, stage_err);
+        }
+
+        // 7. Once crash-durable on disk, publish record to in-memory committed log and advance HWM (INV-4)
         {
             let mut inner = self.inner.write().unwrap();
             inner.records.push(envelope);
@@ -339,6 +541,64 @@ impl PartitionLog {
         }
 
         Ok(offset)
+    }
+
+    fn handle_append_failure(
+        &self,
+        mut writer_guard: std::sync::MutexGuard<'_, Option<Box<dyn StorageWriter>>>,
+        original_len: u64,
+        stage_err: AppendStageError,
+    ) -> Result<u64, LogError> {
+        let (io_err, is_sync_failure, stage_name) = match stage_err {
+            AppendStageError::LengthWrite(e) => (e, false, "length write"),
+            AppendStageError::BodyWrite(e) => (e, false, "body write"),
+            AppendStageError::Flush(e) => (e, false, "flush"),
+            AppendStageError::Sync(e) => (e, true, "sync_all"),
+        };
+
+        let writer = writer_guard.as_mut().unwrap();
+
+        // 1. Attempt rollback by truncating back to original length
+        let truncate_res = writer.set_len(original_len);
+        let repair_sync_res = if truncate_res.is_ok() {
+            let _ = writer.seek_end();
+            writer.sync_all()
+        } else {
+            Err(std::io::Error::other("truncation set_len failed"))
+        };
+
+        // 2. Unrecoverable truncation failure -> fence writer
+        if let Err(ref set_len_err) = truncate_res {
+            let reason = format!(
+                "Append failed during {stage_name} ({io_err}); truncation repair to {original_len} failed: {set_len_err}"
+            );
+            self.fence(&reason);
+            *writer_guard = None;
+            return Err(LogError::WriterFenced(reason));
+        }
+
+        // 3. Unrecoverable truncation sync failure -> fence writer
+        if let Err(ref sync_err) = repair_sync_res {
+            let reason = format!(
+                "Append failed during {stage_name} ({io_err}); truncation repair sync failed: {sync_err}"
+            );
+            self.fence(&reason);
+            *writer_guard = None;
+            return Err(LogError::WriterFenced(reason));
+        }
+
+        // 4. Uncertainty on sync_all durability -> fence writer
+        if is_sync_failure {
+            let reason =
+                format!("Append sync_all failed with uncertain storage persistence: {io_err}");
+            self.fence(&reason);
+            *writer_guard = None;
+            return Err(LogError::Io(io_err));
+        }
+
+        // 5. Successful rollback and healthy writer -> keep reusable
+        let _ = writer.seek_end();
+        Err(LogError::Io(io_err))
     }
 
     /// Fetches records starting at `start_offset`, capped strictly by the High-Water Mark (INV-4).
@@ -375,6 +635,26 @@ impl PartitionLog {
 
     pub fn high_watermark(&self) -> u64 {
         self.inner.read().unwrap().high_watermark
+    }
+
+    pub fn is_fenced(&self) -> bool {
+        self.inner.read().unwrap().fenced_reason.is_some()
+    }
+
+    pub fn fenced_reason(&self) -> Option<String> {
+        self.inner.read().unwrap().fenced_reason.clone()
+    }
+
+    pub fn fence(&self, reason: impl Into<String>) {
+        let mut inner = self.inner.write().unwrap();
+        if inner.fenced_reason.is_none() {
+            inner.fenced_reason = Some(reason.into());
+        }
+    }
+
+    pub fn set_storage_writer(&self, writer: Box<dyn StorageWriter>) {
+        let mut guard = self.writer_lock.lock().unwrap();
+        *guard = Some(writer);
     }
 }
 
