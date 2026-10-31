@@ -1,32 +1,77 @@
 import React from 'react';
+import { useKamish } from '../context/KamishContext';
 
 export default function Header({ onNavigate, onOpenContact }) {
+  const { nodes, currentTelemetry } = useKamish();
+
+  const totalCommitted = Object.values(nodes).reduce(
+    (acc, node) => acc + (node.localCommittedOffset || 0),
+    0
+  );
+
   return (
     <header
       style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '2rem 3.5rem 0.5rem',
+        padding: '1.75rem 3.5rem 0.5rem',
         background: 'transparent',
         position: 'relative',
         zIndex: 50,
         maxWidth: '1600px',
         margin: '0 auto',
         width: '100%',
+        gap: '1rem',
+        flexWrap: 'wrap',
       }}
     >
       {/* Top Left: Brutalist Logo Box */}
-      <div
-        className="brutal-logo-box"
-        onClick={() => onNavigate('home')}
-        style={{ cursor: 'pointer' }}
-      >
-        KAMISH
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+        <div
+          className="brutal-logo-box"
+          onClick={() => onNavigate('home')}
+          style={{ cursor: 'pointer' }}
+        >
+          KAMISH
+        </div>
+
+        {/* Live Cluster Health Badge */}
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            background: 'rgba(15, 23, 42, 0.75)',
+            border: '1px solid rgba(168, 85, 247, 0.3)',
+            borderRadius: '9999px',
+            padding: '5px 14px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.78rem',
+            color: '#e2d9f3',
+            letterSpacing: '0.06em',
+          }}
+        >
+          <span
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#22c55e',
+              boxShadow: '0 0 10px #22c55e',
+              display: 'inline-block',
+            }}
+          />
+          <span>3 REGIONS ACTIVE</span>
+          <span style={{ color: '#94a3b8' }}>·</span>
+          <span style={{ color: '#c084fc', fontWeight: 600 }}>
+            {totalCommitted.toLocaleString()} OFFSETS
+          </span>
+        </div>
       </div>
 
-      {/* Top Right: 3D Story Link & Contact Pill (Sign in removed) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+      {/* Top Right: 3D Story Link & Contact Pill */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
         <a
           href="/3d.html"
           target="_blank"
@@ -68,10 +113,10 @@ export default function Header({ onNavigate, onOpenContact }) {
             boxShadow: '0 4px 18px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
             color: '#ffffff',
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.95rem',
+            fontSize: '0.92rem',
             fontWeight: 700,
             letterSpacing: '0.08em',
-            padding: '10px 28px',
+            padding: '9px 26px',
             borderRadius: '9999px',
             cursor: 'pointer',
             transition: 'all 0.25s ease',

@@ -94,6 +94,8 @@ export interface TelemetrySample {
   ingressEps: number;
   writeLatencyMs: number;
   leaseExpiresInSec: number;
+  throughputEps?: number;
+  p99LatencyMs?: number;
 }
 
 export type ScenarioId = 'A' | 'B' | 'C' | null;

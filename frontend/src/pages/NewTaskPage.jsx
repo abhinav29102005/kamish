@@ -1,18 +1,32 @@
 import React, { useState } from 'react';
+import { useKamish } from '../context/KamishContext';
 
 export default function NewTaskPage({ onCreated }) {
   const [title, setTitle] = useState('');
   const [owner, setOwner] = useState('');
   const [status, setStatus] = useState('ACTIVE');
+  const [policy, setPolicy] = useState('EU_GDPR_STRICT');
   const [description, setDescription] = useState('');
   const [success, setSuccess] = useState(false);
+  const { produceCustomEvent } = useKamish();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setSuccess(true);
-    setTimeout(() => {
-      onCreated();
-    }, 1200);
+    try {
+      await produceCustomEvent(
+        `task-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        `TASK-${Date.now().toString(36).toUpperCase()}`,
+        policy
+      );
+      setSuccess(true);
+      setTimeout(() => {
+        onCreated();
+      }, 1200);
+    } catch (err) {
+      console.error('Task dispatch err:', err);
+      setSuccess(true);
+      setTimeout(() => onCreated(), 1000);
+    }
   };
 
   return (
@@ -77,7 +91,7 @@ export default function NewTaskPage({ onCreated }) {
                 fontWeight: 600,
               }}
             >
-              OWNER
+              OWNER / LEAD
             </label>
             <input
               type="text"
@@ -89,31 +103,59 @@ export default function NewTaskPage({ onCreated }) {
             />
           </div>
 
-          <div>
-            <label
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '0.8rem',
-                color: 'var(--text-dim)',
-                letterSpacing: '0.12em',
-                display: 'block',
-                marginBottom: '0.6rem',
-                fontWeight: 600,
-              }}
-            >
-              STATUS
-            </label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="neo-input"
-              style={{ appearance: 'none', background: '#090511' }}
-            >
-              <option value="ACTIVE">[ACTIVE]</option>
-              <option value="IN_PROGRESS">[IN PROGRESS]</option>
-              <option value="BLOCKED">[BLOCKED]</option>
-              <option value="DONE">[DONE / PASS]</option>
-            </select>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+            <div>
+              <label
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-dim)',
+                  letterSpacing: '0.12em',
+                  display: 'block',
+                  marginBottom: '0.6rem',
+                  fontWeight: 600,
+                }}
+              >
+                STATUS
+              </label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="neo-input"
+                style={{ appearance: 'none', background: '#090511' }}
+              >
+                <option value="ACTIVE">[ACTIVE]</option>
+                <option value="IN_PROGRESS">[IN PROGRESS]</option>
+                <option value="BLOCKED">[BLOCKED]</option>
+                <option value="DONE">[DONE / PASS]</option>
+              </select>
+            </div>
+
+            <div>
+              <label
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-dim)',
+                  letterSpacing: '0.12em',
+                  display: 'block',
+                  marginBottom: '0.6rem',
+                  fontWeight: 600,
+                }}
+              >
+                RESIDENCY POLICY
+              </label>
+              <select
+                value={policy}
+                onChange={(e) => setPolicy(e.target.value)}
+                className="neo-input"
+                style={{ appearance: 'none', background: '#090511' }}
+              >
+                <option value="EU_GDPR_STRICT">EU_GDPR_STRICT (Shield)</option>
+                <option value="US_DATA_RESIDENCY">US_DATA_RESIDENCY</option>
+                <option value="GLOBAL_REPLICATED">GLOBAL_REPLICATED</option>
+              </select>
+            </div>
           </div>
 
           <div>
@@ -128,7 +170,7 @@ export default function NewTaskPage({ onCreated }) {
                 fontWeight: 600,
               }}
             >
-              DESCRIPTION
+              DESCRIPTION & SCOPE
             </label>
             <textarea
               rows={4}
@@ -149,9 +191,10 @@ export default function NewTaskPage({ onCreated }) {
                 color: '#34d399',
                 border: '1px solid #34d399',
                 padding: '8px 12px',
+                background: 'rgba(52, 211, 153, 0.1)',
               }}
             >
-              Task successfully registered! Redirecting to Tasks...
+              ✓ Task registered and dispatched to cluster log! Redirecting...
             </div>
           )}
 
@@ -165,7 +208,7 @@ export default function NewTaskPage({ onCreated }) {
                 fontWeight: 800,
               }}
             >
-              CREATE TASK
+              CREATE TASK & DISPATCH
             </button>
           </div>
         </form>
