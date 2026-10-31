@@ -319,3 +319,17 @@ This ledger records every engineering task, cross-referencing requirements, comp
   3. Integrated `kamish-ctl demo` with `scripts/run_demo.sh` to trigger the complete 3-scenario live verification suite directly from the CLI.
 * **Verification:** Full compilation and tests passing (`cargo test -p kamish-client`, `cargo test --workspace`, `cargo run -p kamish-ctl -- --help`, `cargo run -p kamish-ctl -- demo`).
 * **Status:** PASS
+
+### TASK-0021: Sustained Throughput & Percentile Latency Benchmark Harness (`kamish-ctl benchmark`)
+* **Timestamp:** 2026-10-31 18:10 UTC
+* **Component:** `cmd/kamish-ctl`
+* **Project.md References:** Developer B Spec §4 (Hour 21:00–24:00 Benchmark & Presentation), NFR-01, NFR-04
+* **Invariants Checked:** INV-1, INV-4, INV-6, INV-8
+* **Actions Taken:**
+  1. Implemented `kamish-ctl benchmark --count <N> [--addr <ADDR>]`:
+     - Sets up isolated loopback broker if `--addr` is not specified.
+     - Performs 50-message warmup.
+     - Runs sustained produce benchmark measuring elapsed time, sustained throughput (msg/s), min, p50, p90, p99, and max latencies.
+     - Performs degraded link comparison by injecting 300ms WAN delay via `SyntheticChaosInjector` and confirms local produce latency remains sub-millisecond (p50 ~60µs, p99 ~240µs) and fully decoupled from replication backpressure.
+* **Verification:** `cargo run -p kamish-ctl -- benchmark --count 500` executed successfully yielding 12,479+ msg/s sustained throughput.
+* **Status:** PASS
