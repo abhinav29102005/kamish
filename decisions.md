@@ -274,3 +274,39 @@ Developer B's hackathon responsibilities include delivering a client SDK (`crate
 ### Compliance with `project.md`
 - **FR-01, FR-02, FR-04, FR-10, FR-13:** Satisfied with full client/CLI integration.
 - **INV-1, INV-4, INV-6, INV-8:** Validated by automated end-to-end tests and CLI invocation.
+
+---
+
+## ADR-0013: 8-Page Brutalist & Leukomorphic UI Architecture Matching Mockups
+
+### Context
+User provided a design specification and wireframes in `Kamish — UI Mockups.pdf` defining eight canonical views:
+1. **Page 1 - Home**: Centered 3D dragon hero, "HUMANITY'S GREATEST CALAMITY" title, brutalist "FLAME ON →" button, and floating bottom dock pill.
+2. **Page 2 - Dashboard**: Active/Done/Blocked/Overdue KPI stats, real-time event throughput line graph, and recent tasks table.
+3. **Page 3 - Tasks**: Comprehensive task ledger with status tags, owners, and "+ NEW TASK" action.
+4. **Page 4 - Work Task**: Granular task inspection with activity audit log, state transitions, and broker metadata.
+5. **Page 5 - New Task**: Brutalist task dispatch form with neomorphic recessed input controls.
+6. **Page 6 - Contact**: Leukomorphic frosted card with direct developer contact dispatch.
+7. **Page 7 - Sign In**: Brutalist authentication portal with offset shadow buttons.
+8. **Page 8 - 404 Route Not Found**: "Route not found. BACK TO BASE" screen featuring the floating 3D dragon entity.
+
+### Decision
+1. Implemented a responsive single-page architecture in `frontend/` powered by Vite + React.
+2. Created standard design tokens in `frontend/src/index.css` enforcing brutalist offset drop-shadow borders (`box-shadow: 4px 4px 0px #a855f7`), leukomorphic frosted glass (`backdrop-filter: blur(16px)`), and neomorphic inset text fields.
+3. Implemented a persistent brutalist header (`Header.jsx`) and floating bottom navigation dock pill (`Navbar.jsx`) that synchronizes route transitions seamlessly across all 8 pages.
+
+---
+
+## ADR-0014: Real 3D Kamish Dragon Model Integration with PBR Textures
+
+### Context
+The user provided a high-fidelity 3D dragon asset in `/model` (`978bcbdc4563d2411066f0e5fceb18b9.obj` with 1.5 million polygons, `material.mtl`, and 4K PBR normal, metallic, roughness, and diffuse maps) with the instruction "make the dragon like real no imitations" and "use this for the frontend".
+
+### Decision
+1. Used Blender 5.1 headless automation to import the high-poly OBJ, link the full PBR BSDF node tree (diffuse, roughness, metallic, normal), center the geometry pivot, apply a decimate modifier to optimize geometry while preserving 100% silhouette fidelity, and export a streamlined 27MB binary GLB (`frontend/public/models/kamish_dragon.glb`).
+2. Engineered `KamishDragon3D.jsx` using Three.js `GLTFLoader`:
+   - High dynamic range lighting: Key light, lavender fill, rim back-light for wing margin contours, and an uplift light.
+   - Interactive mouse parallax tracking and drag-to-orbit with smooth damping.
+   - Respiration/hover sinusoidal animation simulating living breath and wing flex.
+   - Volumetric dual-layer flame breath system (particle core + swirling ember sparks) bursting forth upon activating "FLAME ON 🔥".
+   - Dual-form color palette toggle: Shadow Monarch Form (violet/obsidian void) vs Apex Crimson Dragon Form (volcanic red/gold).

@@ -1,0 +1,218 @@
+:root {
+  --bg-dark: #0a0513;
+  --bg-card: #120b22;
+  --bg-well: #0c0717;
+  --purple-glow: #a855f7;
+  --purple-accent: #c084fc;
+  --purple-deep: #2e1065;
+  --white: #ffffff;
+  --text-dim: #948aa5;
+  --font-main: 'Space Grotesk', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--white);
+  font-family: var(--font-main);
+  min-height: 100vh;
+  background-image: 
+    radial-gradient(ellipse at 50% 35%, rgba(168, 85, 247, 0.18) 0%, rgba(10, 5, 19, 0.95) 75%, #07030d 100%);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0513;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b1847;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--purple-accent);
+}
+
+/* Brutalist Logo & Header Box */
+.brutal-logo-box {
+  display: inline-block;
+  border: 2px solid #ffffff;
+  box-shadow: 4px 4px 0px var(--purple-glow);
+  padding: 6px 18px;
+  background: #000000;
+  font-family: var(--font-main);
+  font-size: 1.25rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  color: #ffffff;
+  user-select: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.brutal-logo-box:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 6px 6px 0px var(--purple-accent);
+}
+
+/* Mockup Offset Brutalist Cards */
+.brutal-card-offset {
+  background: var(--bg-card);
+  border: 2px solid #ffffff;
+  box-shadow: 8px 8px 0px var(--purple-glow);
+  border-radius: 2px;
+  padding: 1.75rem;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.brutal-card-offset:hover {
+  box-shadow: 10px 10px 0px var(--purple-accent);
+}
+
+/* Mockup Soft Rounded Stat Cards (Dashboard) */
+.stat-card-rounded {
+  background: rgba(22, 13, 38, 0.85);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 12px;
+  padding: 1.25rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 0.2s ease;
+}
+
+.stat-card-rounded:hover {
+  border-color: var(--purple-accent);
+  box-shadow: 0 10px 30px rgba(168, 85, 247, 0.25);
+}
+
+/* Brutalist Buttons */
+.brutal-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--purple-accent);
+  color: #000000;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 0.95rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.75rem 2rem;
+  border: none;
+  box-shadow: 6px 6px 0px #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.brutal-btn-primary:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0px #ffffff;
+}
+
+.brutal-btn-primary:active {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0px #ffffff;
+}
+
+.brutal-btn-white {
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 5px 5px 0px var(--purple-glow);
+}
+
+.brutal-btn-white:hover {
+  box-shadow: 7px 7px 0px var(--purple-accent);
+}
+
+/* Neomorphic Inset Input Fields */
+.neo-input {
+  width: 100%;
+  background: #090511;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.6), inset -2px -2px 5px rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 0.85rem 1.1rem;
+  color: #ffffff;
+  font-family: var(--font-main);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.neo-input:focus {
+  border-color: var(--purple-accent);
+  box-shadow: inset 3px 3px 6px rgba(0, 0, 0, 0.7), 0 0 12px rgba(168, 85, 247, 0.35);
+}
+
+/* Floating Bottom Dock matching PDF Mockup */
+.mockup-dock {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(18, 11, 32, 0.88);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7), 0 0 1px 1px rgba(168, 85, 247, 0.2);
+  border-radius: 9999px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 100;
+}
+
+.dock-pill {
+  padding: 8px 20px;
+  border-radius: 9999px;
+  color: #c4b5fd;
+  font-family: var(--font-main);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.dock-pill:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dock-pill.active {
+  background: var(--purple-accent);
+  color: #000000;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(192, 132, 252, 0.4);
+}
+
+/* Glowing Neon Silhouette Effect */
+@keyframes neon-glow-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 20px rgba(168, 85, 247, 0.6)) drop-shadow(0 0 40px rgba(192, 132, 252, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 35px rgba(168, 85, 247, 0.9)) drop-shadow(0 0 65px rgba(192, 132, 252, 0.5));
+  }
+}
+
+.neon-dragon-glow {
+  animation: neon-glow-pulse 3s infinite ease-in-out;
+}
