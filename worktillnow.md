@@ -2486,10 +2486,11 @@ the existing chunk warning. Documentation changes add no test-count increment.
 - `src/lib.rs`: original 11 checks.
 - `tests/remaining_gaps.rs`: six broader contracts.
 
-Two extended tests still fail:
+As of Phase 1, Item 1.3, `independent_regions_must_not_both_accept_unregistered_epoch_one_writes` is passed and honestly green (5 passed out of 6).
 
-1. `independent_regions_must_not_both_accept_unregistered_epoch_one_writes`.
-2. `audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable`.
+One extended test still fails:
+
+1. `audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable` (addressed in Item 1.4).
 
 The full independent harness must remain nonzero until those contracts are
 implemented or explicitly redesigned with correct acceptance evidence. Tests
@@ -2619,7 +2620,7 @@ Do not claim novelty for:
 | FR-04 | One signed decision at every movement point | Partial integration; future backup/telemetry/admin/gateway paths and unified lifecycle still needed |
 | FR-05 | Offset-preserving mirror replication | Single-record offset/payload cases tested; full original-envelope/source-generation/prefix proof missing |
 | FR-06 | Bounded durable outbox and cursor resume | In-memory bounded accounting plus source-log replay; durable cursor/intent/disk-budget contract incomplete |
-| FR-07 | Owner/epoch fencing | Local registered-owner checks tested; global consensus/unknown-owner failure remains |
+| FR-07 | Owner/epoch fencing | Implemented: MetadataAuthority::compare_and_swap_epoch, broker claim_partition_ownership, and fail-closed unregistered stream rejection in MultiRegion mode |
 | FR-08 | Policy-eligible promotion | Local helper gate; replica proof and global promotion protocol missing |
 | FR-09 | Per-class degradation | Enum/concepts exist; complete distinct per-class budgeting and blocking/degradation behavior not implemented |
 | FR-10 | Canary/checker evidence | Small supplied-data checkers exist; complete independent artifact/history scanner missing |
@@ -2632,7 +2633,7 @@ Do not claim novelty for:
 
 | ID | Requirement | Current status |
 | --- | --- | --- |
-| NFR-01 | Global control plane off write path, pinned continuity | Real control plane/ownership modes absent; local cache/store behavior is not this outage proof |
+| NFR-01 | Global control plane off write path, pinned continuity | Implemented: produce path validates against local monotonic lease clock without consulting consensus quorum per write; failover bound documented in ADR-0018 |
 | NFR-02 | Invalid/stale/replayed policy fails closed | Local verification covered; durable restart floor and deployed policy service missing |
 | NFR-03 | Bounded memory/disk and class pressure | Queue/task caps only; full log/audit memory and disk/lifecycle/fairness incomplete |
 | NFR-04 | Smoothed/windowed stable routing | Policy filtering, current metrics and dwell/hysteresis exist; smoothing/window/breaker proof incomplete |
@@ -2651,7 +2652,7 @@ Use `project.md` as the naming authority:
 | INV-4 | Fetch does not exceed committed HWM | Local HWM checks/tests |
 | INV-5 | Destination is exact source prefix | Offset/payload tests; complete-envelope and source-history limitations remain |
 | INV-6 | Applied retry is no-op | Tested local/current single-record scenarios; regional/session history scope incomplete |
-| INV-7 | No two regions commit same partition/epoch | **Failing extended contract** in `independent_regions_must_not_both_accept_unregistered_epoch_one_writes` probe |
+| INV-7 | No two regions commit same partition/epoch | Implemented: consensus CAS arbitration grants epoch to exactly one claimant while fencing the other; probe `independent_regions_must_not_both_accept_unregistered_epoch_one_writes` passes |
 | INV-8 | No unauthorized payload placement | Selected class/mode checks and synthetic scans; no universal/legal/location guarantee |
 | INV-9 | Invalid/unsigned/rolled-back policy never applied | Local signature/cache checks; durable policy-floor scope incomplete |
 
