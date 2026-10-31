@@ -9,14 +9,17 @@ import {
   Play,
   Sparkles,
   Flame,
+  Eye,
 } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: 'overview' | 'grafana' | 'audit' | 'chaos';
   setActiveTab: (tab: 'overview' | 'grafana' | 'audit' | 'chaos') => void;
+  showHud?: boolean;
+  setShowHud?: (show: boolean) => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
+export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, showHud = true, setShowHud }) => {
   const { nodes, runScenario, scenarioState, isShadowMonarchMode, setIsShadowMonarchMode } = useKamish();
   const [utcTime, setUtcTime] = useState<string>('');
 
@@ -190,6 +193,21 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
             <Play className="w-3 h-3 fill-current text-slate-400" />
             <span>Demo B</span>
           </button>
+
+          {setShowHud && (
+            <button
+              onClick={() => setShowHud(!showHud)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-mono transition-colors ${
+                !showHud
+                  ? 'bg-purple-600 text-white font-bold'
+                  : 'bg-black/40 text-slate-300 hover:text-white border border-white/10'
+              }`}
+              title={showHud ? "Hide HUD overlays to inspect 3D WebGL world" : "Show HUD observability panels"}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{showHud ? '3D View' : 'Show HUD'}</span>
+            </button>
+          )}
 
           {/* Minimalist ARISE button */}
           <button

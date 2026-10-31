@@ -23,7 +23,19 @@ function createElevatedCurve(v1: THREE.Vector3, v2: THREE.Vector3, elevation: nu
   return new THREE.QuadraticBezierCurve3(v1, controlPoint, v2);
 }
 
-export const ThreeTopologyGlobe: React.FC = () => {
+export interface ThreeTopologyGlobeProps {
+  isGlobalBackground?: boolean;
+  activeTab?: 'overview' | 'grafana' | 'audit' | 'chaos';
+  showHud?: boolean;
+  setShowHud?: (show: boolean) => void;
+}
+
+export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
+  isGlobalBackground = true,
+  activeTab = 'overview',
+  showHud = true,
+  setShowHud,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { nodes, wanDelayMs, isPartitioned, adaptiveRoutingActive, isShadowMonarchMode } = useKamish();
   const [selectedRegion, setSelectedRegion] = useState<RegionId>('EU_WEST');
@@ -93,8 +105,8 @@ export const ThreeTopologyGlobe: React.FC = () => {
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
-    const width = container.clientWidth;
-    const height = container.clientHeight || 450;
+    const width = isGlobalBackground ? window.innerWidth : (container.clientWidth || 450);
+    const height = isGlobalBackground ? window.innerHeight : (container.clientHeight || 450);
 
     // 1. Scene setup
     const scene = new THREE.Scene();
@@ -102,7 +114,7 @@ export const ThreeTopologyGlobe: React.FC = () => {
 
     // 2. Camera setup
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-    camera.position.set(0, 8, 24);
+    camera.position.set(0, isGlobalBackground ? 4 : 8, isGlobalBackground ? 26 : 24);
     cameraRef.current = camera;
 
     // 3. Renderer setup
@@ -428,8 +440,8 @@ export const ThreeTopologyGlobe: React.FC = () => {
     // Resize handler
     const handleResize = () => {
       if (!containerRef.current || !rendererRef.current || !cameraRef.current) return;
-      const newWidth = containerRef.current.clientWidth;
-      const newHeight = containerRef.current.clientHeight || 450;
+      const newWidth = isGlobalBackground ? window.innerWidth : (containerRef.current.clientWidth || 450);
+      const newHeight = isGlobalBackground ? window.innerHeight : (containerRef.current.clientHeight || 450);
       cameraRef.current.aspect = newWidth / newHeight;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(newWidth, newHeight);
@@ -536,224 +548,253 @@ export const ThreeTopologyGlobe: React.FC = () => {
   const currentNode = nodes[selectedRegion];
 
   return (
-    <div className="topology-card relative overflow-hidden flex flex-col h-full">
-      {/* Minimalist 3D Header Bar */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-white/5 bg-[#080512]/90 backdrop-blur-md z-10 text-xs font-mono">
-        <div className="flex items-center space-x-2">
-          <Globe className="w-4 h-4 text-purple-400" />
-          <span className="font-semibold tracking-wider text-slate-200 uppercase">
-            3D Topology
-          </span>
-          <span className="text-[10px] text-slate-500 font-normal">WebGL</span>
-        </div>
+    <div className={isGlobalBackground ? "fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden select-none" : "topology-card relative overflow-hidden flex flex-col h-full"}>
+      {/* 3D WebGL Canvas Container - Catches pointer events for free rotation & zoom */}
+      <div
+        ref={containerRef}
+        className={isGlobalBackground ? "w-full h-full cursor-grab active:cursor-grabbing pointer-events-auto" : "relative flex-1 min-h-[380px] w-full cursor-grab active:cursor-grabbing bg-cyber-deep"}
+      />
 
-        <div className="flex items-center space-x-2">
-          {/* Auto rotate toggle */}
-          <button
-            onClick={() => setAutoRotate(!autoRotate)}
-            className={`text-[11px] flex items-center gap-1 px-2.5 py-1 rounded transition-colors ${
-              autoRotate ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40' : 'text-slate-400 bg-black/40 border border-white/5'
-            }`}
-            title="Toggle Earth Auto-Rotation"
-          >
-            <RotateCw className={`w-3 h-3 ${autoRotate ? 'animate-spin' : ''}`} />
-            <span>{autoRotate ? 'Orbiting' : 'Paused'}</span>
-          </button>
+      {/* Floating HUD controls active on 'overview' tab */}
+      {activeTab === 'overview' && (
+        <>
+          {showHud ? (
+            <>
+              {/* Minimalist 3D Top Floating HUD Bar */}
+              <div className="absolute top-16 left-4 right-4 flex flex-wrap items-center justify-between gap-2 px-3.5 py-1.5 rounded-xl border border-white/5 bg-[#080512]/80 backdrop-blur-md pointer-events-auto text-xs font-mono shadow-xl z-20">
+                <div className="flex items-center space-x-2">
+                  <Globe className="w-3.5 h-3.5 text-purple-400" />
+                  <span className="font-semibold tracking-wider text-slate-200 uppercase text-xs">
+                    Global 3D WAN Mesh
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-normal">WebGL Topology</span>
+                </div>
 
-          {/* Region Selector Pills */}
-          <div className="flex items-center bg-black/50 p-0.5 rounded-lg border border-white/5 space-x-1">
-            {(['EU_WEST', 'US_EAST', 'AP_SOUTH'] as RegionId[]).map((r) => {
-              const isSel = selectedRegion === r;
-              const node = nodes[r];
-              return (
-                <button
-                  key={r}
-                  onClick={() => setSelectedRegion(r)}
-                  className={`text-[11px] font-mono px-2 py-0.5 rounded transition-all flex items-center gap-1.5 ${
-                    isSel
-                      ? 'bg-white/10 text-white font-bold'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      node.status === 'HEALTHY'
-                        ? 'bg-emerald-400'
-                        : node.status === 'DEGRADED'
-                        ? 'bg-amber-400'
-                        : 'bg-rose-500'
+                <div className="flex items-center space-x-2">
+                  {/* Auto rotate toggle */}
+                  <button
+                    onClick={() => setAutoRotate(!autoRotate)}
+                    className={`text-[11px] flex items-center gap-1 px-2.5 py-0.5 rounded transition-colors ${
+                      autoRotate
+                        ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40'
+                        : 'text-slate-400 bg-black/40 border border-white/5'
                     }`}
-                  />
-                  <span>{r}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
+                    title="Toggle Earth Auto-Rotation"
+                  >
+                    <RotateCw className={`w-3 h-3 ${autoRotate ? 'animate-spin' : ''}`} />
+                    <span>{autoRotate ? 'Orbiting' : 'Paused'}</span>
+                  </button>
 
-      {/* 3D WebGL Canvas Container */}
-      <div className="relative flex-1 min-h-[380px] w-full cursor-grab active:cursor-grabbing bg-cyber-deep">
-        <div ref={containerRef} className="w-full h-full" />
+                  {/* Region Selector Pills */}
+                  <div className="flex items-center bg-black/50 p-0.5 rounded-lg border border-white/5 space-x-1">
+                    {(['EU_WEST', 'US_EAST', 'AP_SOUTH'] as RegionId[]).map((r) => {
+                      const isSel = selectedRegion === r;
+                      const node = nodes[r];
+                      return (
+                        <button
+                          key={r}
+                          onClick={() => setSelectedRegion(r)}
+                          className={`text-[11px] font-mono px-2 py-0.5 rounded transition-all flex items-center gap-1.5 ${
+                            isSel
+                              ? 'bg-white/10 text-white font-bold'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              node.status === 'HEALTHY'
+                                ? 'bg-emerald-400'
+                                : node.status === 'DEGRADED'
+                                ? 'bg-amber-400'
+                                : 'bg-rose-500'
+                            }`}
+                          />
+                          <span>{r}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-        {/* Floating Quick Camera & Orbit Controls HUD */}
-        <div className="absolute top-4 right-4 flex flex-col items-center gap-1.5 bg-cyber-panel/90 backdrop-blur-md p-1.5 rounded-lg border border-cyber-border shadow-xl pointer-events-auto font-mono text-xs z-10">
-          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Orbit</div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => rotateGlobe(-0.35)}
-              className="w-7 h-7 flex items-center justify-center rounded bg-cyber-dark text-slate-200 hover:text-white hover:bg-purple-600 transition-colors border border-white/10"
-              title="Rotate Left"
-            >
-              ◀
-            </button>
-            <button
-              onClick={() => rotateGlobe(0.35)}
-              className="w-7 h-7 flex items-center justify-center rounded bg-cyber-dark text-slate-200 hover:text-white hover:bg-purple-600 transition-colors border border-white/10"
-              title="Rotate Right"
-            >
-              ▶
-            </button>
-          </div>
-          <div className="w-full h-px bg-cyber-border my-0.5" />
-          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Zoom</div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => zoomCamera(-3)}
-              className="w-7 h-7 flex items-center justify-center rounded bg-cyber-dark text-slate-200 hover:text-white hover:bg-emerald-600 transition-colors border border-white/10 font-bold text-sm"
-              title="Zoom In"
-            >
-              +
-            </button>
-            <button
-              onClick={() => zoomCamera(3)}
-              className="w-7 h-7 flex items-center justify-center rounded bg-cyber-dark text-slate-200 hover:text-white hover:bg-emerald-600 transition-colors border border-white/10 font-bold text-sm"
-              title="Zoom Out"
-            >
-              -
-            </button>
-          </div>
-          <div className="w-full h-px bg-cyber-border my-0.5" />
-          <button
-            onClick={resetView}
-            className="w-full py-1 text-[9px] uppercase font-bold rounded bg-cyber-dark text-slate-300 hover:text-white hover:bg-white/10 transition-colors border border-white/10 text-center"
-            title="Reset to Default Perspective"
-          >
-            Reset
-          </button>
-        </div>
+                  {setShowHud && (
+                    <button
+                      onClick={() => setShowHud(false)}
+                      className="text-[11px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-black/40 border border-white/5 transition-colors"
+                      title="Hide HUD panels for clean 3D exploration"
+                    >
+                      Hide HUD
+                    </button>
+                  )}
+                </div>
+              </div>
 
-        {/* Floating Region Inspector Overlay - Minimalist compact card */}
-        <div className="absolute top-3 left-3 p-2.5 rounded-lg bg-[#07050d]/85 backdrop-blur-md border border-white/10 shadow-xl pointer-events-auto max-w-[230px] font-mono text-xs">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-white text-xs">{currentNode.id}</span>
-              <span className="text-[10px] text-slate-400">({currentNode.city})</span>
-            </div>
-            <span
-              className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
-                currentNode.status === 'HEALTHY'
-                  ? 'bg-emerald-500/15 text-emerald-400'
-                  : currentNode.status === 'DEGRADED'
-                  ? 'bg-amber-500/15 text-amber-400'
-                  : 'bg-rose-500/15 text-rose-400'
-              }`}
-            >
-              {currentNode.status}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-            <div className="bg-black/50 p-1.5 rounded border border-white/5">
-              <span className="text-slate-400 block text-[9px]">ROLE</span>
-              <span className="text-purple-300 font-semibold">{currentNode.role} (Ep. {currentNode.activeEpoch})</span>
-            </div>
-            <div className="bg-black/50 p-1.5 rounded border border-white/5">
-              <span className="text-slate-400 block text-[9px]">LOCAL COMMITTED</span>
-              <span className="text-emerald-400 font-semibold">{currentNode.localCommittedOffset}</span>
-            </div>
-            <div className="bg-black/50 p-1.5 rounded border border-white/5">
-              <span className="text-slate-400 block text-[9px]">WATERMARK</span>
-              <span className="text-indigo-300 font-semibold">{currentNode.durableWatermark}</span>
-            </div>
-            <div className="bg-black/50 p-1.5 rounded border border-white/5">
-              <span className="text-slate-400 block text-[9px]">OUTBOX QUEUE</span>
-              <span className={currentNode.outboxQueueSize > 0 ? 'text-amber-400 font-semibold' : 'text-slate-400'}>
-                {currentNode.outboxQueueSize} msgs
-              </span>
-            </div>
-
-            {/* Live Animated Epoch Lease Countdown Bar */}
-            <div className="bg-black/50 p-1.5 rounded border border-white/5 col-span-2">
-              <div className="flex items-center justify-between text-[9px] text-slate-400 mb-1">
-                <span>EPOCH {currentNode.activeEpoch} CAS LEASE</span>
-                <span
-                  className={`font-semibold tabular-nums ${
-                    currentNode.leaseExpiresInSec <= 1
-                      ? 'text-rose-400'
-                      : currentNode.leaseExpiresInSec <= 3
-                      ? 'text-amber-400'
-                      : 'text-emerald-400'
-                  }`}
+              {/* Floating Quick Camera & Orbit Controls HUD (Bottom Right) */}
+              <div className="absolute bottom-6 right-4 flex flex-col items-center gap-1.5 bg-[#080512]/85 backdrop-blur-md p-1.5 rounded-lg border border-white/10 shadow-2xl pointer-events-auto font-mono text-xs z-20">
+                <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Orbit</div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => rotateGlobe(-0.35)}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-black/50 text-slate-200 hover:text-white hover:bg-purple-600 transition-colors border border-white/10"
+                    title="Rotate Left"
+                  >
+                    ◀
+                  </button>
+                  <button
+                    onClick={() => rotateGlobe(0.35)}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-black/50 text-slate-200 hover:text-white hover:bg-purple-600 transition-colors border border-white/10"
+                    title="Rotate Right"
+                  >
+                    ▶
+                  </button>
+                </div>
+                <div className="w-full h-px bg-white/5 my-0.5" />
+                <div className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mb-0.5">Zoom</div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => zoomCamera(-3)}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-black/50 text-slate-200 hover:text-white hover:bg-emerald-600 transition-colors border border-white/10 font-bold text-sm"
+                    title="Zoom In"
+                  >
+                    +
+                  </button>
+                  <button
+                    onClick={() => zoomCamera(3)}
+                    className="w-7 h-7 flex items-center justify-center rounded bg-black/50 text-slate-200 hover:text-white hover:bg-emerald-600 transition-colors border border-white/10 font-bold text-sm"
+                    title="Zoom Out"
+                  >
+                    -
+                  </button>
+                </div>
+                <div className="w-full h-px bg-white/5 my-0.5" />
+                <button
+                  onClick={resetView}
+                  className="w-full py-1 text-[9px] uppercase font-bold rounded bg-black/50 text-slate-300 hover:text-white hover:bg-white/10 transition-colors border border-white/10 text-center"
+                  title="Reset Perspective"
                 >
-                  {currentNode.leaseExpiresInSec.toFixed(1)}s / 10s
+                  Reset
+                </button>
+              </div>
+
+              {/* Floating Region Inspector Overlay (Top Left) */}
+              <div className="absolute top-28 left-4 p-2.5 rounded-xl bg-[#080512]/85 backdrop-blur-md border border-white/10 shadow-2xl pointer-events-auto max-w-[240px] font-mono text-xs z-20">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-white text-xs">{currentNode.id}</span>
+                    <span className="text-[10px] text-slate-400">({currentNode.city})</span>
+                  </div>
+                  <span
+                    className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${
+                      currentNode.status === 'HEALTHY'
+                        ? 'bg-emerald-500/15 text-emerald-400'
+                        : currentNode.status === 'DEGRADED'
+                        ? 'bg-amber-500/15 text-amber-400'
+                        : 'bg-rose-500/15 text-rose-400'
+                    }`}
+                  >
+                    {currentNode.status}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                  <div className="bg-black/50 p-1.5 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[9px]">ROLE</span>
+                    <span className="text-purple-300 font-semibold">{currentNode.role} (Ep. {currentNode.activeEpoch})</span>
+                  </div>
+                  <div className="bg-black/50 p-1.5 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[9px]">COMMITTED</span>
+                    <span className="text-emerald-400 font-semibold">{currentNode.localCommittedOffset}</span>
+                  </div>
+                  <div className="bg-black/50 p-1.5 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[9px]">WATERMARK</span>
+                    <span className="text-indigo-300 font-semibold">{currentNode.durableWatermark}</span>
+                  </div>
+                  <div className="bg-black/50 p-1.5 rounded border border-white/5">
+                    <span className="text-slate-400 block text-[9px]">OUTBOX</span>
+                    <span className={currentNode.outboxQueueSize > 0 ? 'text-amber-400 font-semibold' : 'text-slate-400'}>
+                      {currentNode.outboxQueueSize} msgs
+                    </span>
+                  </div>
+
+                  {/* Animated Epoch Lease Countdown Bar */}
+                  <div className="bg-black/50 p-1.5 rounded border border-white/5 col-span-2">
+                    <div className="flex items-center justify-between text-[9px] text-slate-400 mb-1">
+                      <span>EPOCH {currentNode.activeEpoch} CAS LEASE</span>
+                      <span
+                        className={`font-semibold tabular-nums ${
+                          currentNode.leaseExpiresInSec <= 1
+                            ? 'text-rose-400'
+                            : currentNode.leaseExpiresInSec <= 3
+                            ? 'text-amber-400'
+                            : 'text-emerald-400'
+                        }`}
+                      >
+                        {currentNode.leaseExpiresInSec.toFixed(1)}s / 10s
+                      </span>
+                    </div>
+                    <div className="w-full bg-black/80 h-1 rounded-full overflow-hidden">
+                      <div
+                        className="h-full transition-all duration-100 ease-linear rounded-full"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, (currentNode.leaseExpiresInSec / 10) * 100))}%`,
+                          backgroundColor:
+                            currentNode.leaseExpiresInSec <= 1
+                              ? '#d90429'
+                              : currentNode.leaseExpiresInSec <= 3
+                              ? '#ffb703'
+                              : '#00f5d4',
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {currentNode.strictLocalShieldActive && (
+                  <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center gap-1.5 text-[10px] text-emerald-400">
+                    <Shield className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span>StrictLocal Sovereignty Shield</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic Status Legend (Bottom Left) */}
+              <div className="absolute bottom-6 left-4 flex items-center gap-3 bg-[#080511]/90 backdrop-blur-md px-3 py-1 rounded-full border border-white/10 pointer-events-auto text-[10px] font-mono text-slate-400 shadow-2xl z-20">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                  <span>Direct WAN</span>
                 </span>
-              </div>
-              <div className="w-full bg-black/80 h-1 rounded-full overflow-hidden">
-                <div
-                  className="h-full transition-all duration-100 ease-linear rounded-full"
-                  style={{
-                    width: `${Math.min(100, Math.max(0, (currentNode.leaseExpiresInSec / 10) * 100))}%`,
-                    backgroundColor:
-                      currentNode.leaseExpiresInSec <= 1
-                        ? '#d90429'
-                        : currentNode.leaseExpiresInSec <= 3
-                        ? '#ffb703'
-                        : '#00f5d4',
-                  }}
-                />
-              </div>
-            </div>
-          </div>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  <span>Degraded</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Relay (AP_SOUTH)</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                  <span>Severed</span>
+                </span>
 
-          {/* EU_WEST Sovereignty Shield indicator */}
-          {currentNode.strictLocalShieldActive && (
-            <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center gap-1.5 text-[10px] text-emerald-400">
-              <Shield className="w-3 h-3 text-emerald-400 shrink-0" />
-              <span>StrictLocal Sovereignty Shield</span>
+                {adaptiveRoutingActive && (isPartitioned || wanDelayMs > 150) && (
+                  <span className="text-emerald-400 flex items-center gap-1 font-semibold pl-2 border-l border-white/10">
+                    <Zap className="w-3 h-3 text-emerald-400" />
+                    <span>Adaptive Routing Active</span>
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="absolute bottom-6 right-4 pointer-events-auto z-20">
+              <button
+                onClick={() => setShowHud && setShowHud(true)}
+                className="px-3.5 py-1.5 rounded-full bg-purple-600/90 hover:bg-purple-500 text-white font-mono text-xs font-semibold shadow-2xl transition-colors flex items-center gap-1.5 border border-purple-400/40"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Show HUD</span>
+              </button>
             </div>
           )}
-        </div>
-
-        {/* Dynamic Topology Status Legend - Minimalist Pill */}
-        <div className="absolute bottom-3 left-3 right-3 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono pointer-events-none">
-          <div className="flex items-center gap-3 bg-[#080511]/90 backdrop-blur-md px-3 py-1 rounded-full border border-white/10 pointer-events-auto text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-              <span>Direct WAN</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              <span>Degraded</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>Relay (AP_SOUTH)</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-              <span>Severed</span>
-            </span>
-          </div>
-
-          {adaptiveRoutingActive && (isPartitioned || wanDelayMs > 150) && (
-            <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 text-[10px] pointer-events-auto">
-              <Zap className="w-3 h-3 text-emerald-400" />
-              <span>Adaptive Route: EU → AP → US</span>
-            </div>
-          )}
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 };

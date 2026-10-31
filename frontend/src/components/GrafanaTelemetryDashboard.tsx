@@ -209,14 +209,14 @@ export const GrafanaTelemetryDashboard: React.FC = () => {
   return (
     <div className="space-y-3.5">
       {/* Grafana Navigation / Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#080512] border border-white/5 px-3.5 py-2 rounded-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#080512]/85 backdrop-blur-md border border-white/10 px-3.5 py-2 rounded-xl shadow-xl">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 bg-purple-400 rounded-full" />
-          <span className="font-semibold text-slate-200 font-mono text-xs uppercase tracking-wider">
-            Telemetry & Invariant Monitor
+          <div className="w-2.5 h-2.5 bg-orange-500 rounded-sm" />
+          <span className="font-semibold text-slate-100 font-mono text-xs uppercase tracking-wider">
+            Grafana Analytics & Prometheus Observability Console
           </span>
-          <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-slate-400 font-mono border border-white/5">
-            topic: eu-patient-records/0
+          <span className="text-[10px] bg-white/5 px-2 py-0.5 rounded text-cyan-300 font-mono border border-white/5">
+            cluster: kamish-core
           </span>
         </div>
 
@@ -227,9 +227,9 @@ export const GrafanaTelemetryDashboard: React.FC = () => {
               <button
                 key={r}
                 onClick={() => setTimeRange(r)}
-                className={`px-2 py-0.5 rounded transition-colors ${
+                className={`px-2.5 py-0.5 rounded transition-colors ${
                   timeRange === r
-                    ? 'bg-white/10 text-white font-medium'
+                    ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40 font-medium'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
@@ -240,10 +240,71 @@ export const GrafanaTelemetryDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* PromQL Query Inspector Strip */}
+      <div className="bg-[#080512]/85 backdrop-blur-md border border-white/10 rounded-xl px-3.5 py-2 font-mono text-xs flex flex-wrap items-center justify-between gap-2 shadow-lg">
+        <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+          <span className="text-[10px] text-orange-400 bg-orange-500/10 border border-orange-500/20 px-1.5 py-0.5 rounded font-bold">
+            PromQL
+          </span>
+          <code className="text-slate-300 text-[11px] truncate">
+            kamish_replication_lag_records&#123;source="EU_WEST",target="US_EAST"&#125;
+          </code>
+        </div>
+        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Polling interval: 500ms</span>
+          <span className="text-slate-600">|</span>
+          <span className="text-purple-300 font-medium">Scrape Target: :9090/metrics</span>
+        </div>
+      </div>
+
+      {/* Instant Stat Metrics Row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-mono text-xs">
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/5 p-2.5 rounded-xl">
+          <span className="text-[9px] text-slate-400 uppercase tracking-wider block">Local Offset</span>
+          <span className="text-sm font-bold text-purple-300">{nodes.EU_WEST.localCommittedOffset}</span>
+          <span className="text-[9px] text-slate-500 block">EU_WEST committed</span>
+        </div>
+
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/5 p-2.5 rounded-xl">
+          <span className="text-[9px] text-slate-400 uppercase tracking-wider block">Watermark</span>
+          <span className="text-sm font-bold text-cyan-300">{nodes.US_EAST.durableWatermark}</span>
+          <span className="text-[9px] text-slate-500 block">US_EAST synced</span>
+        </div>
+
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/5 p-2.5 rounded-xl">
+          <span className="text-[9px] text-slate-400 uppercase tracking-wider block">Replication Lag</span>
+          <span className={`text-sm font-bold ${currentTelemetry.replicationLag > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+            {currentTelemetry.replicationLag} <span className="text-[10px] font-normal">msgs</span>
+          </span>
+          <span className="text-[9px] text-slate-500 block">delta(Committed - HWM)</span>
+        </div>
+
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/5 p-2.5 rounded-xl">
+          <span className="text-[9px] text-slate-400 uppercase tracking-wider block">Link WAN RTT</span>
+          <span className="text-sm font-bold text-rose-300">
+            {isPartitioned ? 'OFFLINE' : `${currentTelemetry.wanRttMs.toFixed(1)}ms`}
+          </span>
+          <span className="text-[9px] text-slate-500 block">{isPartitioned ? 'Severed link' : 'Transatlantic link'}</span>
+        </div>
+
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/5 p-2.5 rounded-xl">
+          <span className="text-[9px] text-slate-400 uppercase tracking-wider block">Fsync Latency</span>
+          <span className="text-sm font-bold text-cyan-400">{currentTelemetry.writeLatencyMs}ms</span>
+          <span className="text-[9px] text-slate-500 block">p99 in-region quorum</span>
+        </div>
+
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/5 p-2.5 rounded-xl">
+          <span className="text-[9px] text-slate-400 uppercase tracking-wider block">Invariants</span>
+          <span className="text-sm font-bold text-emerald-400">9 / 9</span>
+          <span className="text-[9px] text-slate-500 block">100% formal pass</span>
+        </div>
+      </div>
+
       {/* Main Dual Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
         {/* Panel 1: Offsets & Watermark Progression */}
-        <div className="bg-[#080512] border border-white/5 rounded-xl p-3.5 flex flex-col">
+        <div className="bg-[#080512]/85 backdrop-blur-md border border-white/10 rounded-xl p-3.5 flex flex-col shadow-xl">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
