@@ -11,6 +11,7 @@ members = [
     "crates/kamish-own",
     "crates/kamish-seal",
     "crates/kamish-checkers",
+    "crates/kamish-client",
     "cmd/kamish-broker",
     "cmd/kamish-agent",
     "cmd/kamish-ctl",

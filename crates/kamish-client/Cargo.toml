@@ -1,0 +1,26 @@
+[package]
+name = "kamish-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kamish-broker = { path = "../../cmd/kamish-broker" }
+kamish-meta = { path = "../kamish-meta" }
+kamish-audit = { path = "../kamish-audit" }
+kamish-log = { path = "../kamish-log" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+kamish-enforce = { path = "../kamish-enforce" }
+kamish-policy = { path = "../kamish-policy" }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+hex = { workspace = true }
+tempfile = "3.17"

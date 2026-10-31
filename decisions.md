@@ -246,3 +246,31 @@ To support parallel 2-developer velocity without merge conflicts or interface dr
 ### Compliance with `project.md`
 - **FR-01, FR-04, FR-08, FR-10, FR-13:** Complete policy validation, audit logging, and automated checkers.
 - **INV-1 through INV-9:** All invariants preserved and verified across normal, slow-link, and partition scenarios.
+
+---
+
+## ADR-0012: Client SDK, CLI Control Tool, and Demonstration Harness
+
+### Context
+Developer B's hackathon responsibilities include delivering a client SDK (`crates/kamish-client`), administrative control CLI (`cmd/kamish-ctl`), and automated demonstration orchestration (`scripts/run_demo.sh`):
+1. Client-side pre-flight policy validation ensuring unauthorized payloads are rejected before wire transmission.
+2. Idempotent producer sequence management with dense offset acknowledgments.
+3. Sequential consumer offset streaming strictly bounded by partition High-Water Mark (INV-4).
+4. Administrative watermark interrogation to verify replication progress across remote regions (INV-6).
+5. Comprehensive CLI interface (`kamish-ctl`) exposing audit verification, produce/consume operations, watermark queries, and one-click demo test runs.
+
+### Decision
+1. Implemented `crates/kamish-client`:
+   - `KamishProducer`: Asynchronously sends framed requests to the broker TCP listener with optional `PolicyEngine` pre-validation and session sequence numbers.
+   - `KamishConsumer`: Fetches sequential `RecordEnvelope` batches up to HWM.
+   - `KamishAdminClient`: Queries durable replication watermarks.
+2. Implemented `cmd/kamish-ctl` subcommands:
+   - `verify-audit`: Cryptographically verifies the unbroken SHA-256 hash chain of the audit log (FR-13).
+   - `produce`: Sends events to a broker instance with client-side residency rule checking.
+   - `consume`: Reads records sequentially from a topic partition.
+   - `watermark`: Interrogates the broker for durable watermarks.
+   - `demo`: Triggers the end-to-end multi-broker demo suite.
+
+### Compliance with `project.md`
+- **FR-01, FR-02, FR-04, FR-10, FR-13:** Satisfied with full client/CLI integration.
+- **INV-1, INV-4, INV-6, INV-8:** Validated by automated end-to-end tests and CLI invocation.

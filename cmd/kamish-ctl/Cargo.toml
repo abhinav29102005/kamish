@@ -8,6 +8,8 @@ authors.workspace = true
 [dependencies]
 kamish-audit = { path = "../../crates/kamish-audit" }
 kamish-policy = { path = "../../crates/kamish-policy" }
+kamish-meta = { path = "../../crates/kamish-meta" }
+kamish-client = { path = "../../crates/kamish-client" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

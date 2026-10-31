@@ -307,3 +307,15 @@ This ledger records every engineering task, cross-referencing requirements, comp
   4. Verified with `test_ingress_and_egress_interceptor_hooks`: verified that `StrictLocal` in `EU_WEST` is admitted locally but strictly blocked from entering the `US_EAST` outbox, whereas `RestrictedReplication(vec![UsEast])` is permitted into `US_EAST`.
 * **Verification:** Unit and integration tests (`cargo test -p kamish-broker`).
 * **Status:** PASS
+
+### TASK-0020: Client SDK, Administrative CLI (`kamish-ctl`), and Demo CLI Integration
+* **Timestamp:** 2026-10-31 18:05 UTC
+* **Component:** `crates/kamish-client`, `cmd/kamish-ctl`
+* **Project.md References:** §1.4.1 FR-01, FR-02, FR-04, FR-10, FR-13, Developer B Spec §2, §4, §5
+* **Invariants Checked:** INV-1, INV-4, INV-6, INV-8
+* **Actions Taken:**
+  1. Built `crates/kamish-client` offering `KamishProducer` (with client-side policy pre-flight and sequence numbering), `KamishConsumer` (sequential HWM reads), and `KamishAdminClient` (watermark queries) communicating over framed async TCP.
+  2. Implemented `cmd/kamish-ctl` with subcommands: `verify-audit`, `produce`, `consume`, `watermark`, and `demo`.
+  3. Integrated `kamish-ctl demo` with `scripts/run_demo.sh` to trigger the complete 3-scenario live verification suite directly from the CLI.
+* **Verification:** Full compilation and tests passing (`cargo test -p kamish-client`, `cargo test --workspace`, `cargo run -p kamish-ctl -- --help`, `cargo run -p kamish-ctl -- demo`).
+* **Status:** PASS
