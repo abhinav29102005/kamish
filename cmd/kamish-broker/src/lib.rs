@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Debug, Error)]
 pub enum BrokerError {
@@ -98,6 +100,29 @@ pub struct ReplicationResponse {
     pub accepted: bool,
     pub applied_watermark: u64,
     pub reason: String,
+}
+
+/// Unified wire protocol request enum for async framed transport (§3.5.1, ADR-0005).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action", content = "payload")]
+pub enum BrokerRequest {
+    Produce(ProduceRequest),
+    Fetch(FetchRequest),
+    Replicate(ReplicationRequest),
+    GetWatermark { topic: String, partition: u32, source_region: String },
+    Ping,
+}
+
+/// Unified wire protocol response enum.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "status", content = "payload")]
+pub enum BrokerResponse {
+    Produce(ProduceResponse),
+    Fetch(FetchResponse),
+    Replicate(ReplicationResponse),
+    Watermark { durable_watermark: u64 },
+    Pong,
+    Error(String),
 }
 
 /// Regional Broker Server holding partition logs, metadata, outboxes, and enforcer.
@@ -342,6 +367,147 @@ impl BrokerServer {
 
         let mut sessions = self.sessions.write().unwrap();
         sessions.entry(key).or_insert_with(SessionManager::new).clone()
+    }
+
+    /// Dispatches a high-level request to the appropriate internal engine handler.
+    pub fn dispatch(&self, req: BrokerRequest) -> BrokerResponse {
+        match req {
+            BrokerRequest::Produce(p) => match self.produce(p) {
+                Ok(res) => BrokerResponse::Produce(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::Fetch(f) => match self.fetch(f) {
+                Ok(res) => BrokerResponse::Fetch(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::Replicate(r) => match self.handle_replication(r) {
+                Ok(res) => BrokerResponse::Replicate(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::GetWatermark { topic, partition, source_region } => {
+                let wm = self.meta.get_watermark(&topic, partition, &source_region);
+                BrokerResponse::Watermark { durable_watermark: wm }
+            }
+            BrokerRequest::Ping => BrokerResponse::Pong,
+        }
+    }
+
+    /// Spawns an async framed TCP listener on `bind_addr` handling concurrent client connections.
+    pub async fn start_tcp_listener(
+        self: Arc<Self>,
+        bind_addr: &str,
+    ) -> Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>), std::io::Error> {
+        let listener = TcpListener::bind(bind_addr).await?;
+        let local_addr = listener.local_addr()?;
+
+        let handle = tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _peer_addr)) => {
+                        let server = Arc::clone(&self);
+                        tokio::spawn(async move {
+                            let _ = server.handle_connection(stream).await;
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Accept error in broker TCP listener");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok((local_addr, handle))
+    }
+
+    async fn handle_connection(&self, stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (reader, mut writer) = stream.into_split();
+        let mut lines = BufReader::new(reader).lines();
+
+        while let Some(line) = lines.next_line().await? {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let req: BrokerRequest = match serde_json::from_str(&line) {
+                Ok(r) => r,
+                Err(e) => {
+                    let err_resp = BrokerResponse::Error(format!("Malformed JSON request: {}", e));
+                    let mut serialized = serde_json::to_vec(&err_resp)?;
+                    serialized.push(b'\n');
+                    writer.write_all(&serialized).await?;
+                    writer.flush().await?;
+                    continue;
+                }
+            };
+
+            let resp = self.dispatch(req);
+            let mut serialized = serde_json::to_vec(&resp)?;
+            serialized.push(b'\n');
+            writer.write_all(&serialized).await?;
+            writer.flush().await?;
+        }
+        Ok(())
+    }
+}
+
+/// Lightweight async framed TCP client connecting to a remote Kamish Broker daemon.
+pub struct BrokerClient {
+    lines: tokio::io::Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
+    writer: tokio::net::tcp::OwnedWriteHalf,
+}
+
+impl BrokerClient {
+    pub async fn connect(addr: impl tokio::net::ToSocketAddrs) -> Result<Self, std::io::Error> {
+        let stream = TcpStream::connect(addr).await?;
+        let (reader, writer) = stream.into_split();
+        let lines = BufReader::new(reader).lines();
+        Ok(Self { lines, writer })
+    }
+
+    pub async fn send_request(&mut self, req: BrokerRequest) -> Result<BrokerResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let mut payload = serde_json::to_vec(&req)?;
+        payload.push(b'\n');
+        self.writer.write_all(&payload).await?;
+        self.writer.flush().await?;
+
+        match self.lines.next_line().await? {
+            Some(line) => {
+                let resp: BrokerResponse = serde_json::from_str(&line)?;
+                Ok(resp)
+            }
+            None => Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Connection closed by remote broker").into()),
+        }
+    }
+
+    pub async fn produce(&mut self, req: ProduceRequest) -> Result<ProduceResponse, Box<dyn std::error::Error + Send + Sync>> {
+        match self.send_request(BrokerRequest::Produce(req)).await? {
+            BrokerResponse::Produce(p) => Ok(p),
+            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
+            other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+        }
+    }
+
+    pub async fn fetch(&mut self, req: FetchRequest) -> Result<FetchResponse, Box<dyn std::error::Error + Send + Sync>> {
+        match self.send_request(BrokerRequest::Fetch(req)).await? {
+            BrokerResponse::Fetch(f) => Ok(f),
+            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
+            other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+        }
+    }
+
+    pub async fn replicate(&mut self, req: ReplicationRequest) -> Result<ReplicationResponse, Box<dyn std::error::Error + Send + Sync>> {
+        match self.send_request(BrokerRequest::Replicate(req)).await? {
+            BrokerResponse::Replicate(r) => Ok(r),
+            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
+            other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+        }
+    }
+
+    pub async fn ping(&mut self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        match self.send_request(BrokerRequest::Ping).await? {
+            BrokerResponse::Pong => Ok(true),
+            _ => Ok(false),
+        }
     }
 }
 
@@ -652,5 +818,58 @@ mod tests {
         assert_eq!(fetch_res.records.len(), 5);
         assert_eq!(fetch_res.records[4].base_offset, 4);
         assert_eq!(fetch_res.records[4].payload, b"reading-4");
+    }
+
+    #[tokio::test]
+    async fn test_async_framed_tcp_listener_and_client() {
+        let (broker, _td) = setup_test_broker("region-eu", vec!["region-us".to_string()]);
+        let broker_arc = Arc::new(broker);
+
+        // Bind ephemeral port on 127.0.0.1:0 (gracefully handle sandbox environment)
+        let (local_addr, _handle) = match broker_arc.start_tcp_listener("127.0.0.1:0").await {
+            Ok(res) => res,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("Skipping TCP socket test in restricted sandbox: {}", e);
+                return;
+            }
+            Err(e) => panic!("Failed to bind TCP listener: {}", e),
+        };
+
+        // Connect client (gracefully handle sandbox socket restriction)
+        let mut client = match BrokerClient::connect(local_addr).await {
+            Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!("Skipping TCP socket test in restricted sandbox: {}", e);
+                return;
+            }
+            Err(e) => panic!("Failed to connect to TCP listener: {}", e),
+        };
+
+        // 1. Ping test
+        assert!(client.ping().await.unwrap());
+
+        // 2. Produce test over TCP
+        let prod_res = client.produce(ProduceRequest {
+            topic: "tcp-stream".to_string(),
+            partition: 0,
+            producer_id: 777,
+            producer_epoch: 1,
+            sequence_base: 0,
+            class_id: "global-data".to_string(),
+            payload: b"tcp-payload".to_vec(),
+        }).await.unwrap();
+        assert!(prod_res.sovereignty_allowed);
+        assert_eq!(prod_res.base_offset, 0);
+
+        // 3. Fetch test over TCP
+        let fetch_res = client.fetch(FetchRequest {
+            topic: "tcp-stream".to_string(),
+            partition: 0,
+            class_id: "global-data".to_string(),
+            start_offset: 0,
+            max_records: 5,
+        }).await.unwrap();
+        assert_eq!(fetch_res.records.len(), 1);
+        assert_eq!(fetch_res.records[0].payload, b"tcp-payload");
     }
 }

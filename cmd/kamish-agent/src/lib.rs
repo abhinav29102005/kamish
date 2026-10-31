@@ -10,7 +10,7 @@
 //! - INV-6: Retrying an applied range is a no-op.
 //! - INV-8: No payload outside legal set or sealed-only mode.
 
-use kamish_broker::{BrokerServer, ReplicationRequest};
+use kamish_broker::{BrokerClient, BrokerServer, ReplicationRequest};
 use kamish_meta::MetadataStore;
 use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,7 @@ pub struct ReplicationAgent {
     pub meta: Arc<MetadataStore>,
     pub router: RouteSelector,
     peer_brokers: Arc<RwLock<HashMap<String, Arc<BrokerServer>>>>,
+    peer_addresses: Arc<RwLock<HashMap<String, String>>>,
     link_metrics: Arc<RwLock<HashMap<String, LinkMetrics>>>,
 }
 
@@ -75,6 +76,7 @@ impl ReplicationAgent {
             meta,
             router,
             peer_brokers: Arc::new(RwLock::new(HashMap::new())),
+            peer_addresses: Arc::new(RwLock::new(HashMap::new())),
             link_metrics: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -83,6 +85,13 @@ impl ReplicationAgent {
     pub fn register_peer(&self, region: impl Into<String>, broker: Arc<BrokerServer>) {
         let region_str = region.into();
         self.peer_brokers.write().unwrap().insert(region_str.clone(), broker);
+        self.link_metrics.write().unwrap().entry(region_str).or_default();
+    }
+
+    /// Registers a remote peer broker address (e.g. "127.0.0.1:8082") for TCP transfers.
+    pub fn register_remote_peer(&self, region: impl Into<String>, addr: impl Into<String>) {
+        let region_str = region.into();
+        self.peer_addresses.write().unwrap().insert(region_str.clone(), addr.into());
         self.link_metrics.write().unwrap().entry(region_str).or_default();
     }
 
@@ -184,6 +193,99 @@ impl ReplicationAgent {
             watermark = summary.advanced_watermark,
             "Replication step completed"
         );
+
+        Ok(summary)
+    }
+
+    /// Performs a replication drain pass connecting over TCP to a remote broker daemon.
+    pub async fn step_replication_tcp(&self, target_region: &str) -> Result<TransferSummary, AgentError> {
+        let addr = {
+            let addrs = self.peer_addresses.read().unwrap();
+            addrs
+                .get(target_region)
+                .cloned()
+                .ok_or_else(|| AgentError::TargetNotRegistered(target_region.to_string()))?
+        };
+
+        let outbox = match self.local_broker.get_outbox(target_region) {
+            Some(o) => o,
+            None => return Ok(TransferSummary::default()),
+        };
+
+        let pending_ranges = outbox.next_transfer_batch(50);
+        if pending_ranges.is_empty() {
+            return Ok(TransferSummary::default());
+        }
+
+        let metrics = self
+            .link_metrics
+            .read()
+            .unwrap()
+            .get(target_region)
+            .copied()
+            .unwrap_or_default();
+
+        let mut client = BrokerClient::connect(&addr)
+            .await
+            .map_err(|e| AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e)))?;
+
+        let mut summary = TransferSummary::default();
+
+        for range in pending_ranges {
+            let direct_candidate = PathCandidate {
+                target_region: target_region.to_string(),
+                relay_region: None,
+                metrics,
+            };
+
+            let picked_path = self.router.pick_path(
+                target_region,
+                &range.class_id,
+                &[direct_candidate],
+            );
+
+            if picked_path.is_none() {
+                continue;
+            }
+
+            let rep_req = ReplicationRequest {
+                topic: range.topic.clone(),
+                partition: range.partition,
+                source_region: self.local_region.clone(),
+                target_region: target_region.to_string(),
+                class_id: range.class_id.clone(),
+                epoch: range.epoch,
+                from_offset: range.start_offset,
+                to_offset: range.end_offset,
+                payload: range.payload.clone(),
+                is_sealed: range.is_sealed,
+            };
+
+            let start = std::time::Instant::now();
+            let rep_res = client
+                .replicate(rep_req)
+                .await
+                .map_err(|e| AgentError::TargetNotRegistered(e.to_string()))?;
+            let rtt_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+            if let Some(m) = self.link_metrics.write().unwrap().get_mut(target_region) {
+                m.rtt_ms = (m.rtt_ms * 0.8) + (rtt_ms * 0.2);
+            }
+
+            if rep_res.accepted {
+                outbox.advance_watermark(rep_res.applied_watermark);
+                self.meta.update_watermark(
+                    &range.topic,
+                    range.partition,
+                    target_region,
+                    rep_res.applied_watermark,
+                );
+
+                summary.ranges_transferred += 1;
+                summary.bytes_transferred += range.byte_size();
+                summary.advanced_watermark = rep_res.applied_watermark;
+            }
+        }
 
         Ok(summary)
     }

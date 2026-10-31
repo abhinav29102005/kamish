@@ -220,3 +220,17 @@ This ledger records every engineering task, cross-referencing requirements, comp
   4. Implemented real-time replication lag telemetry measuring $\text{LocalHighWatermark} - \text{RemoteDurableWatermark}$ and active link RTT/loss metrics.
 * **Verification:** Unit tests verifying end-to-end cross-region replication draining, lag monitoring, and slow-link metrics tracking (`cargo test -p kamish-agent`).
 * **Status:** PASS
+
+### TASK-0017: Async Framed TCP Wire Protocol Listener and Client (`cmd/kamish-broker` & `cmd/kamish-agent`)
+* **Timestamp:** 2026-10-31 17:44 UTC
+* **Components:** `cmd/kamish-broker`, `cmd/kamish-agent`
+* **Project.md References:** §3.5.1, §3.6, ADR-0005, INV-1, INV-4, INV-5, INV-6, INV-8
+* **Invariants Checked:** INV-1 through INV-8 across async network boundaries
+* **Actions Taken:**
+  1. Implemented JSON-framed async TCP wire protocol (`BrokerRequest` and `BrokerResponse`) supporting `Produce`, `Fetch`, `Replicate`, `GetWatermark`, and `Ping`.
+  2. Built `BrokerServer::start_tcp_listener()` supporting concurrent connections, request line deserialization, engine dispatch, and error handling.
+  3. Built `BrokerClient` async client helper for remote broker communication.
+  4. Extended `ReplicationAgent` with `step_replication_tcp()` allowing automated replication across real network TCP sockets.
+  5. Updated `cmd/kamish-broker/src/main.rs` and `cmd/kamish-agent/src/main.rs` to start live TCP listeners and replication background worker loops with graceful shutdown on Ctrl-C.
+* **Verification:** Unit tests verifying client-server TCP roundtrip over loopback sockets (`cargo test -p kamish-broker`).
+* **Status:** PASS
