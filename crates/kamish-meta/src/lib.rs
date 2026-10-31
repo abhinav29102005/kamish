@@ -422,7 +422,7 @@ impl SyntheticChaosInjector {
 }
 
 // ============================================================================
-// 4. Metadata Entity-Relationship Store (§2.5)
+// 4. Metadata Entity-Relationship Store (§2.5) & MetadataAuthority Trait
 // ============================================================================
 
 #[derive(Debug, Error)]
@@ -438,6 +438,21 @@ pub enum MetaError {
 
     #[error("Ownership lease conflict for partition {partition}")]
     LeaseConflict { partition: u32 },
+
+    #[error("Lease not found or expired: id {0}")]
+    LeaseNotFound(u64),
+
+    #[error("Compare-and-swap conflict: expected epoch {expected}, actual epoch {actual}")]
+    CasConflict { expected: u64, actual: u64 },
+
+    #[error("Unregistered stream in multi-region mode: {topic}/{partition}")]
+    UnregisteredStream { topic: String, partition: u32 },
+
+    #[error("Policy floor regression rejected: current floor {current}, proposed {proposed}")]
+    PolicyFloorRegression { current: u64, proposed: u64 },
+
+    #[error("Authority error or backend communication failure: {0}")]
+    AuthorityError(String),
 }
 
 /// Partition ownership with monotonic epoch fencing token (§2.5).
@@ -454,6 +469,92 @@ impl PartitionOwnership {
     pub fn is_lease_valid(&self, now_ns: i64) -> bool {
         now_ns < self.lease_expiry_ns
     }
+}
+
+/// Stream identification tuple (topic and partition).
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StreamId {
+    pub topic: String,
+    pub partition: u32,
+}
+
+impl StreamId {
+    pub fn new(topic: impl Into<String>, partition: u32) -> Self {
+        Self {
+            topic: topic.into(),
+            partition,
+        }
+    }
+}
+
+impl fmt::Display for StreamId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}/{}", self.topic, self.partition)
+    }
+}
+
+/// Operational deployment mode of the broker metadata authority (§2.1, CONTRACT.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeploymentMode {
+    /// Explicit single-node compatibility mode (isolated development, local authority fallback).
+    SingleNodeCompatibility,
+    /// Multi-region distributed mode (consensus quorum required, unknown streams fail closed).
+    MultiRegion,
+}
+
+/// Lease grant issued by metadata authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeaseGrant {
+    pub lease_id: u64,
+    pub stream: StreamId,
+    pub holder_region: String,
+    pub granted_at_ns: i64,
+    pub expiry_ns: i64,
+    pub epoch: u64,
+}
+
+impl LeaseGrant {
+    pub fn is_valid(&self, now_ns: i64) -> bool {
+        now_ns < self.expiry_ns
+    }
+}
+
+/// Acknowledgment of a lease revocation with effective boundary timestamp.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RevocationAck {
+    pub lease_id: u64,
+    pub stream: StreamId,
+    pub revoked_at_ns: i64,
+    pub effective_boundary_ns: i64,
+}
+
+/// Quorum-issued source identity and generation (§3.B, CONTRACT.md).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceIdentityGrant {
+    pub cluster_id: String,
+    pub node_id: String,
+    pub generation: u64,
+    pub issued_at_ns: i64,
+}
+
+/// Signed audit checkpoint committed to the metadata witness quorum (§3.C, CONTRACT.md, W08).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditCheckpoint {
+    pub stream: StreamId,
+    pub sequence: u64,
+    pub tail_hash: String,
+    pub record_count: u64,
+    pub signature_hex: String,
+    pub witness_timestamp_ns: i64,
+}
+
+/// Receipt confirming that an audit checkpoint was durably committed to the witness quorum.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckpointReceipt {
+    pub stream: StreamId,
+    pub checkpoint_sequence: u64,
+    pub committed_revision: u64,
+    pub anchored_at_ns: i64,
 }
 
 /// Remote replica state with durable applied watermark (§2.5).
@@ -485,23 +586,169 @@ pub struct TopicMeta {
     pub partition_count: u32,
 }
 
+/// Authoritative metadata trait for partition ownership, leases, policy versions,
+/// source identity, and audit checkpoints.
+///
+/// Complies with:
+/// - Master Plan Phase 1 (Authority)
+/// - `docs/CONTRACT.md` (§2.1, §2.2, §3.B, §3.C)
+/// - NFR-01: Metadata quorum is NOT consulted on the local write path.
+/// - The broker core depends ONLY on this trait abstraction.
+pub trait MetadataAuthority: Send + Sync {
+    /// Deployment mode of this metadata authority (SingleNodeCompatibility or MultiRegion).
+    fn deployment_mode(&self) -> DeploymentMode;
+
+    /// Authoritatively registers or updates partition ownership and initial lease.
+    fn set_ownership(
+        &self,
+        topic: &str,
+        partition: u32,
+        owner_region: &str,
+        epoch: u64,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError>;
+
+    /// Compare-and-swap epoch operation across the metadata authority.
+    /// Commits a bumped epoch and new owner region if the current committed epoch matches `expected_epoch`.
+    fn compare_and_swap_epoch(
+        &self,
+        stream: &StreamId,
+        expected_epoch: u64,
+        new_epoch: u64,
+        new_owner_region: &str,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError>;
+
+    /// Grants a time-limited lease to `holder_region` for the specified `stream`.
+    fn grant_lease(
+        &self,
+        stream: &StreamId,
+        holder_region: &str,
+        duration_ms: i64,
+    ) -> Result<LeaseGrant, MetaError>;
+
+    /// Renews an active lease if not revoked or expired.
+    fn renew_lease(
+        &self,
+        stream: &StreamId,
+        lease_id: u64,
+        duration_ms: i64,
+    ) -> Result<LeaseGrant, MetaError>;
+
+    /// Revokes an active lease with a barrier bound.
+    fn revoke_lease(&self, stream: &StreamId, lease_id: u64) -> Result<RevocationAck, MetaError>;
+
+    /// Returns the authoritative policy-version floor for the cluster.
+    fn get_policy_floor(&self, cluster_id: &str) -> Result<u64, MetaError>;
+
+    /// Authoritatively advances the cluster's durable policy-version floor.
+    fn advance_policy_floor(&self, cluster_id: &str, new_floor: u64) -> Result<u64, MetaError>;
+
+    /// Issues an authoritative source identity and monotonic generation from the quorum.
+    fn issue_source_identity(
+        &self,
+        cluster_id: &str,
+        node_id: &str,
+    ) -> Result<SourceIdentityGrant, MetaError>;
+
+    /// Commits a signed audit checkpoint `(tail_hash, record_count)` to the witness quorum.
+    fn commit_audit_checkpoint(
+        &self,
+        checkpoint: AuditCheckpoint,
+    ) -> Result<CheckpointReceipt, MetaError>;
+
+    /// Reads the latest committed audit checkpoint for a stream from the witness quorum.
+    fn read_audit_checkpoint(
+        &self,
+        stream: &StreamId,
+    ) -> Result<Option<AuditCheckpoint>, MetaError>;
+
+    /// Returns the locally verified/cached partition ownership without consulting quorum per write (NFR-01).
+    fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership>;
+
+    /// Updates the durable replication watermark for an ingress/egress peer.
+    fn update_watermark(&self, topic: &str, partition: u32, region: &str, watermark: u64);
+
+    /// Returns the recorded replication watermark for a region.
+    fn get_watermark(&self, topic: &str, partition: u32, region: &str) -> u64;
+
+    /// Records outbox stream tracking metadata.
+    fn record_outbox_stream(&self, meta: OutboxStreamMeta);
+
+    /// Retrieves outbox stream tracking metadata.
+    fn get_outbox_stream(
+        &self,
+        topic: &str,
+        partition: u32,
+        dest: &str,
+    ) -> Option<OutboxStreamMeta>;
+}
+
 /// Central in-memory, thread-safe Metadata Store (D4 in DFDs §2.7.2).
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct MetadataStore {
     inner: Arc<RwLock<MetadataStoreInner>>,
 }
 
-#[derive(Default)]
 struct MetadataStoreInner {
+    mode: DeploymentMode,
     topics: HashMap<String, TopicMeta>,
     ownerships: HashMap<(String, u32), PartitionOwnership>,
+    leases: HashMap<u64, LeaseGrant>,
+    next_lease_id: u64,
+    policy_floors: HashMap<String, u64>,
+    source_generations: HashMap<String, u64>,
+    audit_checkpoints: HashMap<StreamId, Vec<AuditCheckpoint>>,
     replicas: HashMap<(String, u32, String), ReplicaState>,
     outbox_streams: HashMap<(String, u32, String), OutboxStreamMeta>,
+}
+
+impl Default for MetadataStoreInner {
+    fn default() -> Self {
+        Self {
+            mode: DeploymentMode::SingleNodeCompatibility,
+            topics: HashMap::new(),
+            ownerships: HashMap::new(),
+            leases: HashMap::new(),
+            next_lease_id: 1,
+            policy_floors: HashMap::new(),
+            source_generations: HashMap::new(),
+            audit_checkpoints: HashMap::new(),
+            replicas: HashMap::new(),
+            outbox_streams: HashMap::new(),
+        }
+    }
+}
+
+impl Default for MetadataStore {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(MetadataStoreInner::default())),
+        }
+    }
 }
 
 impl MetadataStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn new_with_mode(mode: DeploymentMode) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(MetadataStoreInner {
+                mode,
+                ..Default::default()
+            })),
+        }
+    }
+
+    pub fn new_multi_region() -> Self {
+        Self::new_with_mode(DeploymentMode::MultiRegion)
+    }
+
+    pub fn set_deployment_mode(&self, mode: DeploymentMode) {
+        let mut inner = self.inner.write().unwrap();
+        inner.mode = mode;
     }
 
     pub fn create_topic(
@@ -567,38 +814,14 @@ impl MetadataStore {
         new_region: impl Into<String>,
         lease_duration_ms: i64,
     ) -> Result<PartitionOwnership, MetaError> {
-        let mut inner = self.inner.write().unwrap();
-        let key = (topic.to_string(), partition);
-
-        let current = match inner.ownerships.get(&key) {
-            Some(o) => o,
-            None => {
-                return Err(MetaError::PartitionNotFound {
-                    topic: topic.to_string(),
-                    partition,
-                });
-            }
-        };
-
-        if current.epoch != expected_epoch {
-            return Err(MetaError::StaleEpoch {
-                current: current.epoch,
-                proposed: expected_epoch,
-            });
-        }
-
-        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let new_epoch = expected_epoch + 1;
-        let new_ownership = PartitionOwnership {
-            topic: topic.to_string(),
-            partition,
-            owner_region: new_region.into(),
-            epoch: new_epoch,
-            lease_expiry_ns: now_ns + (lease_duration_ms * 1_000_000),
-        };
-
-        inner.ownerships.insert(key, new_ownership.clone());
-        Ok(new_ownership)
+        let stream = StreamId::new(topic, partition);
+        self.compare_and_swap_epoch(
+            &stream,
+            expected_epoch,
+            expected_epoch + 1,
+            &new_region.into(),
+            lease_duration_ms,
+        )
     }
 
     pub fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership> {
@@ -669,6 +892,276 @@ impl MetadataStore {
             .outbox_streams
             .get(&(topic.to_string(), partition, dest.to_string()))
             .cloned()
+    }
+}
+
+impl MetadataAuthority for MetadataStore {
+    fn deployment_mode(&self) -> DeploymentMode {
+        self.inner.read().unwrap().mode
+    }
+
+    fn set_ownership(
+        &self,
+        topic: &str,
+        partition: u32,
+        owner_region: &str,
+        epoch: u64,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError> {
+        self.set_ownership(topic, partition, owner_region, epoch, lease_duration_ms)
+    }
+
+    fn compare_and_swap_epoch(
+        &self,
+        stream: &StreamId,
+        expected_epoch: u64,
+        new_epoch: u64,
+        new_owner_region: &str,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let key = (stream.topic.clone(), stream.partition);
+
+        let current = match inner.ownerships.get(&key) {
+            Some(o) => o,
+            None => {
+                if inner.mode == DeploymentMode::MultiRegion {
+                    return Err(MetaError::PartitionNotFound {
+                        topic: stream.topic.clone(),
+                        partition: stream.partition,
+                    });
+                }
+                if expected_epoch != 0 {
+                    return Err(MetaError::PartitionNotFound {
+                        topic: stream.topic.clone(),
+                        partition: stream.partition,
+                    });
+                }
+                let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                let ownership = PartitionOwnership {
+                    topic: stream.topic.clone(),
+                    partition: stream.partition,
+                    owner_region: new_owner_region.to_string(),
+                    epoch: new_epoch,
+                    lease_expiry_ns: now_ns + (lease_duration_ms * 1_000_000),
+                };
+                inner.ownerships.insert(key, ownership.clone());
+                return Ok(ownership);
+            }
+        };
+
+        if current.epoch != expected_epoch {
+            return Err(MetaError::StaleEpoch {
+                current: current.epoch,
+                proposed: expected_epoch,
+            });
+        }
+
+        if new_epoch <= current.epoch {
+            return Err(MetaError::StaleEpoch {
+                current: current.epoch,
+                proposed: new_epoch,
+            });
+        }
+
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let new_ownership = PartitionOwnership {
+            topic: stream.topic.clone(),
+            partition: stream.partition,
+            owner_region: new_owner_region.to_string(),
+            epoch: new_epoch,
+            lease_expiry_ns: now_ns + (lease_duration_ms * 1_000_000),
+        };
+
+        inner.ownerships.insert(key, new_ownership.clone());
+        Ok(new_ownership)
+    }
+
+    fn grant_lease(
+        &self,
+        stream: &StreamId,
+        holder_region: &str,
+        duration_ms: i64,
+    ) -> Result<LeaseGrant, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let key = (stream.topic.clone(), stream.partition);
+
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let expiry_ns = now_ns + (duration_ms * 1_000_000);
+
+        let lease_id = inner.next_lease_id;
+        inner.next_lease_id += 1;
+
+        let epoch = {
+            let ownership = match inner.ownerships.get_mut(&key) {
+                Some(o) => o,
+                None => {
+                    return Err(MetaError::PartitionNotFound {
+                        topic: stream.topic.clone(),
+                        partition: stream.partition,
+                    });
+                }
+            };
+            ownership.owner_region = holder_region.to_string();
+            ownership.lease_expiry_ns = expiry_ns;
+            ownership.epoch
+        };
+
+        let grant = LeaseGrant {
+            lease_id,
+            stream: stream.clone(),
+            holder_region: holder_region.to_string(),
+            granted_at_ns: now_ns,
+            expiry_ns,
+            epoch,
+        };
+
+        inner.leases.insert(lease_id, grant.clone());
+        Ok(grant)
+    }
+
+    fn renew_lease(
+        &self,
+        stream: &StreamId,
+        lease_id: u64,
+        duration_ms: i64,
+    ) -> Result<LeaseGrant, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let new_expiry_ns = now_ns + (duration_ms * 1_000_000);
+
+        let grant_clone = {
+            let grant = match inner.leases.get_mut(&lease_id) {
+                Some(g) if &g.stream == stream => g,
+                _ => return Err(MetaError::LeaseNotFound(lease_id)),
+            };
+            grant.expiry_ns = new_expiry_ns;
+            grant.clone()
+        };
+
+        let key = (stream.topic.clone(), stream.partition);
+        if let Some(owner) = inner.ownerships.get_mut(&key) {
+            owner.lease_expiry_ns = new_expiry_ns;
+        }
+
+        Ok(grant_clone)
+    }
+
+    fn revoke_lease(&self, stream: &StreamId, lease_id: u64) -> Result<RevocationAck, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let grant = match inner.leases.remove(&lease_id) {
+            Some(g) if &g.stream == stream => g,
+            _ => return Err(MetaError::LeaseNotFound(lease_id)),
+        };
+
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let key = (stream.topic.clone(), stream.partition);
+        if let Some(owner) = inner.ownerships.get_mut(&key) {
+            owner.lease_expiry_ns = now_ns;
+        }
+
+        let effective_boundary_ns = std::cmp::max(now_ns, grant.expiry_ns);
+
+        Ok(RevocationAck {
+            lease_id,
+            stream: stream.clone(),
+            revoked_at_ns: now_ns,
+            effective_boundary_ns,
+        })
+    }
+
+    fn get_policy_floor(&self, cluster_id: &str) -> Result<u64, MetaError> {
+        let inner = self.inner.read().unwrap();
+        Ok(inner.policy_floors.get(cluster_id).copied().unwrap_or(1))
+    }
+
+    fn advance_policy_floor(&self, cluster_id: &str, new_floor: u64) -> Result<u64, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let current = inner.policy_floors.get(cluster_id).copied().unwrap_or(1);
+        if new_floor < current {
+            return Err(MetaError::PolicyFloorRegression {
+                current,
+                proposed: new_floor,
+            });
+        }
+        inner
+            .policy_floors
+            .insert(cluster_id.to_string(), new_floor);
+        Ok(new_floor)
+    }
+
+    fn issue_source_identity(
+        &self,
+        cluster_id: &str,
+        node_id: &str,
+    ) -> Result<SourceIdentityGrant, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let key = format!("{}:{}", cluster_id, node_id);
+        let next_gen = inner.source_generations.get(&key).copied().unwrap_or(0) + 1;
+        inner.source_generations.insert(key, next_gen);
+
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        Ok(SourceIdentityGrant {
+            cluster_id: cluster_id.to_string(),
+            node_id: node_id.to_string(),
+            generation: next_gen,
+            issued_at_ns: now_ns,
+        })
+    }
+
+    fn commit_audit_checkpoint(
+        &self,
+        checkpoint: AuditCheckpoint,
+    ) -> Result<CheckpointReceipt, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let stream = checkpoint.stream.clone();
+        let seq = checkpoint.sequence;
+        let list = inner.audit_checkpoints.entry(stream.clone()).or_default();
+        list.push(checkpoint);
+
+        Ok(CheckpointReceipt {
+            stream,
+            checkpoint_sequence: seq,
+            committed_revision: list.len() as u64,
+            anchored_at_ns: now_ns,
+        })
+    }
+
+    fn read_audit_checkpoint(
+        &self,
+        stream: &StreamId,
+    ) -> Result<Option<AuditCheckpoint>, MetaError> {
+        let inner = self.inner.read().unwrap();
+        Ok(inner
+            .audit_checkpoints
+            .get(stream)
+            .and_then(|list| list.last().cloned()))
+    }
+
+    fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership> {
+        self.get_ownership(topic, partition)
+    }
+
+    fn update_watermark(&self, topic: &str, partition: u32, region: &str, watermark: u64) {
+        self.update_watermark(topic, partition, region, watermark);
+    }
+
+    fn get_watermark(&self, topic: &str, partition: u32, region: &str) -> u64 {
+        self.get_watermark(topic, partition, region)
+    }
+
+    fn record_outbox_stream(&self, meta: OutboxStreamMeta) {
+        self.record_outbox_stream(meta);
+    }
+
+    fn get_outbox_stream(
+        &self,
+        topic: &str,
+        partition: u32,
+        dest: &str,
+    ) -> Option<OutboxStreamMeta> {
+        self.get_outbox_stream(topic, partition, dest)
     }
 }
 
@@ -763,5 +1256,96 @@ mod tests {
         chaos.set_partition(true);
         let err = chaos.simulate_link_traversal().await.unwrap_err();
         assert_eq!(err, "NETWORK_PARTITION: Link severed");
+    }
+
+    #[test]
+    fn test_metadata_authority_cas_and_leases() {
+        let authority: Arc<dyn MetadataAuthority> = Arc::new(MetadataStore::new());
+        assert_eq!(
+            authority.deployment_mode(),
+            DeploymentMode::SingleNodeCompatibility
+        );
+
+        let stream = StreamId::new("orders", 0);
+        // Single-node mode CAS allows creation at expected_epoch 0
+        let created = authority
+            .compare_and_swap_epoch(&stream, 0, 1, "region-a", 10_000)
+            .unwrap();
+        assert_eq!(created.epoch, 1);
+        assert_eq!(created.owner_region, "region-a");
+
+        // Stale CAS fails
+        let stale = authority.compare_and_swap_epoch(&stream, 0, 2, "region-b", 5000);
+        assert!(stale.is_err());
+
+        // Valid CAS advances epoch
+        let advanced = authority
+            .compare_and_swap_epoch(&stream, 1, 2, "region-b", 10_000)
+            .unwrap();
+        assert_eq!(advanced.epoch, 2);
+        assert_eq!(advanced.owner_region, "region-b");
+
+        // Grant lease
+        let lease = authority.grant_lease(&stream, "region-b", 2000).unwrap();
+        assert_eq!(lease.holder_region, "region-b");
+        assert_eq!(lease.epoch, 2);
+
+        // Renew lease
+        let renewed = authority
+            .renew_lease(&stream, lease.lease_id, 5000)
+            .unwrap();
+        assert!(renewed.expiry_ns > lease.expiry_ns);
+
+        // Revoke lease
+        let ack = authority.revoke_lease(&stream, lease.lease_id).unwrap();
+        assert_eq!(ack.lease_id, lease.lease_id);
+    }
+
+    #[test]
+    fn test_metadata_authority_policy_floor_and_source_identity() {
+        let authority = MetadataStore::new();
+        assert_eq!(authority.get_policy_floor("c1").unwrap(), 1);
+        assert_eq!(authority.advance_policy_floor("c1", 3).unwrap(), 3);
+        assert!(authority.advance_policy_floor("c1", 2).is_err());
+
+        let id1 = authority.issue_source_identity("c1", "node-1").unwrap();
+        assert_eq!(id1.generation, 1);
+        let id2 = authority.issue_source_identity("c1", "node-1").unwrap();
+        assert_eq!(id2.generation, 2);
+    }
+
+    #[test]
+    fn test_metadata_authority_audit_checkpoints() {
+        let authority = MetadataStore::new();
+        let stream = StreamId::new("audit-test", 0);
+
+        let cp1 = AuditCheckpoint {
+            stream: stream.clone(),
+            sequence: 1,
+            tail_hash: "hash1".to_string(),
+            record_count: 50,
+            signature_hex: "sig1".to_string(),
+            witness_timestamp_ns: 1000,
+        };
+
+        let receipt = authority.commit_audit_checkpoint(cp1).unwrap();
+        assert_eq!(receipt.checkpoint_sequence, 1);
+        assert_eq!(receipt.committed_revision, 1);
+
+        let retrieved = authority.read_audit_checkpoint(&stream).unwrap().unwrap();
+        assert_eq!(retrieved.sequence, 1);
+        assert_eq!(retrieved.tail_hash, "hash1");
+        assert_eq!(retrieved.record_count, 50);
+    }
+
+    #[test]
+    fn test_metadata_authority_multi_region_fail_closed() {
+        let authority = MetadataStore::new_multi_region();
+        assert_eq!(authority.deployment_mode(), DeploymentMode::MultiRegion);
+
+        let stream = StreamId::new("unregistered-topic", 0);
+        // Multi-region mode strictly rejects CAS for unregistered stream
+        let res = authority.compare_and_swap_epoch(&stream, 0, 1, "region-a", 10_000);
+        assert!(matches!(res, Err(MetaError::PartitionNotFound { .. })));
     }
 }

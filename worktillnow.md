@@ -22,7 +22,7 @@
 | Public-production release status | **BLOCKED / FAIL** |
 | Known extended contract tests still failing | **2: distributed ownership and trusted audit completeness** |
 | Changes performed for this document | Documentation only; application code was not changed |
-| Current phase | Phase 0 approved with amendments; Phase 1 preparation awaiting consensus pick and timing/consistency decisions |
+| Current phase | Phase 1 in progress (Item 1.1 MetadataAuthority trait and broker decoupling complete) |
 
 The original walkthrough describes `170de8e`, whose change clarifies PowerShell
 demo output. A fresh baseline at `77bb051` additionally includes frontend logo
@@ -32,15 +32,18 @@ passing / two failing, four frontend tests, 23 SDK tests and one Rust/Node
 integration test passing, plus format/Clippy/lint/type/build/package checks.
 Older CLI/browser/advisory results below retain their original dates and scope.
 
-**Phase 0 deliverable:** [docs/CONTRACT.md](docs/CONTRACT.md), with choices in
-[ADR-0015](decisions.md#adr-0015-phase-0-contract-and-approval-gates). Modes,
-durability, watermark identity, audit witness/coverage and revocation semantics
-have maintainer approval with amendments: use time-limited quorum-issued leases
-without per-write metadata calls; option 1 payload quorum follows Phase 1; source
-identity/generation come from the quorum; cancel in-flight work on revocation.
-The proposed audit entry cap and global revocation boundary still require answers.
-**No W01–W38 item is newly completed.** Both
-extended failures remain; no tests or application code changed in Phase 0.
+**Phase 1 Authority Progress (Item 1.1 completed):**
+- Defined `MetadataAuthority` trait in `crates/kamish-meta`:
+  - Epoch compare-and-swap (`compare_and_swap_epoch`)
+  - Time-limited lease management (`grant_lease`, `renew_lease`, `revoke_lease` with barrier bounds)
+  - Cluster durable policy-version floor tracking (`get_policy_floor`, `advance_policy_floor`)
+  - Quorum-issued source identity and generation (`issue_source_identity`)
+  - Audit witness checkpoints (`commit_audit_checkpoint`, `read_audit_checkpoint`)
+  - Local cached ownership and watermark query methods (NFR-01: write path does not consult quorum per write)
+- Decoupled `BrokerServer` in `cmd/kamish-broker` to depend strictly on `Arc<dyn MetadataAuthority>`, introducing `DeploymentMode` (`SingleNodeCompatibility` vs `MultiRegion`).
+- Decoupled `PartitionOwnerCoordinator` (`crates/kamish-own`) and `ReplicationAgent` (`cmd/kamish-agent`) to use `Arc<dyn MetadataAuthority>`.
+- Implemented `MetadataAuthority` for `MetadataStore` with 4 new dedicated unit tests.
+- 106 workspace tests passing, 0 clippy warnings, 0 format diffs. Both extended gap probes remain intentionally untouched until behavior implementation.
 
 ---
 

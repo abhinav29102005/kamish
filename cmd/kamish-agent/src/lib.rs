@@ -11,7 +11,7 @@
 //! - INV-8: No payload outside legal set or sealed-only mode.
 
 use kamish_broker::{BrokerClient, BrokerServer, ReplicationRequest};
-use kamish_meta::MetadataStore;
+use kamish_meta::MetadataAuthority;
 use kamish_outbox::OutboxRange;
 use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
 use serde::{Deserialize, Serialize};
@@ -94,7 +94,7 @@ pub struct TransferSummary {
 pub struct ReplicationAgent {
     pub local_region: String,
     pub local_broker: Arc<BrokerServer>,
-    pub meta: Arc<MetadataStore>,
+    pub meta: Arc<dyn MetadataAuthority>,
     pub router: RouteSelector,
     peer_brokers: Arc<RwLock<HashMap<String, Arc<BrokerServer>>>>,
     peer_addresses: Arc<RwLock<HashMap<String, String>>>,
@@ -108,7 +108,7 @@ impl ReplicationAgent {
     pub fn new(
         local_region: impl Into<String>,
         local_broker: Arc<BrokerServer>,
-        meta: Arc<MetadataStore>,
+        meta: Arc<dyn MetadataAuthority>,
         router: RouteSelector,
     ) -> Self {
         Self::with_queue_capacity(local_region, local_broker, meta, router, 1024)
@@ -117,7 +117,7 @@ impl ReplicationAgent {
     pub fn with_queue_capacity(
         local_region: impl Into<String>,
         local_broker: Arc<BrokerServer>,
-        meta: Arc<MetadataStore>,
+        meta: Arc<dyn MetadataAuthority>,
         router: RouteSelector,
         capacity: usize,
     ) -> Self {
@@ -928,6 +928,7 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
     use kamish_broker::ProduceRequest;
+    use kamish_meta::MetadataStore;
     use kamish_policy::{
         AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
     };

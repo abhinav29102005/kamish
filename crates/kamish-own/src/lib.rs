@@ -13,7 +13,7 @@ use chrono::Utc;
 use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
 use kamish_log::RecordEnvelope;
-use kamish_meta::{MetadataStore, PartitionOwnership};
+use kamish_meta::{MetadataAuthority, PartitionOwnership, StreamId};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -110,7 +110,7 @@ impl QuarantineStore {
 pub struct PartitionOwnerCoordinator {
     local_region: String,
     max_clock_drift_ms: i64,
-    meta_store: MetadataStore,
+    meta_store: Arc<dyn MetadataAuthority>,
     enforcer: Enforcer,
     quarantine: QuarantineStore,
 }
@@ -119,7 +119,7 @@ impl PartitionOwnerCoordinator {
     pub fn new(
         local_region: impl Into<String>,
         max_clock_drift_ms: i64,
-        meta_store: MetadataStore,
+        meta_store: Arc<dyn MetadataAuthority>,
         enforcer: Enforcer,
         quarantine: QuarantineStore,
     ) -> Self {
@@ -183,11 +183,12 @@ impl PartitionOwnerCoordinator {
         }
 
         // 4. Commit new epoch (epoch + 1) through metadata quorum CAS (INV-7)
+        let stream = StreamId::new(topic, partition);
         self.meta_store
-            .compare_and_swap_owner(
-                topic,
-                partition,
+            .compare_and_swap_epoch(
+                &stream,
                 current_ownership.epoch,
+                current_ownership.epoch + 1,
                 &self.local_region,
                 lease_duration_ms,
             )
@@ -234,6 +235,7 @@ mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
+    use kamish_meta::MetadataStore;
     use kamish_policy::{
         AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
     };
@@ -291,7 +293,7 @@ mod tests {
         let audit_log = AuditLog::new_in_memory();
         let enforcer = Enforcer::new("region-b", Arc::new(RwLock::new(cache)), audit_log);
 
-        let meta = MetadataStore::new();
+        let meta = Arc::new(MetadataStore::new());
         meta.create_topic("orders", "failover-class", 1);
         meta.set_ownership("orders", 0, "region-a", 1, now_offset_ms)
             .unwrap();

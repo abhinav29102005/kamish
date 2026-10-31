@@ -18,7 +18,9 @@ use kamish_enforce::{EnforcementRequest, Enforcer};
 use kamish_log::{
     LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager,
 };
-use kamish_meta::{MetadataStore, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
+use kamish_meta::{
+    DeploymentMode, MetadataAuthority, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent,
+};
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
@@ -226,7 +228,7 @@ pub struct BrokerServer {
     pub region: String,
     pub region_id: RegionId,
     pub enforcer: Arc<Enforcer>,
-    pub meta: Arc<MetadataStore>,
+    pub meta: Arc<dyn MetadataAuthority>,
     pub policy_engine: Option<Arc<dyn PolicyEngine>>,
     pub known_peers: Vec<String>,
     data_dir: PathBuf,
@@ -240,7 +242,7 @@ impl BrokerServer {
     pub fn new<P: AsRef<Path>>(
         region: impl Into<String>,
         enforcer: Arc<Enforcer>,
-        meta: Arc<MetadataStore>,
+        meta: Arc<dyn MetadataAuthority>,
         known_peers: Vec<String>,
         data_dir: P,
     ) -> Self {
@@ -253,7 +255,7 @@ impl BrokerServer {
     pub fn try_new<P: AsRef<Path>>(
         region: impl Into<String>,
         enforcer: Arc<Enforcer>,
-        meta: Arc<MetadataStore>,
+        meta: Arc<dyn MetadataAuthority>,
         known_peers: Vec<String>,
         data_dir: P,
     ) -> Result<Self, BrokerError> {
@@ -332,31 +334,37 @@ impl BrokerServer {
         let _operation = operation.lock().unwrap();
         let topic = req.topic.clone();
         let partition = req.partition;
-        self.meta.with_ownership(&topic, partition, |ownership| {
-            if let Some(owner) = ownership {
-                let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
-                if owner.owner_region != self.region || now >= owner.lease_expiry_ns {
-                    return Err(BrokerError::PolicyDenied(
-                        "not_current_partition_owner".into(),
-                    ));
-                }
+
+        let ownership = self.meta.get_ownership(&topic, partition);
+        if self.meta.deployment_mode() == DeploymentMode::MultiRegion && ownership.is_none() {
+            return Err(BrokerError::PolicyDenied(
+                "unregistered_stream_in_multi_region_mode".into(),
+            ));
+        }
+
+        if let Some(ref owner) = ownership {
+            let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+            if owner.owner_region != self.region || now >= owner.lease_expiry_ns {
+                return Err(BrokerError::PolicyDenied(
+                    "not_current_partition_owner".into(),
+                ));
             }
-            // Preserve the existing unregistered, single-node prototype mode.
-            // Multi-region authority still requires consensus-backed registration.
-            let epoch = ownership.map_or(1, |owner| owner.epoch);
-            let response = self.produce_at_epoch(req, epoch)?;
-            if let Some(owner) = ownership {
-                let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
-                if now >= owner.lease_expiry_ns {
-                    // Append may have committed; never send a successful ACK
-                    // after lease expiry. The client must resolve/retry identity.
-                    return Err(BrokerError::PolicyDenied(
-                        "lease_expired_outcome_unknown".into(),
-                    ));
-                }
+        }
+
+        // Preserve single-node prototype compatibility: unregistered partition defaults to local authority at epoch 1.
+        let epoch = ownership.as_ref().map_or(1, |owner| owner.epoch);
+        let response = self.produce_at_epoch(req, epoch)?;
+        if let Some(ref owner) = ownership {
+            let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+            if now >= owner.lease_expiry_ns {
+                // Append may have committed; never send a successful ACK
+                // after lease expiry. The client must resolve/retry identity.
+                return Err(BrokerError::PolicyDenied(
+                    "lease_expired_outcome_unknown".into(),
+                ));
             }
-            Ok(response)
-        })
+        }
+        Ok(response)
     }
 
     fn produce_at_epoch(
@@ -1221,6 +1229,7 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
     use kamish_meta::KamishPolicyEngine;
+    use kamish_meta::MetadataStore;
     use kamish_policy::{
         AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
     };
