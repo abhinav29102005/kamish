@@ -270,7 +270,11 @@ impl ReplicationAgent {
 
             if res.accepted {
                 if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                    outbox.advance_watermark(res.applied_watermark);
+                    outbox.advance_partition_watermark(
+                        &task.range.topic,
+                        task.range.partition,
+                        res.applied_watermark,
+                    );
                 }
                 self.meta.update_watermark(
                     &task.range.topic,
@@ -282,7 +286,11 @@ impl ReplicationAgent {
             } else {
                 if res.reason.contains("offset_gap") || res.reason.contains("partial_overlap") {
                     if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                        outbox.advance_watermark(res.applied_watermark);
+                        outbox.advance_partition_watermark(
+                            &task.range.topic,
+                            task.range.partition,
+                            res.applied_watermark,
+                        );
                     }
                     self.meta.update_watermark(
                         &task.range.topic,
@@ -316,7 +324,11 @@ impl ReplicationAgent {
                 .map_err(|e| AgentError::TransferFailed(e.to_string()))??;
             if res.accepted {
                 if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                    outbox.advance_watermark(res.applied_watermark);
+                    outbox.advance_partition_watermark(
+                        &task.range.topic,
+                        task.range.partition,
+                        res.applied_watermark,
+                    );
                 }
                 self.meta.update_watermark(
                     &task.range.topic,
@@ -328,7 +340,11 @@ impl ReplicationAgent {
             } else {
                 if res.reason.contains("offset_gap") || res.reason.contains("partial_overlap") {
                     if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                        outbox.advance_watermark(res.applied_watermark);
+                        outbox.advance_partition_watermark(
+                            &task.range.topic,
+                            task.range.partition,
+                            res.applied_watermark,
+                        );
                     }
                     self.meta.update_watermark(
                         &task.range.topic,
@@ -453,7 +469,7 @@ impl ReplicationAgent {
 
         // Advance local outbox cursor and trim ranges completely committed remotely (INV-5, INV-6)
         if let Some(outbox) = self.local_broker.get_outbox(target_region) {
-            outbox.advance_watermark(remote_watermark);
+            outbox.advance_partition_watermark(topic, partition, remote_watermark);
         }
         self.meta
             .update_watermark(topic, partition, target_region, remote_watermark);
@@ -545,7 +561,11 @@ impl ReplicationAgent {
             let rep_res = peer_broker.handle_replication(rep_req)?;
             if rep_res.accepted {
                 // 3. Advance local outbox watermark and trim applied range (INV-5, INV-6)
-                outbox.advance_watermark(rep_res.applied_watermark);
+                outbox.advance_partition_watermark(
+                    &range.topic,
+                    range.partition,
+                    rep_res.applied_watermark,
+                );
                 self.meta.update_watermark(
                     &range.topic,
                     range.partition,
@@ -557,7 +577,11 @@ impl ReplicationAgent {
                 summary.bytes_transferred += range.byte_size();
                 summary.advanced_watermark = rep_res.applied_watermark;
             } else if rep_res.reason.contains("offset_gap") {
-                outbox.advance_watermark(rep_res.applied_watermark);
+                outbox.advance_partition_watermark(
+                    &range.topic,
+                    range.partition,
+                    rep_res.applied_watermark,
+                );
                 self.meta.update_watermark(
                     &range.topic,
                     range.partition,
@@ -654,7 +678,11 @@ impl ReplicationAgent {
             }
 
             if rep_res.accepted {
-                outbox.advance_watermark(rep_res.applied_watermark);
+                outbox.advance_partition_watermark(
+                    &range.topic,
+                    range.partition,
+                    rep_res.applied_watermark,
+                );
                 self.meta.update_watermark(
                     &range.topic,
                     range.partition,
@@ -666,7 +694,11 @@ impl ReplicationAgent {
                 summary.bytes_transferred += range.byte_size();
                 summary.advanced_watermark = rep_res.applied_watermark;
             } else if rep_res.reason.contains("offset_gap") {
-                outbox.advance_watermark(rep_res.applied_watermark);
+                outbox.advance_partition_watermark(
+                    &range.topic,
+                    range.partition,
+                    rep_res.applied_watermark,
+                );
                 self.meta.update_watermark(
                     &range.topic,
                     range.partition,
@@ -688,7 +720,7 @@ impl ReplicationAgent {
         local_hwm: u64,
     ) -> ReplicationLagMetric {
         let remote_watermark = match self.local_broker.get_outbox(target_region) {
-            Some(o) => o.durable_watermark(),
+            Some(o) => o.durable_partition_watermark(topic, partition),
             None => 0,
         };
 

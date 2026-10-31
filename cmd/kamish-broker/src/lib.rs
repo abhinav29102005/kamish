@@ -567,7 +567,7 @@ impl BrokerServer {
         target_region: &str,
     ) -> Result<usize, BrokerError> {
         let outbox = self.get_or_create_outbox(target_region);
-        let start_offset = outbox.durable_watermark();
+        let start_offset = outbox.durable_partition_watermark(topic, partition);
 
         let log = self.get_or_create_log(topic, partition, 1)?;
         let hwm = log.high_watermark();
@@ -580,7 +580,7 @@ impl BrokerServer {
         let mut staged_count = 0;
 
         for record in records {
-            if outbox.contains_offset(record.base_offset) {
+            if outbox.contains_partition_offset(topic, partition, record.base_offset) {
                 continue;
             }
 

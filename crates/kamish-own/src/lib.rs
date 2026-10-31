@@ -64,10 +64,10 @@ impl QuarantineStore {
             let mut file = File::open(&q_file)?;
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
-            if !buf.is_empty() {
-                if let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&buf) {
-                    quarantined = records;
-                }
+            if !buf.is_empty()
+                && let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&buf)
+            {
+                quarantined = records;
             }
         }
 
@@ -202,13 +202,13 @@ impl PartitionOwnerCoordinator {
         partition: u32,
         write_epoch: u64,
     ) -> Result<(), OwnershipError> {
-        if let Some(ownership) = self.meta_store.get_ownership(topic, partition) {
-            if write_epoch < ownership.epoch {
-                return Err(OwnershipError::StaleWriterFenced {
-                    request_epoch: write_epoch,
-                    current_epoch: ownership.epoch,
-                });
-            }
+        if let Some(ownership) = self.meta_store.get_ownership(topic, partition)
+            && write_epoch < ownership.epoch
+        {
+            return Err(OwnershipError::StaleWriterFenced {
+                request_epoch: write_epoch,
+                current_epoch: ownership.epoch,
+            });
         }
         Ok(())
     }
@@ -233,7 +233,6 @@ impl PartitionOwnerCoordinator {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use hex;
     use kamish_audit::AuditLog;
     use kamish_policy::{
         AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,

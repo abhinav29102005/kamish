@@ -209,7 +209,6 @@ impl RouteSelector {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use hex;
     use kamish_audit::AuditLog;
     use kamish_policy::{
         AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,

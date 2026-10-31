@@ -10,7 +10,7 @@
 //! - INV-6: Retrying an applied range is a no-op.
 
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 
@@ -63,6 +63,7 @@ struct OutboxInner {
     ranges: VecDeque<OutboxRange>,
     queued_bytes: usize,
     durable_watermark: u64,
+    watermarks: HashMap<(String, u32), u64>,
     max_bytes: usize,
 }
 
@@ -123,6 +124,7 @@ impl DestinationOutbox {
                 ranges: VecDeque::new(),
                 queued_bytes: 0,
                 durable_watermark: 0,
+                watermarks: HashMap::new(),
                 max_bytes,
             })),
         }
@@ -167,18 +169,52 @@ impl DestinationOutbox {
     /// Retrieves pending ranges starting strictly from the durable watermark (§3.4.5, INV-5).
     pub fn next_transfer_batch(&self, max_ranges: usize) -> Vec<OutboxRange> {
         let inner = self.inner.read().unwrap();
-        let watermark = inner.durable_watermark;
 
         inner
             .ranges
             .iter()
-            .filter(|r| r.end_offset > watermark)
+            .filter(|r| {
+                let wm = inner
+                    .watermarks
+                    .get(&(r.topic.clone(), r.partition))
+                    .copied()
+                    .unwrap_or(inner.durable_watermark);
+                r.end_offset > wm
+            })
             .take(max_ranges)
             .cloned()
             .collect()
     }
 
-    /// Acknowledges receiver progress, trimming applied ranges from the outbox queue (§3.3.2, INV-6).
+    /// Acknowledges receiver progress for a specific partition, trimming applied ranges (§3.3.2, INV-6).
+    pub fn advance_partition_watermark(&self, topic: &str, partition: u32, new_watermark: u64) {
+        let mut inner = self.inner.write().unwrap();
+        let key = (topic.to_string(), partition);
+        let current = inner.watermarks.get(&key).copied().unwrap_or(0);
+        if new_watermark <= current {
+            return; // strictly monotonic
+        }
+        inner.watermarks.insert(key, new_watermark);
+        inner.durable_watermark = std::cmp::max(inner.durable_watermark, new_watermark);
+
+        // Trim strictly ranges belonging to this (topic, partition)
+        let mut trimmed_bytes = 0;
+        inner.ranges.retain(|r| {
+            if r.topic == topic && r.partition == partition {
+                if r.end_offset <= new_watermark {
+                    trimmed_bytes += r.byte_size();
+                    false
+                } else {
+                    true
+                }
+            } else {
+                true // Retain other partitions
+            }
+        });
+        inner.queued_bytes = inner.queued_bytes.saturating_sub(trimmed_bytes);
+    }
+
+    /// Acknowledges receiver progress across all partitions, trimming applied ranges (§3.3.2, INV-6).
     pub fn advance_watermark(&self, new_watermark: u64) {
         let mut inner = self.inner.write().unwrap();
         if new_watermark <= inner.durable_watermark {
@@ -187,15 +223,22 @@ impl DestinationOutbox {
 
         inner.durable_watermark = new_watermark;
 
-        // Trim ranges completely covered by the new watermark
-        while let Some(front) = inner.ranges.front() {
-            if front.end_offset <= new_watermark {
-                let removed = inner.ranges.pop_front().unwrap();
-                inner.queued_bytes = inner.queued_bytes.saturating_sub(removed.byte_size());
-            } else {
-                break;
+        for val in inner.watermarks.values_mut() {
+            if *val < new_watermark {
+                *val = new_watermark;
             }
         }
+
+        let mut trimmed_bytes = 0;
+        inner.ranges.retain(|r| {
+            if r.end_offset <= new_watermark {
+                trimmed_bytes += r.byte_size();
+                false
+            } else {
+                true
+            }
+        });
+        inner.queued_bytes = inner.queued_bytes.saturating_sub(trimmed_bytes);
     }
 
     pub fn queued_bytes(&self) -> usize {
@@ -219,6 +262,15 @@ impl DestinationOutbox {
         self.inner.read().unwrap().durable_watermark
     }
 
+    pub fn durable_partition_watermark(&self, topic: &str, partition: u32) -> u64 {
+        let inner = self.inner.read().unwrap();
+        inner
+            .watermarks
+            .get(&(topic.to_string(), partition))
+            .copied()
+            .unwrap_or(inner.durable_watermark)
+    }
+
     pub fn target_region(&self) -> &str {
         &self.target_region
     }
@@ -233,6 +285,25 @@ impl DestinationOutbox {
             .ranges
             .iter()
             .any(|r| r.start_offset <= offset && offset < r.end_offset)
+    }
+
+    /// Checks if a given offset for a specific topic/partition has already been queued or acknowledged.
+    pub fn contains_partition_offset(&self, topic: &str, partition: u32, offset: u64) -> bool {
+        let inner = self.inner.read().unwrap();
+        let wm = inner
+            .watermarks
+            .get(&(topic.to_string(), partition))
+            .copied()
+            .unwrap_or(inner.durable_watermark);
+        if offset < wm {
+            return true;
+        }
+        inner.ranges.iter().any(|r| {
+            r.topic == topic
+                && r.partition == partition
+                && r.start_offset <= offset
+                && offset < r.end_offset
+        })
     }
 }
 
