@@ -1,0 +1,15 @@
+[package]
+name = "kamish-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kamish-audit = { path = "../../crates/kamish-audit" }
+kamish-policy = { path = "../../crates/kamish-policy" }
+kamish-enforce = { path = "../../crates/kamish-enforce" }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

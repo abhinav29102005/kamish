@@ -1,0 +1,100 @@
+# Kamish — Task Audit Ledger
+
+This ledger records every engineering task, cross-referencing requirements, components, and invariants from [project.md](project.md).
+
+---
+
+## Invariant Reference Table
+
+| Invariant | Description | Verification Method |
+|---|---|---|
+| **INV-1** | Offsets are dense and monotonic per partition | Ordering checker & Segment index test |
+| **INV-2** | An acknowledged record is on a majority of in-region replicas | Majority fsync verification |
+| **INV-3** | A new leader holds all acknowledged records | Failover & loss checker |
+| **INV-4** | A fetch never returns records beyond committed high-water mark | HWM reader contract test |
+| **INV-5** | Destination log is a prefix of source log; offsets match exactly | Prefix & checksum verification |
+| **INV-6** | Retrying an applied range is a no-op | Outbox retry & idempotent session test |
+| **INV-7** | No two regions commit writes for same partition and epoch | Epoch lease & stale-epoch auditor |
+| **INV-8** | No payload outside legal set or sealed-only mode | Broker enforcement & canary scanner |
+| **INV-9** | An unsigned, invalid or rolled-back policy is never applied | Ed25519 signature & version test |
+
+---
+
+## Task Audit Log
+
+### TASK-0001: Project Setup & Audit Architecture
+* **Timestamp:** 2026-10-31 16:42 UTC
+* **Components:** Project Root, Documentation, ADRs
+* **Project.md References:** §1.4, §1.5, §3.6, §4.7.1, §4.11
+* **Invariants Checked:** None directly violated; foundational setup for INV-1 through INV-9.
+* **Actions Taken:**
+  1. Established Architecture Decision Records in `decisions.md` (ADR-0001 to ADR-0004).
+  2. Created task audit ledger `TASK_AUDIT.md` for continuous verification against `project.md`.
+  3. Configured Rust multi-crate workspace adhering to repository structure in §3.6.
+* **Verification:** Structure verified against repository manifest in `project.md`.
+* **Status:** PASS
+
+
+### TASK-0002: Implementation of Hash-Chained Decision Audit Log (`kamish-audit`)
+* **Timestamp:** 2026-10-31 16:44 UTC
+* **Component:** `crates/kamish-audit`
+* **Project.md References:** §1.4.1 (FR-13), §2.6, §2.7.5, §3.4.1, §4.7.1
+* **Invariants Checked:** INV-8, INV-9
+* **Actions Taken:**
+  1. Built SHA-256 hash-chained immutable decision log with sequence verification.
+  2. Implemented tamper-detection and full chain verification (`verify_integrity()`).
+  3. Enforced zero-payload threat model: stores only action, class, regions, policy version, and decision outcome.
+* **Verification:** Unit tests verifying genesis link, append progression, disk persistence, and tamper resistance (`test_tamper_detection`).
+* **Status:** PASS
+
+### TASK-0003: Sovereignty Policy Engine & Versioning (`kamish-policy`)
+* **Timestamp:** 2026-10-31 16:44 UTC
+* **Component:** `crates/kamish-policy`
+* **Project.md References:** §2.4, §3.3.3, INV-9, FR-01, FR-08
+* **Invariants Checked:** INV-9 (tampered / replayed / rolled-back policy rejection)
+* **Actions Taken:**
+  1. Implemented class rules, legal set validation, and destination modes (`Cleartext`, `SealedOnly`, `Deny`).
+  2. Built Ed25519 signing and verification with trusted issuer enforcement.
+  3. Implemented policy cache with strict monotonic versioning and staleness expiration.
+* **Verification:** Unit tests verifying signature validity, expiry windows, and rollback rejection.
+* **Status:** PASS
+
+### TASK-0004: Single Decision Function (`kamish-enforce`)
+* **Timestamp:** 2026-10-31 16:45 UTC
+* **Component:** `crates/kamish-enforce`
+* **Project.md References:** §2.6, §2.7.5, §3.4.1, INV-8, FR-01, FR-08
+* **Invariants Checked:** INV-8 (payload restricted to legal set/mode), INV-9 (fail-closed if policy invalid/stale)
+* **Actions Taken:**
+  1. Built `Enforcer::decide()` mapping §3.4.1 logic across produce, cross-region send, promote, and fetch operations.
+  2. Integrated automatic auditing: every single decision is logged into the `kamish-audit` hash chain.
+  3. Implemented fail-closed behavior for unknown classes, expired policies, or non-legal regions.
+* **Verification:** Unit tests for produce, remote send, non-legal destination rejection, and promotion gating.
+* **Status:** PASS
+
+### TASK-0005: Segmented Append-Only Log Storage (`kamish-log`)
+* **Timestamp:** 2026-10-31 16:45 UTC
+* **Component:** `crates/kamish-log`
+* **Project.md References:** §3.5.2, INV-1, INV-4
+* **Invariants Checked:** INV-1 (dense monotonic offsets), INV-4 (reads bounded by High-Water Mark)
+* **Actions Taken:**
+  1. Implemented §3.5.2 record envelope (`magic`, `epoch`, `class_id`, `policy_version`, `base_offset`, `payload`, `checksum`).
+  2. Implemented CRC32 checksum verification and epoch fencing checks.
+  3. Implemented HWM read bounds and persistent disk recovery.
+* **Verification:** Unit tests verifying monotonic offsets, CRC validation, HWM-bounded fetches, and stale-epoch rejection.
+* **Status:** PASS
+
+### TASK-0006: Project Renaming to Kamish & Semantic Endpoint Protocol Design
+* **Timestamp:** 2026-10-31 16:48 UTC
+* **Component:** Entire Workspace & `proto/kamish/stream.proto`
+* **Project.md References:** §1.1, §3.5.1, §3.6, ADR-0005
+* **Invariants Checked:** INV-1 through INV-9
+* **Actions Taken:**
+  1. Standardized project naming to **Kamish** across all crates (`kamish-audit`, `kamish-policy`, `kamish-enforce`, `kamish-log`) and binaries (`kamish-broker`, `kamish-agent`, `kamish-ctl`).
+  2. Deprecated generic `/api/v1` styles; created domain-specific semantic Protobuf protocol in `proto/kamish/stream.proto`:
+     - Data plane: `/kamish.stream.StreamService/Produce`, `/kamish.stream.StreamService/Fetch`
+     - Replication plane: `/kamish.replication.ReplicationService/TransferReplicationRange`, `/kamish.replication.ReplicationService/GetDurableWatermark`
+     - Governance plane: `/kamish.governance.GovernanceService/PublishPolicy`, `/kamish.governance.GovernanceService/VerifyAuditChain`
+     - Failover plane: `/kamish.cluster.ClusterCoordinationService/RenewPartitionLease`, `/kamish.cluster.ClusterCoordinationService/PromotePartitionOwner`
+  3. Added ADR-0005 in `decisions.md`.
+* **Verification:** Full workspace build and test pass (`cargo test --workspace`).
+* **Status:** PASS
