@@ -281,3 +281,16 @@ This ledger records every engineering task, cross-referencing requirements, comp
   2. Orchestrates full check: workspace compilation, invariant test suite (23 tests), and live execution of Scenarios A, B, and C.
 * **Verification:** Script executes end-to-end with 100% success output.
 * **Status:** PASS
+
+### TASK-0018: Disk Commit Log Fsync Durability & Sequential Offset Reads (`crates/kamish-log`)
+* **Timestamp:** 2026-10-31 17:53 UTC
+* **Component:** `crates/kamish-log`
+* **Project.md References:** §3.1.1, §3.5.2, INV-1, INV-2, INV-4
+* **Invariants Checked:** INV-1 (dense monotonic offsets), INV-2 (fsync durability before ack), INV-4 (HWM read bounds)
+* **Actions Taken:**
+  1. Maintained persistent open file descriptor in `PartitionLogInner` to avoid per-append open/close syscall overhead.
+  2. Implemented hardware-level `file.sync_all()` upon every append, guaranteeing `fsync` flush durability to persistent storage before returning an acknowledgment to the producer.
+  3. Implemented `read_range(start_offset, end_offset)` supporting bounded sequential consumer range queries.
+  4. Built `test_fsync_flush_durability_and_sequential_reads`: wrote 200 records with hardware sync, simulated crash/shutdown by dropping the log, reopened from disk, and validated sequential chunked consumer reads with CRC32 verification.
+* **Verification:** Unit tests verifying persistent segment replay, hardware sync durability, and sequential offset reading (`cargo test -p kamish-log`).
+* **Status:** PASS

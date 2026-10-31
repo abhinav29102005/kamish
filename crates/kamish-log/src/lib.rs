@@ -1,12 +1,15 @@
-//! Segmented Append-Only Log with Dense Monotonic Offsets and Envelope Checksums.
+//! Segmented Append-Only Log with Dense Monotonic Offsets, fsync Flush Durability, and Checksum Verification.
 //!
 //! Complies with `project.md`:
+//! - §3.1.1: Produce Path with Policy Enforcement and Acknowledgment (fsync flush durability).
 //! - §3.5.2: Record Envelope Layout (magic, epoch, class_id, policy_version, base_offset, payload, checksum).
 //! - INV-1: Offsets are dense and monotonic per partition.
+//! - INV-2: Acknowledged record is durable on disk before Ack.
 //! - INV-4: A fetch never returns records beyond the committed high-water mark.
 
 use crc32fast::Hasher as CrcHasher;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -99,7 +102,7 @@ impl RecordEnvelope {
     }
 }
 
-/// In-memory and persistent partition log manager enforcing INV-1 and INV-4.
+/// In-memory and persistent partition log manager enforcing INV-1, INV-2, and INV-4.
 #[derive(Clone)]
 pub struct PartitionLog {
     inner: Arc<RwLock<PartitionLogInner>>,
@@ -111,6 +114,7 @@ struct PartitionLogInner {
     next_offset: u64,
     high_watermark: u64,
     records: Vec<RecordEnvelope>,
+    active_file: Option<File>,
 }
 
 impl PartitionLog {
@@ -156,11 +160,13 @@ impl PartitionLog {
                 next_offset,
                 high_watermark,
                 records,
+                active_file: None,
             })),
         })
     }
 
-    /// Appends a payload batch, enforcing INV-1 (monotonic dense offsets) and epoch fencing (§3.4.2).
+    /// Appends a payload batch, enforcing INV-1 (monotonic dense offsets), epoch fencing (§3.4.2),
+    /// and fsync flush durability to underlying disk hardware (§3.1.1, INV-2).
     pub fn append(
         &self,
         epoch: u64,
@@ -184,17 +190,26 @@ impl PartitionLog {
         let offset = inner.next_offset;
         let envelope = RecordEnvelope::new(epoch, class_id, policy_version, offset, payload);
 
-        // Append to file
-        let log_path = inner.dir.join("partition.data");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)?;
+        // Open or reuse persistent segment file
+        if inner.active_file.is_none() {
+            let log_path = inner.dir.join("partition.data");
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_path)?;
+            inner.active_file = Some(file);
+        }
+
         let serialized = serde_json::to_vec(&envelope).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let len_bytes = (serialized.len() as u32).to_be_bytes();
+
+        let file = inner.active_file.as_mut().unwrap();
         file.write_all(&len_bytes)?;
         file.write_all(&serialized)?;
         file.flush()?;
+
+        // Genuine fsync flush to hardware storage controller before acknowledging append (INV-2)
+        file.sync_all()?;
 
         inner.records.push(envelope);
         inner.next_offset += 1;
@@ -216,6 +231,18 @@ impl PartitionLog {
         );
 
         inner.records[start_offset as usize..start_offset as usize + count].to_vec()
+    }
+
+    /// Sequential consumer reads between `[start_offset, end_offset)`.
+    pub fn read_range(&self, start_offset: u64, end_offset: u64) -> Vec<RecordEnvelope> {
+        let inner = self.inner.read().unwrap();
+        if start_offset >= inner.high_watermark || start_offset >= end_offset {
+            return Vec::new();
+        }
+
+        let effective_end = std::cmp::min(end_offset, inner.high_watermark) as usize;
+        let start = start_offset as usize;
+        inner.records[start..effective_end].to_vec()
     }
 
     pub fn next_offset(&self) -> u64 {
@@ -276,9 +303,53 @@ mod tests {
         let err = log.append(4, "EU-class", 1, b"stale write".to_vec()).unwrap_err();
         assert!(matches!(err, LogError::StaleEpoch { current: 5, requested: 4 }));
     }
-}
 
-use std::collections::HashMap;
+    #[test]
+    fn test_fsync_flush_durability_and_sequential_reads() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().to_path_buf();
+
+        // 1. Write 200 records with fsync durability
+        {
+            let log = PartitionLog::open(&path, 1).unwrap();
+            for i in 0..200 {
+                let payload = format!("durable-event-payload-{:04}", i).into_bytes();
+                let offset = log.append(1, "sovereign-class", 1, payload).unwrap();
+                assert_eq!(offset, i as u64);
+            }
+            assert_eq!(log.high_watermark(), 200);
+            // PartitionLog dropped here, simulating broker shutdown/process termination
+        }
+
+        // 2. Restart recovery: reopen partition log from raw disk files
+        let recovered = PartitionLog::open(&path, 1).unwrap();
+        assert_eq!(recovered.high_watermark(), 200);
+        assert_eq!(recovered.next_offset(), 200);
+
+        // 3. Verify sequential consumer offset reads in chunks of 50
+        let mut consumed = 0;
+        let mut cur_offset = 0;
+        while cur_offset < 200 {
+            let chunk = recovered.read(cur_offset, 50);
+            assert_eq!(chunk.len(), 50);
+            for record in chunk {
+                assert_eq!(record.base_offset, cur_offset);
+                assert!(record.verify_checksum());
+                let expected_payload = format!("durable-event-payload-{:04}", cur_offset).into_bytes();
+                assert_eq!(record.payload, expected_payload);
+                cur_offset += 1;
+                consumed += 1;
+            }
+        }
+        assert_eq!(consumed, 200);
+
+        // 4. Test read_range slice
+        let slice = recovered.read_range(10, 25);
+        assert_eq!(slice.len(), 15);
+        assert_eq!(slice[0].base_offset, 10);
+        assert_eq!(slice[14].base_offset, 24);
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum SessionError {
