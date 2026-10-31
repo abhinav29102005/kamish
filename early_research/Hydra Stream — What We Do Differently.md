@@ -2,6 +2,11 @@
 
 *Companion to the Engineering Plan · Draft v0.1 · 31 Oct 2026*
 
+**Research update, 31 Oct 2026:** The prior-art wording below incorporates the
+[dated source review](SOURCES_AND_PRIOR_ART.md). These are proposed differences;
+the [implementation review](LOOPHOLES_REVIEW.md) records remaining integration
+gaps and counterexamples.
+
 ## How to read this document
 
 This lists only the parts of Hydra Stream we are proposing as different from existing systems. Everything else (log storage, in-region replication, producer idempotence, and so on) is in the companion baseline document and is deliberately **not** claimed as new.
@@ -25,7 +30,7 @@ Two cautions apply to every item below:
 
 ## 1. Broker-side residency enforcement at every persistence and send point (P0)
 
-**What exists.** Pulsar lets a producer restrict a single message to a list of clusters, but the application supplies that list when it builds the message, and replication is otherwise configured per namespace. Gateway-style products enforce rules on the client connection path using tokens or tags. Kafka-based tooling can require a region label on topics so that replication can be policy-checked.
+**What exists.** Pulsar 5.0.x documents tenant/namespace `allowed-clusters` restrictions enforced independently of a producer's message-level replication list; producers cannot override those restrictions. It also supports topic-level replication targets. Kafka MirrorMaker 2 supports administrator-defined topic-filtered replication flows. The proposed difference must therefore be demonstrated across the full persistence, read, replay, backup and ownership lifecycle, rather than framed as the first server-side replication restriction. See sources S1 and S4 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
 **What we do.** One enforcement library, linked into the ingress, broker, replication sender and receiver, backup or tiered export, consumer fetch, telemetry export and admin tools. A record’s class and the signed policy version are stamped into its envelope at ingress. No component can write to disk or send bytes across a region boundary without calling the same decision function.
 
@@ -41,7 +46,7 @@ Two cautions apply to every item below:
 
 ## 2. Three destination modes: deny, sealed-only, cleartext (P1)
 
-**What exists.** Replication tools generally treat a destination as either replicated or not.
+**What exists.** Selective replication and client-side end-to-end encryption already exist, including in Pulsar. The proposed addition is a unified class policy selecting deny, ciphertext-only or cleartext for each destination, with explicit key and recovery-location constraints. Ciphertext storage alone is not novel. See S4–S5 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
 **What we do.** Each class has a mode per destination region. A sealed copy is ciphertext only, with keys that stay in the class’s key-residency region. EU regulator guidance lists strong encryption with exporter-held keys as an effective supplementary measure for storage-only transfers such as backup, which is the legal idea behind this mode.
 
@@ -70,7 +75,7 @@ Two cautions apply to every item below:
 
 ## 4. Per-class survival and degradation rules (P0)
 
-**What exists.** Systems that offer region-survival settings generally apply them to a whole database or cluster. CockroachDB documents that its simple restricted-placement domiciling does not work with region-survival databases, so domiciling with region survival needs a different mechanism. Cluster Linking and Shadowing mirror topics or whole clusters.
+**What exists.** Existing systems expose controls below whole-cluster granularity: Pulsar has topic replication policies, Confluent Cluster Linking manages mirror topics, and Redpanda Shadowing supports individual-topic failover. The proposed difference is the integrated class-specific contract spanning residency, acknowledgment, ownership and backpressure, not granularity alone. See S4, S6 and S7 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
 **What we do.** Each class declares its legal set, ownership mode (movable or pinned), acknowledgment mode, failover candidates and backpressure behavior. A class with no legal alternate region degrades by policy; other classes keep running. Pinned classes need no metadata quorum and keep accepting local writes if the control plane is lost.
 
@@ -86,7 +91,7 @@ Two cautions apply to every item below:
 
 ## 5. Fencing built into the broker, gated by policy eligibility (P0)
 
-**What exists.** In the documentation we reviewed, promotion and failover are operator-driven. Cluster Linking’s migration flow has operators stop producers and promote once lag is zero; messages written to the old source afterwards are not migrated. Redpanda’s guidance for avoiding split-brain is to make sure clients are reconfigured before resuming writes. Pulsar’s replicated subscriptions sync only the baseline cursor position, so consumers can see duplicates after failover.
+**What exists.** The reviewed Cluster Linking documentation exposes promote/failover plus restore/reverse operations. Redpanda explicitly directs operators to reconfigure clients before resuming writes to avoid split brain. Pulsar replicated subscriptions synchronize the baseline mark-delete cursor, not every individual acknowledgment, so failover can redeliver messages. This targeted review supports testing integrated policy-gated fencing against those documented workflows; it does not establish that every existing product lacks automated failover. See S4, S6 and S7 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
 **What we do.**
 

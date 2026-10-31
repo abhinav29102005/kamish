@@ -429,3 +429,17 @@ This ledger records every engineering task, cross-referencing requirements, comp
     - Degraded Link: **6,464.4 msg/s** | p50: **1,177.5 µs** | p90: **1,474.9 µs** | p99: **1.912 ms**
   - **Decoupling Confirmed**: Local produce path maintains sub-millisecond to ~1.2ms p50 latency and ~1.4–2.4ms p99 tail latency under both normal and degraded 300ms WAN conditions.
 * **Status:** PASS
+
+### TASK-0025: Early Research Review, Configuration Roadmap & Independent Counterexamples
+* **Timestamp:** 2026-10-31 (research date)
+* **Components:** `early_research/`, independent `early_research/probes/` harness
+* **Reviewed Revision:** `4ebfb74375ed2c6ba84e0fdbb4a0d864bb5cc86a`
+* **Project.md References:** §1.3, §2.4–2.6, §3.5.3, §4.2–4.7, §4.10–4.12
+* **Invariants Checked:** Original INV-1 through INV-9 used as the reference; audit numbering drift and incomplete evidence explicitly recorded.
+* **Actions Taken:**
+  1. Reviewed the original dossier, baseline, differentiators and rendered design; added a research index, loophole review, configuration roadmap and dated primary-source register.
+  2. Corrected prior-art wording for Pulsar allowed-cluster enforcement/E2EE and topic-level replication/failover controls in existing products.
+  3. Rechecked earlier failures against the new atomic admission implementation; confirmed oversized-write rejection now passes.
+  4. Preserved a portable, isolated research harness for policy, recovery, stream cursor, session, ownership and audit counterexamples.
+* **Verification:** `cargo test --workspace`: 61 passed. Research harness: 11 checks, 1 passed and 10 failed as documented in [PROBE_RESULTS.md](early_research/PROBE_RESULTS.md). Broker and producer CLI help checks still panic on duplicate short flags. Local research-document links and proposed TOML syntax validated.
+* **Status:** RESEARCH COMPLETE; documented implementation failures remain open. External systems were reviewed through documentation, not deployed or benchmarked in this task.

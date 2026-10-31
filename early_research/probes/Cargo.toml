@@ -1,0 +1,20 @@
+[package]
+name = "kamish-repo-review"
+version = "0.0.0"
+edition = "2024"
+
+# Independent research harness; not part of the application's default test suite.
+[workspace]
+
+[dependencies]
+kamish-broker = { path = "../../cmd/kamish-broker" }
+kamish-audit = { path = "../../crates/kamish-audit" }
+kamish-enforce = { path = "../../crates/kamish-enforce" }
+kamish-policy = { path = "../../crates/kamish-policy" }
+kamish-meta = { path = "../../crates/kamish-meta" }
+kamish-log = { path = "../../crates/kamish-log" }
+ed25519-dalek = "2.1"
+serde_json = "1.0"
+chrono = "0.4"
+hex = "0.4"
+tempfile = "3"
