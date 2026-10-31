@@ -15,10 +15,10 @@ use kamish_meta::MetadataStore;
 use kamish_outbox::OutboxRange;
 use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Error)]
 pub enum AgentError {
@@ -165,6 +165,23 @@ impl ReplicationAgent {
     }
 
     /// Sets simulated link metrics (RTT, packet loss) for slow-link testing (§4.2).
+    /// Returns a deduplicated list of all registered remote peer target regions.
+    pub fn registered_targets(&self) -> Vec<String> {
+        let mut targets = HashSet::new();
+        for p in self.peer_brokers.read().unwrap().keys() {
+            targets.insert(p.clone());
+        }
+        for p in self.peer_addresses.read().unwrap().keys() {
+            targets.insert(p.clone());
+        }
+        for p in &self.local_broker.known_peers {
+            targets.insert(p.clone());
+        }
+        let mut v: Vec<String> = targets.into_iter().collect();
+        v.sort();
+        v
+    }
+
     pub fn set_link_metrics(&self, target_region: &str, metrics: LinkMetrics) {
         self.link_metrics
             .write()
@@ -299,6 +316,14 @@ impl ReplicationAgent {
                         &task.target_region,
                         res.applied_watermark,
                     );
+                } else if res.reason.contains("replication_history_conflict") {
+                    error!(
+                        target = %task.target_region,
+                        topic = %task.range.topic,
+                        partition = task.range.partition,
+                        offset = task.range.start_offset,
+                        "Replication history conflict detected during TCP transfer"
+                    );
                 }
                 warn!(
                     target = %task.target_region,
@@ -353,6 +378,14 @@ impl ReplicationAgent {
                         &task.target_region,
                         res.applied_watermark,
                     );
+                } else if res.reason.contains("replication_history_conflict") {
+                    error!(
+                        target = %task.target_region,
+                        topic = %task.range.topic,
+                        partition = task.range.partition,
+                        offset = task.range.start_offset,
+                        "Replication history conflict detected during TCP transfer"
+                    );
                 }
                 warn!(
                     target = %task.target_region,
@@ -376,51 +409,129 @@ impl ReplicationAgent {
 
         let handle = tokio::spawn(async move {
             info!("Replication retry worker started");
-            while let Some(mut task) = rx.recv().await {
-                let mut completed = false;
-                while task.attempt <= task.max_retries {
-                    match self.execute_task(&task).await {
-                        Ok(true) => {
-                            completed = true;
-                            break;
-                        }
-                        Ok(false) => {
-                            task.attempt += 1;
-                            if task.attempt <= task.max_retries {
-                                let delay = task.backoff_ms * (1 << (task.attempt - 1));
-                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+            let mut target_backoffs: HashMap<
+                String,
+                (tokio::time::Instant, tokio::time::Duration),
+            > = HashMap::new();
+            let base_backoff = tokio::time::Duration::from_millis(50);
+            let max_backoff = tokio::time::Duration::from_millis(2000);
+            let sweep_interval = tokio::time::Duration::from_millis(50);
+
+            loop {
+                tokio::select! {
+                    maybe_task = rx.recv() => {
+                        match maybe_task {
+                            Some(mut task) => {
+                                let mut completed = false;
+                                while task.attempt <= task.max_retries {
+                                    match self.execute_task(&task).await {
+                                        Ok(true) => {
+                                            completed = true;
+                                            target_backoffs.remove(&task.target_region);
+                                            break;
+                                        }
+                                        Ok(false) => {
+                                            task.attempt += 1;
+                                            if task.attempt <= task.max_retries {
+                                                let delay = task.backoff_ms * (1 << (task.attempt - 1));
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                                            }
+                                        }
+                                        Err(e) => {
+                                            task.attempt += 1;
+                                            if task.attempt <= task.max_retries {
+                                                let delay = task.backoff_ms * (1 << (task.attempt - 1));
+                                                warn!(
+                                                    target = %task.target_region,
+                                                    attempt = task.attempt,
+                                                    delay_ms = delay,
+                                                    error = %e,
+                                                    "Replication task failed, retrying with backoff"
+                                                );
+                                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                                            } else {
+                                                warn!(
+                                                    target = %task.target_region,
+                                                    error = %e,
+                                                    "Replication task exhausted max retries; remaining durable in outbox"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                if !completed {
+                                    let next_delay = target_backoffs
+                                        .get(&task.target_region)
+                                        .map_or(base_backoff, |(_, prev)| (*prev * 2).min(max_backoff));
+                                    target_backoffs.insert(
+                                        task.target_region.clone(),
+                                        (tokio::time::Instant::now() + next_delay, next_delay),
+                                    );
+                                    warn!(
+                                        target = %task.target_region,
+                                        topic = %task.range.topic,
+                                        partition = task.range.partition,
+                                        start_offset = task.range.start_offset,
+                                        backoff_ms = next_delay.as_millis(),
+                                        "Replication task not acknowledged; outbox retains range for resume"
+                                    );
+                                }
                             }
-                        }
-                        Err(e) => {
-                            task.attempt += 1;
-                            if task.attempt <= task.max_retries {
-                                let delay = task.backoff_ms * (1 << (task.attempt - 1));
-                                warn!(
-                                    target = %task.target_region,
-                                    attempt = task.attempt,
-                                    delay_ms = delay,
-                                    error = %e,
-                                    "Replication task failed, retrying with backoff"
-                                );
-                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
-                            } else {
-                                warn!(
-                                    target = %task.target_region,
-                                    error = %e,
-                                    "Replication task exhausted max retries; remaining durable in outbox"
-                                );
+                            None => {
+                                info!("Replication task channel closed; stopping retry worker");
+                                break;
                             }
                         }
                     }
-                }
-                if !completed {
-                    warn!(
-                        target = %task.target_region,
-                        topic = %task.range.topic,
-                        partition = task.range.partition,
-                        start_offset = task.range.start_offset,
-                        "Replication task not acknowledged; outbox retains range for resume"
-                    );
+                    _ = tokio::time::sleep(sweep_interval) => {
+                        let targets = self.registered_targets();
+                        let now = tokio::time::Instant::now();
+                        for target in targets {
+                            if let Some((ready_at, _)) = target_backoffs.get(&target) {
+                                if now < *ready_at {
+                                    continue;
+                                }
+                            }
+                            let _ = self.local_broker.refill_outbox(&target);
+                            if let Some(outbox) = self.local_broker.get_outbox(&target) {
+                                let pending = outbox.next_transfer_batch(10);
+                                for range in pending {
+                                    let task = ReplicationTask::new(&target, range);
+                                    match self.execute_task(&task).await {
+                                        Ok(true) => {
+                                            target_backoffs.remove(&target);
+                                        }
+                                        Ok(false) => {
+                                            let next_delay = target_backoffs
+                                                .get(&target)
+                                                .map_or(base_backoff, |(_, prev)| (*prev * 2).min(max_backoff));
+                                            target_backoffs.insert(
+                                                target.clone(),
+                                                (tokio::time::Instant::now() + next_delay, next_delay),
+                                            );
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            let next_delay = target_backoffs
+                                                .get(&target)
+                                                .map_or(base_backoff, |(_, prev)| (*prev * 2).min(max_backoff));
+                                            target_backoffs.insert(
+                                                target.clone(),
+                                                (tokio::time::Instant::now() + next_delay, next_delay),
+                                            );
+                                            warn!(
+                                                target = %target,
+                                                error = %e,
+                                                backoff_ms = next_delay.as_millis(),
+                                                "Sweep replication failed for target, backing off"
+                                            );
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             info!("Replication retry worker stopped");
@@ -577,7 +688,9 @@ impl ReplicationAgent {
                 summary.ranges_transferred += 1;
                 summary.bytes_transferred += range.byte_size();
                 summary.advanced_watermark = rep_res.applied_watermark;
-            } else if rep_res.reason.contains("offset_gap") {
+            } else if rep_res.reason.contains("offset_gap")
+                || rep_res.reason.contains("partial_overlap")
+            {
                 outbox.advance_partition_watermark(
                     &range.topic,
                     range.partition,
@@ -588,6 +701,35 @@ impl ReplicationAgent {
                     range.partition,
                     target_region,
                     rep_res.applied_watermark,
+                );
+                if rep_res.applied_watermark > summary.advanced_watermark {
+                    summary.advanced_watermark = rep_res.applied_watermark;
+                }
+                warn!(
+                    target = %target_region,
+                    topic = %range.topic,
+                    partition = range.partition,
+                    reason = %rep_res.reason,
+                    applied_watermark = rep_res.applied_watermark,
+                    "Replication rejected due to gap or partial overlap; halting batch to resume from confirmed prefix"
+                );
+                break;
+            } else if rep_res.reason.contains("replication_history_conflict") {
+                error!(
+                    target = %target_region,
+                    topic = %range.topic,
+                    partition = range.partition,
+                    offset = range.start_offset,
+                    "Replication rejected due to history conflict; stopping transfer batch"
+                );
+                break;
+            } else {
+                warn!(
+                    target = %target_region,
+                    topic = %range.topic,
+                    partition = range.partition,
+                    reason = %rep_res.reason,
+                    "Replication rejected by peer"
                 );
             }
         }
@@ -695,7 +837,9 @@ impl ReplicationAgent {
                 summary.ranges_transferred += 1;
                 summary.bytes_transferred += range.byte_size();
                 summary.advanced_watermark = rep_res.applied_watermark;
-            } else if rep_res.reason.contains("offset_gap") {
+            } else if rep_res.reason.contains("offset_gap")
+                || rep_res.reason.contains("partial_overlap")
+            {
                 outbox.advance_partition_watermark(
                     &range.topic,
                     range.partition,
@@ -706,6 +850,35 @@ impl ReplicationAgent {
                     range.partition,
                     target_region,
                     rep_res.applied_watermark,
+                );
+                if rep_res.applied_watermark > summary.advanced_watermark {
+                    summary.advanced_watermark = rep_res.applied_watermark;
+                }
+                warn!(
+                    target = %target_region,
+                    topic = %range.topic,
+                    partition = range.partition,
+                    reason = %rep_res.reason,
+                    applied_watermark = rep_res.applied_watermark,
+                    "Replication rejected due to gap or partial overlap; halting batch to resume from confirmed prefix"
+                );
+                break;
+            } else if rep_res.reason.contains("replication_history_conflict") {
+                error!(
+                    target = %target_region,
+                    topic = %range.topic,
+                    partition = range.partition,
+                    offset = range.start_offset,
+                    "Replication rejected due to history conflict; stopping transfer batch"
+                );
+                break;
+            } else {
+                warn!(
+                    target = %target_region,
+                    topic = %range.topic,
+                    partition = range.partition,
+                    reason = %rep_res.reason,
+                    "Replication rejected by peer"
                 );
             }
         }

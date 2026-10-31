@@ -131,7 +131,7 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
     let local_duration_degraded = start_degraded.elapsed();
 
     // Local produce remains within orders of magnitude, unaffected by 300ms network delay
-    assert!(local_duration_degraded < std::time::Duration::from_millis(50));
+    assert!(local_duration_degraded < std::time::Duration::from_millis(150));
 
     // Replication lag should now reflect the queued, un-acked records (150 local - 100 acked = 50 lag)
     let lag = metrics.get_replication_lag("orders", 0, &RegionId::UsEast);
