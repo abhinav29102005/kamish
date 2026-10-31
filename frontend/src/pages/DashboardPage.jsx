@@ -1,23 +1,24 @@
 import React, { useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
+import { policyForSelection } from '../utils/demoPolicy.js';
 
-export default function DashboardPage({ onSelectTask, onNavigate }) {
+export default function DashboardPage({ onNavigate }) {
   const {
     nodes,
     auditLedger,
+    auditError,
     telemetryHistory,
     currentTelemetry,
     produceCustomEvent,
     verifyAuditLedgerIntegrity,
-    runScenario,
-    scenarioState,
   } = useKamish();
 
   const [verifyResult, setVerifyResult] = useState(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [produceError, setProduceError] = useState(null);
 
   const activeNodeCount = Object.values(nodes).filter((n) => n.status === 'HEALTHY').length;
-  const acceptedCount = auditLedger.filter((a) => a.outcome === 'Accept').length;
+  const acceptedCount = auditLedger.filter((a) => a.outcome === 'AllowCleartext' || a.outcome === 'AllowSealed').length;
   const blockedCount = auditLedger.filter((a) => a.outcome === 'Deny').length;
 
   const handleVerifyAudit = async () => {
@@ -34,16 +35,17 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
   };
 
   const handleQuickProduce = async () => {
-    await produceCustomEvent(
-      'kamish-orders',
-      `ORD-${Math.floor(Math.random() * 90000 + 10000)}`,
-      'EU_GDPR_STRICT'
-    );
+    setProduceError(null);
+    try {
+      await produceCustomEvent('kamish-orders', `ORD-${Date.now()}`, policyForSelection('EU_GDPR_STRICT'));
+    } catch (error) {
+      setProduceError(error instanceof Error ? error.message : 'Could not create demo event');
+    }
   };
 
   // Generate dynamic SVG path from telemetryHistory
   const samples = telemetryHistory.slice(-12);
-  const maxThroughput = Math.max(...samples.map((s) => s.throughputEps), 15000);
+  const maxThroughput = Math.max(...samples.map((s) => s.throughputEps), 1);
   const svgWidth = 540;
   const svgHeight = 220;
 
@@ -58,10 +60,10 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
     : 'M0,170 Q45,150 90,165 T180,105 T270,135 T360,75 T450,115 T540,85';
 
   const stats = [
-    { label: 'ACTIVE', count: `0${activeNodeCount}`, path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6' },
-    { label: 'DONE', count: acceptedCount > 9 ? String(acceptedCount) : `0${acceptedCount}`, path: 'M0,18 Q40,16 80,12 T160,8 T240,2' },
-    { label: 'BLOCKED', count: blockedCount > 9 ? String(blockedCount) : `0${blockedCount}`, path: 'M0,10 Q50,15 100,8 T200,12 T240,14' },
-    { label: 'OVERDUE', count: '00', path: 'M0,14 Q60,12 120,16 T180,11 T240,15' },
+    { label: 'HEALTHY DEMO REGIONS', count: `0${activeNodeCount}`, path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6' },
+    { label: 'ALLOWED DEMO DECISIONS', count: String(acceptedCount).padStart(2, '0'), path: 'M0,18 Q40,16 80,12 T160,8 T240,2' },
+    { label: 'DENIED DEMO DECISIONS', count: String(blockedCount).padStart(2, '0'), path: 'M0,10 Q50,15 100,8 T200,12 T240,14' },
+    { label: 'SIMULATED QUEUE DEPTH', count: String(nodes.EU_WEST.outboxQueueSize).padStart(2, '0'), path: 'M0,14 Q60,12 120,16 T180,11 T240,15' },
   ];
 
   return (
@@ -95,7 +97,7 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
             className="brutal-btn-primary"
             style={{ padding: '0.75rem 1.75rem', fontSize: '0.85rem' }}
           >
-            + PRODUCE EVENT
+            + SIMULATE EVENT
           </button>
 
           <button
@@ -108,11 +110,13 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
               cursor: isVerifying ? 'wait' : 'pointer',
             }}
           >
-            {isVerifying ? 'VERIFYING...' : 'VERIFY SHA-256 AUDIT'}
+            {isVerifying ? 'CHECKING...' : 'CHECK LOCAL DEMO AUDIT'}
           </button>
         </div>
       </div>
 
+      {auditError && <p role="alert">Demo audit unavailable: {auditError}</p>}
+      {produceError && <p role="alert">{produceError}</p>}
       {/* Verification notification banner */}
       {verifyResult && (
         <div
@@ -128,7 +132,7 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
           }}
         >
           {verifyResult.valid
-            ? `✓ Cryptographic Audit Chain Validated: ${verifyResult.count} consecutive blocks sealed with unbroken SHA-256 hashes (Genesis -> Tip).`
+            ? `✓ Local demo audit hashes validated: ${verifyResult.count} entries. No broker or hardware verification was performed.`
             : `✗ Audit Chain Verification Failed: ${verifyResult.error}`}
         </div>
       )}
@@ -183,7 +187,7 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
       </div>
 
       {/* Main Grid: Throughput Chart + Recent Tasks */}
-      <div
+      <div className="demo-main-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: '1.7fr 1fr',
@@ -209,7 +213,7 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
                 fontWeight: 600,
               }}
             >
-              THROUGHPUT · LIVE STREAM ({(currentTelemetry?.throughputEps || 12479).toLocaleString()} MSG/S)
+              SIMULATED THROUGHPUT ({(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)
             </div>
             <span
               style={{
@@ -255,25 +259,25 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
               justifyContent: 'space-between',
             }}
           >
-            <span>RECENT TASKS</span>
-            <span
+            <span>DEMO AUDIT EVENTS</span>
+            <button
               onClick={() => onNavigate('tasks')}
               style={{
                 fontSize: '0.75rem',
                 color: '#c084fc',
                 cursor: 'pointer',
                 textDecoration: 'underline',
+                background: 'transparent', border: 0, fontFamily: 'inherit',
               }}
             >
               ALL TASKS →
-            </span>
+            </button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {auditLedger.slice(-4).reverse().map((entry) => (
               <div
-                key={entry.id}
-                onClick={() => onSelectTask(entry.key)}
+                key={entry.seq}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -282,13 +286,13 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
                   fontSize: '0.88rem',
                   borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
                   paddingBottom: '0.75rem',
-                  cursor: 'pointer',
+                  cursor: 'default',
                   transition: 'background 0.15s ease',
                 }}
               >
                 <div>
                   <span style={{ color: '#ffffff', fontWeight: 700, marginRight: '8px' }}>
-                    {entry.key}
+                    #{entry.seq}{' '}
                   </span>
                   <span style={{ color: 'var(--text-dim)' }}>
                     {entry.topic}
@@ -296,11 +300,11 @@ export default function DashboardPage({ onSelectTask, onNavigate }) {
                 </div>
                 <span
                   style={{
-                    color: entry.outcome === 'Accept' ? '#4ade80' : '#f87171',
+                    color: entry.outcome !== 'Deny' ? '#4ade80' : '#f87171',
                     fontWeight: 700,
                   }}
                 >
-                  [{entry.outcome === 'Accept' ? 'PASS' : 'BLOCKED'}]
+                  [{entry.outcome === 'Deny' ? 'DENIED' : 'ALLOWED'} · DEMO]
                 </span>
               </div>
             ))}

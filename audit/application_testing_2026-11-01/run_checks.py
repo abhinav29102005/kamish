@@ -4,6 +4,7 @@ Run from any directory: python3 audit/application_testing_2026-11-01/run_checks.
 No publish, deployment, credential configuration or git mutation is performed.
 """
 from datetime import datetime, timezone
+import argparse
 from pathlib import Path
 import json
 import subprocess
@@ -14,8 +15,12 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 SDK = ROOT / "packages/kamish-client"
 FRONTEND = ROOT / "frontend"
-OUTPUT = HERE / "results"
-OUTPUT.mkdir(exist_ok=True)
+parser = argparse.ArgumentParser()
+parser.add_argument("--output-dir", type=Path, default=HERE)
+args = parser.parse_args()
+RESULT_ROOT = args.output_dir.resolve()
+OUTPUT = RESULT_ROOT / "results"
+OUTPUT.mkdir(exist_ok=True, parents=True)
 
 CHECKS = [
     ("rust-check", ROOT, ["cargo", "check", "--workspace", "--all-targets"]),
@@ -37,10 +42,9 @@ CHECKS = [
     ("sdk-runtime-audit", SDK, ["npm", "audit", "--omit=dev", "--json"]),
     ("frontend-build", FRONTEND, ["npm", "run", "build"]),
     ("frontend-lint", FRONTEND, ["npm", "run", "lint"]),
-    # The frontend's declared TypeScript package is absent from its node_modules.
-    # Record a diagnostic check using the SDK's pinned TS 5.9.3, not a claim
-    # that the frontend's declared TS 7.0.2 compiler was executed.
-    ("frontend-typecheck-diagnostic", FRONTEND, ["node", str(SDK / "node_modules/typescript/lib/tsc.js"), "--build", "tsconfig.json"]),
+    ("frontend-tests", FRONTEND, ["npm", "test"]),
+    # Use the frontend's own locked compiler; do not substitute the SDK compiler.
+    ("frontend-typecheck", FRONTEND, ["npm", "run", "typecheck"]),
     ("git-whitespace", ROOT, ["git", "diff", "--check"]),
 ]
 
@@ -71,6 +75,6 @@ for name, cwd, command in CHECKS:
     })
     print(f"{name}: exit {code}", flush=True)
 summary["finished_at"] = datetime.now(timezone.utc).isoformat()
-(HERE / "checks.json").write_text(json.dumps(summary, indent=2) + "\n")
+(RESULT_ROOT / "checks.json").write_text(json.dumps(summary, indent=2) + "\n")
 print("Local checks recorded; read REPORT.md for interpretation, warnings and coverage limits.")
 sys.exit(1 if any(check["exit_code"] != 0 for check in summary["checks"]) else 0)

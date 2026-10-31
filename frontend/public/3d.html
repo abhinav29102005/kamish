@@ -621,9 +621,9 @@
           <h1 class="hero-title">KAMISH</h1>
           <p class="tagline">"Data stays where the law says it can."</p>
           <p class="body-lead">
-            An apex guardian event streaming broker designed for strict multi-region data sovereignty, WAN jitter adaptation, and zero-loss failover.
+            An experimental event streaming prototype exploring region policy, WAN adaptation, and failure recovery. This animation illustrates the design, not a live deployment.
           </p>
-          <div class="scope-tag">In the tested scenarios · Apache Kafka Protocol Compatible</div>
+          <div class="scope-tag">DESIGN DEMO · Custom JSON/TCP protocol · Not Kafka compatible</div>
         </div>
       </div>
       <div class="scroll-hint">
@@ -676,7 +676,7 @@
           <p class="body-sub">
             Crimson packets sent toward Region C hit a scale-like barrier at its boundary, flash, and burn out with a <code style="color: #ff0055; font-family: var(--font-mono); font-weight: 700;">send.deny</code> label. Ice-blue packets pass through unimpeded.
           </p>
-          <div class="scope-tag">In the tested scenarios · Zero egress violations</div>
+          <div class="scope-tag">Illustrated policy behavior · Consult revision-specific test evidence</div>
         </div>
       </div>
     </section>
@@ -712,7 +712,7 @@
           <p class="body-sub">
             When A returns, a stale epoch-7 packet is rejected and diverted into a small quarantine box.
           </p>
-          <div class="scope-tag">In the tested scenarios · Zero split-brain commits</div>
+          <div class="scope-tag">Consensus-backed failover is not implemented</div>
         </div>
       </div>
     </section>
@@ -724,7 +724,7 @@
           <div class="eyebrow" style="justify-content: center;">Audit Ledger Verification</div>
           <h2 class="section-title">Evidence</h2>
           <p class="body-lead">
-            Verified across simulated multi-region chaos partitions.
+            Illustrative values below, not live measurements or a compliance guarantee.
           </p>
 
           <div class="evidence-dashboard">
@@ -761,7 +761,7 @@
             <div class="stage-item">
               <div class="stage-num">PHASE 01</div>
               <div class="stage-title">Core Append Log</div>
-              <div class="stage-desc">Memory-mapped dense offset segment logs with fsync quorum.</div>
+              <div class="stage-desc">Local append log with single-node fsync; regional quorum remains planned.</div>
             </div>
             <div class="stage-item">
               <div class="stage-num">PHASE 02</div>
@@ -781,7 +781,7 @@
             <div class="stage-item">
               <div class="stage-num">PHASE 05</div>
               <div class="stage-title">Client SDK & Prometheus</div>
-              <div class="stage-desc">Native Rust producer/consumer client with Prometheus scrape targets.</div>
+              <div class="stage-desc">Rust and Node.js clients; live telemetry integration remains planned.</div>
             </div>
             <div class="stage-item">
               <div class="stage-num">PHASE 06</div>
@@ -790,7 +790,7 @@
             </div>
           </div>
 
-          <div class="scope-tag">Stages 1–5 functional in current codebase</div>
+          <div class="scope-tag">Prototype components · Several distributed guarantees remain unimplemented</div>
         </div>
       </div>
     </section>
@@ -811,7 +811,7 @@
             github.com/abhinav29102005/kamish ↗
           </a>
           <div style="margin-top: 0.5rem; color: #475569; font-size: 0.7rem;">
-            Apache-2.0 / MIT License · Tested on Rust 1.80+
+            Experimental software · See repository licensing and toolchain test reports
           </div>
         </div>
       </div>

@@ -456,6 +456,22 @@ impl BrokerServer {
             });
         }
 
+        if let Some(first) = log.read(0, 1).first()
+            && (first.class_id != req.class_id
+                || first
+                    .context
+                    .as_ref()
+                    .is_none_or(|context| context.request_policy != request_policy))
+        {
+            return Ok(ProduceResponse {
+                base_offset: 0,
+                count: 0,
+                committed_epoch: epoch,
+                sovereignty_allowed: false,
+                denial_reason: "stream_policy_change_requires_new_topic".into(),
+            });
+        }
+
         // 3.5. Outbox Capacity Admission Control & Backpressure Pre-check (§3.2.4, INV-3)
         // 3.5. Outbox Capacity Admission Control & Atomic Reservation (§3.2.4, INV-3)
         // Check policy and atomically reserve capacity in all permitted destination outboxes.
@@ -548,6 +564,21 @@ impl BrokerServer {
                 .map(|(peer, _, _)| peer.clone())
                 .collect(),
         };
+        if let Some(first) = log.read(0, 1).first() {
+            let mut original = first.context.as_ref().unwrap().replication_targets.clone();
+            let mut proposed = context.replication_targets.clone();
+            original.sort();
+            proposed.sort();
+            if original != proposed {
+                return Ok(ProduceResponse {
+                    base_offset: 0,
+                    count: 0,
+                    committed_epoch: epoch,
+                    sovereignty_allowed: false,
+                    denial_reason: "stream_destinations_changed_requires_new_topic".into(),
+                });
+            }
+        }
         let offset = log.append_with_context(
             epoch,
             &req.class_id,
@@ -665,9 +696,46 @@ impl BrokerServer {
         let log = self.get_or_create_log(&req.topic, req.partition, req.epoch)?;
         let local_next = log.next_offset();
 
+        if req.target_region != self.region || req.epoch == 0 || req.epoch < log.current_epoch() {
+            return Ok(ReplicationResponse {
+                accepted: false,
+                applied_watermark: local_next,
+                reason: "replication_target_or_epoch_mismatch".into(),
+            });
+        }
+        // The current wire envelope is one opaque record, not a record batch.
+        // Never acknowledge a declared range that its payload cannot represent.
+        if req.from_offset.checked_add(1) != Some(req.to_offset) {
+            let reason = if req.from_offset < local_next && req.to_offset > local_next {
+                format!(
+                    "partial_overlap: local watermark is {local_next}; resume with one-record ranges"
+                )
+            } else {
+                "invalid_replication_range: exactly one record is required".into()
+            };
+            return Ok(ReplicationResponse {
+                accepted: false,
+                applied_watermark: local_next,
+                reason,
+            });
+        }
+
         // Deduplication upon reconnect (INV-5, INV-6):
         // Case 1: Entire range is already committed locally -> Idempotent no-op ACK
         if req.to_offset <= local_next {
+            let same_record = log.read(req.from_offset, 1).first().is_some_and(|record| {
+                record.epoch == req.epoch
+                    && record.class_id == req.class_id
+                    && record.payload == req.payload
+                    && record.verify_checksum()
+            });
+            if !same_record {
+                return Ok(ReplicationResponse {
+                    accepted: false,
+                    applied_watermark: local_next,
+                    reason: "replication_history_conflict".into(),
+                });
+            }
             return Ok(ReplicationResponse {
                 accepted: true,
                 applied_watermark: local_next,
@@ -1511,6 +1579,76 @@ mod tests {
         let response = broker.produce(req).unwrap();
         assert_eq!(response.committed_epoch, 9);
         assert_eq!(response.base_offset, 0);
+    }
+
+    #[test]
+    fn replication_rejects_stale_conflicting_and_invalid_ranges_before_ack() {
+        let (receiver, _dir) = setup_test_broker("region-us", vec![]);
+        let request = ReplicationRequest {
+            topic: "history".into(),
+            partition: 0,
+            source_region: "region-eu".into(),
+            target_region: "region-us".into(),
+            class_id: "global-data".into(),
+            epoch: 7,
+            from_offset: 0,
+            to_offset: 1,
+            payload: b"original".to_vec(),
+            is_sealed: false,
+        };
+        assert!(
+            receiver
+                .handle_replication(request.clone())
+                .unwrap()
+                .accepted
+        );
+        assert!(
+            receiver
+                .handle_replication(request.clone())
+                .unwrap()
+                .accepted
+        );
+        let mut stale = request.clone();
+        stale.epoch = 1;
+        assert!(!receiver.handle_replication(stale).unwrap().accepted);
+        let mut different = request.clone();
+        different.payload = b"different".to_vec();
+        assert!(!receiver.handle_replication(different).unwrap().accepted);
+        let mut range = request;
+        range.topic = "bad-range".into();
+        range.to_offset = 5;
+        assert!(!receiver.handle_replication(range).unwrap().accepted);
+        assert_eq!(receiver.get_watermark("history", 0, "region-eu"), 1);
+        assert_eq!(receiver.get_watermark("bad-range", 0, "region-eu"), 0);
+    }
+
+    #[test]
+    fn changing_stream_policy_is_rejected_without_consuming_producer_sequence() {
+        let (source, _dir) = setup_test_broker("region-eu", vec!["region-us".into()]);
+        let request = ProduceRequest {
+            topic: "fixed-policy".into(),
+            partition: 0,
+            producer_id: 42,
+            producer_epoch: 1,
+            sequence_base: 0,
+            class_id: "global-data".into(),
+            payload: vec![1],
+            residency_rule: Some(ResidencyPolicy::StrictLocal),
+        };
+        assert!(source.produce(request.clone()).unwrap().sovereignty_allowed);
+        let mut second = request;
+        second.sequence_base = 1;
+        second.residency_rule = Some(ResidencyPolicy::GlobalCleartext);
+        assert!(!source.produce(second.clone()).unwrap().sovereignty_allowed);
+        second.residency_rule = Some(ResidencyPolicy::StrictLocal);
+        assert_eq!(source.produce(second).unwrap().base_offset, 1);
+        assert!(
+            source
+                .get_outbox("region-us")
+                .unwrap()
+                .next_transfer_batch(10)
+                .is_empty()
+        );
     }
 
     #[test]

@@ -1,50 +1,14 @@
 import React, { useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
+import { useDemoTasks } from '../context/useDemoTasks.js';
 
 export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
-  const { auditLedger, nodes, currentTelemetry, verifyAuditLedgerIntegrity } = useKamish();
+  const { auditLedger, verifyAuditLedgerIntegrity } = useKamish();
+  const { tasks } = useDemoTasks();
   const [isRunningCheck, setIsRunningCheck] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
-  const taskMetadata = {
-    'TSK-001': {
-      title: 'Segmented Commit Log Fsync Durability & Offset Sequential Reads',
-      owner: 'Developer A (Core Storage Engine)',
-      description: 'Zero-copy index mapping and hardware-enforced fsync durability guaranteeing crash-restart recovery with zero record loss under unannounced SIGKILL.',
-      rule: 'INV-1, INV-4, FR-01',
-    },
-    'TSK-002': {
-      title: 'Session Manager Producer Sequence Deduplication',
-      owner: 'Developer A (Storage Lead)',
-      description: 'Persistent monotonic sequence window rejecting duplicate wire attempts across broker failovers.',
-      rule: 'INV-6, FR-02',
-    },
-    'TSK-003': {
-      title: 'Bounded Durable Outbox & Destination Watermark Trimming',
-      owner: 'Developer A (Distributed Systems)',
-      description: 'Outbox disk queue with durable watermark acknowledgment preventing replication loops and queue overflow under 300ms WAN latency spikes.',
-      rule: 'INV-2, INV-6, FR-08',
-    },
-    'TSK-004': {
-      title: 'Single Decision Function Mapping E1 to E10 Enforcement Points',
-      owner: 'Developer B (Governance & Audit Lead)',
-      description: 'Canonical PolicyEngine contract validating data sovereignty on ingestion (E1-E5) and egress replication (E6-E10).',
-      rule: 'INV-8, FR-04, FR-10',
-    },
-    'TSK-005': {
-      title: 'Sealed Destination Mode & Regional Key Residency Service',
-      owner: 'Developer B (Sovereignty Engineer)',
-      description: 'StrictLocal encryption shields preventing GDPR records from leaking to US_EAST or AP_SOUTH regions.',
-      rule: 'INV-8, FR-12',
-    },
-  };
-
-  const meta = taskMetadata[taskId] || {
-    title: `Distributed Streaming Task ${taskId}`,
-    owner: 'Developer A & B (Systems Team)',
-    description: 'Autonomous distributed streaming invariant enforcement across multi-region Kamish event broker.',
-    rule: 'INV-1 through INV-9',
-  };
+  const meta = tasks.find(task => task.id === taskId);
 
   const handleRunVerification = async () => {
     setIsRunningCheck(true);
@@ -52,7 +16,9 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
       const res = await verifyAuditLedgerIntegrity();
       setTestResult({
         success: res.valid,
-        message: `Verification complete: ${res.count} audit blocks cryptographically verified with zero invariant drift. Hardware fsync and residency confirmed.`,
+        message: res.valid
+          ? `Local demo audit: ${res.count} hash-chain entries checked. No hardware, broker, or residency verification was performed.`
+          : `Local demo audit check failed: ${res.error}`,
       });
     } catch (err) {
       setTestResult({ success: false, message: `Error: ${String(err)}` });
@@ -62,6 +28,12 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
   };
 
   const recentAudits = auditLedger.slice(-4).reverse();
+
+  if (!meta) return <section style={{ padding: '2rem' }}>
+    <h1>TASK NOT FOUND</h1>
+    <p>No stored demo task exists for this ID. No verification status is available.</p>
+    <button className="brutal-btn-primary" onClick={onBack}>BACK TO TASKS</button>
+  </section>;
 
   return (
     <div
@@ -106,7 +78,8 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
         <h1
           style={{
             fontFamily: 'var(--font-main)',
-            fontSize: '3.5rem',
+            fontSize: 'clamp(2rem, 4vw, 3.5rem)',
+            overflowWrap: 'anywhere',
             fontWeight: 900,
             letterSpacing: '0.04em',
             color: '#ffffff',
@@ -118,7 +91,7 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
       </div>
 
       {/* Main Grid: Left Task Details + Right Activity Box */}
-      <div
+      <div className="demo-main-grid"
         style={{
           display: 'grid',
           gridTemplateColumns: '1.7fr 1.1fr',
@@ -168,7 +141,7 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
                   borderRadius: '2px',
                 }}
               >
-                [VERIFIED / PASS]
+                [{meta.status} · DEMO]
               </span>
             </div>
 
@@ -245,7 +218,7 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
                   fontWeight: 800,
                 }}
               >
-                {isRunningCheck ? 'RUNNING INTEGRITY SUITE...' : 'RUN VERIFICATION SUITE ⚡'}
+                {isRunningCheck ? 'CHECKING LOCAL AUDIT...' : 'CHECK LOCAL DEMO AUDIT'}
               </button>
             </div>
           </div>
@@ -270,12 +243,12 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
               fontWeight: 700,
             }}
           >
-            ACTIVITY (LIVE BROKER STREAM)
+            SIMULATED AUDIT ACTIVITY
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {recentAudits.map((act) => (
-              <div key={act.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem' }}>
+              <div key={act.seq} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '1rem' }}>
                 <span
                   style={{
                     fontFamily: 'var(--font-mono)',
@@ -285,7 +258,7 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
                     marginBottom: '4px',
                   }}
                 >
-                  [{new Date(act.timestamp).toLocaleTimeString()} UTC]
+                  [{new Date(act.timestamp).toISOString()}]
                 </span>
                 <span
                   style={{
@@ -294,7 +267,7 @@ export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
                     color: '#f8fafc',
                   }}
                 >
-                  [{act.topic} · {act.key} · {act.outcome === 'Accept' ? 'Ingress Allowed' : 'Replication Denied (GDPR)'}]
+                  [#{act.seq} · {act.topic} · {act.sourceRegion} → {act.targetRegion} · {act.outcome === 'Deny' ? 'Denied' : 'Allowed'} (demo)]
                 </span>
               </div>
             ))}

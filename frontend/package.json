@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "node --test test/*.test.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

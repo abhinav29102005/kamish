@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import type { DecisionOutcome } from '../types';
 import { ShieldCheck, Search, Filter, Lock, CheckCircle2, AlertTriangle, XCircle, Hash } from 'lucide-react';
 

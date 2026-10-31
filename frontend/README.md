@@ -1,32 +1,43 @@
-# React + TypeScript + Vite
+# Kamish frontend — local demonstration
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This React/Vite application is a **simulator**, not a live operator console.
+It does not authenticate users, send contact messages, or connect to the broker.
+Do not enter credentials or regulated/sensitive data.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm ci
+npm run dev
+npm run typecheck
+npm run lint
+npm test
+npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Use a modern browser with WebCrypto (HTTPS or a loopback development origin).
+If WebCrypto is unavailable, audit hashing fails explicitly instead of using a
+pseudo-hash. The TypeScript check validates typed components/declarations;
+JavaScript page behavior is also covered by utility tests and browser checks.
+
+## Demo behavior
+
+- `/` and `#/home` show the dragon animation; pages are lazy-loaded.
+- `#/dashboard` displays **simulated** counters and local audit entries.
+- `#/new` saves a demo task to this browser's `localStorage` under
+  `kamish.demo.tasks.v1`. It does not dispatch a broker event.
+- `#/tasks` and `#/work/<id>` read that local task catalog. Prototype status is
+  not a runtime test result; sealed replication is marked **DISABLED**.
+- `#/signin` explains that authentication is unavailable and offers demo access;
+  it does not collect passwords or claim authentication succeeded.
+- `#/contact` previews a message locally. It does not send it.
+- `/3d.html` is an animated design illustration, not measured system evidence.
+
+Task storage is bounded and not encrypted. Invalid existing storage is not
+silently overwritten. Audit events are browser-only, in memory, and are not
+compatible with or proof of the broker's region-local audit log. The app does not
+establish physical residency, distributed durability, or exactly-once delivery.
+
+See [the resolution report](../audit/application_resolution_2026-11-01/REPORT.md)
+for tests and remaining gaps. A real console requires an authenticated backend
+gateway; the Node.js SDK cannot be imported directly as a browser TCP client.

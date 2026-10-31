@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import {
   Globe,
   Activity,

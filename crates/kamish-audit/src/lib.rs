@@ -201,61 +201,10 @@ impl AuditLog {
         let mut entries = Vec::new();
 
         if path_buf.exists() {
-            let file = File::open(&path_buf)?;
-            let reader = BufReader::new(file);
-
-            for line in reader.lines() {
-                let line_str = line?;
-                if line_str.trim().is_empty() {
-                    continue;
-                }
-                let entry: AuditEntry = serde_json::from_str(&line_str)?;
-                if entry.format_version != 2 {
-                    return Err(AuditError::UnsupportedFormat(entry.format_version));
-                }
-
-                // Sequence verification
-                if entry.sequence != next_sequence {
-                    return Err(AuditError::SequenceOutOfOrder {
-                        index: entry.sequence,
-                        expected: next_sequence,
-                        found: entry.sequence,
-                    });
-                }
-
-                // Chain link verification
-                if entry.prev_hash != last_hash {
-                    return Err(AuditError::HashChainBroken {
-                        index: entry.sequence,
-                        expected: last_hash,
-                        found: entry.prev_hash,
-                    });
-                }
-
-                // Internal checksum verification
-                if !entry.verify_self() {
-                    let computed = AuditEntry::compute_hash(
-                        entry.sequence,
-                        entry.timestamp_ns,
-                        &entry.prev_hash,
-                        entry.action,
-                        &entry.class_id,
-                        &entry.source_region,
-                        &entry.target_region,
-                        entry.policy_version,
-                        entry.outcome,
-                        &entry.reason,
-                    );
-                    return Err(AuditError::EntryHashMismatch {
-                        index: entry.sequence,
-                        computed,
-                        recorded: entry.entry_hash,
-                    });
-                }
-
+            entries = Self::read_verified_entries(&path_buf)?;
+            next_sequence = entries.len() as u64;
+            if let Some(entry) = entries.last() {
                 last_hash = entry.entry_hash.clone();
-                next_sequence += 1;
-                entries.push(entry);
             }
         }
 
@@ -283,6 +232,64 @@ impl AuditLog {
                 in_memory_entries: entries,
             })),
         })
+    }
+
+    /// Verify existing evidence read-only. Missing files are an error; unlike
+    /// open(), this never creates, appends to, or syncs the supplied path.
+    pub fn verify_file<P: AsRef<Path>>(path: P) -> Result<usize, AuditError> {
+        Ok(Self::read_verified_entries(path.as_ref())?.len())
+    }
+
+    fn read_verified_entries(path: &Path) -> Result<Vec<AuditEntry>, AuditError> {
+        let reader = BufReader::new(File::open(path)?);
+        let mut entries = Vec::new();
+        let mut previous = hex::encode(GENESIS_PREV_HASH);
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let entry: AuditEntry = serde_json::from_str(&line)?;
+            if entry.format_version != 2 {
+                return Err(AuditError::UnsupportedFormat(entry.format_version));
+            }
+            if entry.sequence != entries.len() as u64 {
+                return Err(AuditError::SequenceOutOfOrder {
+                    index: entry.sequence,
+                    expected: entries.len() as u64,
+                    found: entry.sequence,
+                });
+            }
+            if entry.prev_hash != previous {
+                return Err(AuditError::HashChainBroken {
+                    index: entry.sequence,
+                    expected: previous,
+                    found: entry.prev_hash,
+                });
+            }
+            if !entry.verify_self() {
+                let computed = AuditEntry::compute_hash(
+                    entry.sequence,
+                    entry.timestamp_ns,
+                    &entry.prev_hash,
+                    entry.action,
+                    &entry.class_id,
+                    &entry.source_region,
+                    &entry.target_region,
+                    entry.policy_version,
+                    entry.outcome,
+                    &entry.reason,
+                );
+                return Err(AuditError::EntryHashMismatch {
+                    index: entry.sequence,
+                    computed,
+                    recorded: entry.entry_hash,
+                });
+            }
+            previous = entry.entry_hash.clone();
+            entries.push(entry);
+        }
+        Ok(entries)
     }
 
     /// Appends a new decision to the hash-chained audit log.

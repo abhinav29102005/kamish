@@ -1,0 +1,156 @@
+
+> @kamish/client@0.1.0-alpha.1 test
+> npm run build && node --test test/*.test.mjs
+
+
+> @kamish/client@0.1.0-alpha.1 build
+> tsc -p tsconfig.json
+
+TAP version 13
+# Subtest: requires explicit insecure opt-in and validates configuration
+ok 1 - requires explicit insecure opt-in and validates configuration
+  ---
+  duration_ms: 1.508254
+  type: 'test'
+  ...
+# Subtest: preserves maximum u64 identities and offsets without rounding
+ok 2 - preserves maximum u64 identities and offsets without rounding
+  ---
+  duration_ms: 13.715291
+  type: 'test'
+  ...
+# Subtest: validates identities, topic paths and payload before opening a socket
+ok 3 - validates identities, topic paths and payload before opening a socket
+  ---
+  duration_ms: 0.605382
+  type: 'test'
+  ...
+# Subtest: serializes residency exactly as the Rust enum
+ok 4 - serializes residency exactly as the Rust enum
+  ---
+  duration_ms: 3.993117
+  type: 'test'
+  ...
+# Subtest: fetch decodes binary bytes and v2 context with bigints
+ok 5 - fetch decodes binary bytes and v2 context with bigints
+  ---
+  duration_ms: 2.141243
+  type: 'test'
+  ...
+# Subtest: fragmented response and split UTF-8 are decoded only after framing
+ok 6 - fragmented response and split UTF-8 are decoded only after framing
+  ---
+  duration_ms: 6.94358
+  type: 'test'
+  ...
+# Subtest: watermark and ping use actual wire actions
+ok 7 - watermark and ping use actual wire actions
+  ---
+  duration_ms: 1.980499
+  type: 'test'
+  ...
+# Subtest: structured rejection differs from a possibly post-commit broker error
+ok 8 - structured rejection differs from a possibly post-commit broker error
+  ---
+  duration_ms: 3.007895
+  type: 'test'
+  ...
+# Subtest: malformed, wrong-kind and incomplete responses fail safely
+ok 9 - malformed, wrong-kind and incomplete responses fail safely
+  ---
+  duration_ms: 2.538974
+  type: 'test'
+  ...
+# Subtest: response and encoded request limits are enforced
+ok 10 - response and encoded request limits are enforced
+  ---
+  duration_ms: 1.123351
+  type: 'test'
+  ...
+# Subtest: fetch rejects class bypass, out-of-order offsets, HWM violations and invalid bytes
+ok 11 - fetch rejects class bypass, out-of-order offsets, HWM violations and invalid bytes
+  ---
+  duration_ms: 2.512323
+  type: 'test'
+  ...
+# Subtest: timeout after dispatch marks write outcome unknown and never retries
+ok 12 - timeout after dispatch marks write outcome unknown and never retries
+  ---
+  duration_ms: 31.609979
+  type: 'test'
+  ...
+# Subtest: abort works before connection and after request dispatch
+ok 13 - abort works before connection and after request dispatch
+  ---
+  duration_ms: 1.424542
+  type: 'test'
+  ...
+# Subtest: close aborts active calls, limits concurrency, and is permanent
+ok 14 - close aborts active calls, limits concurrency, and is permanent
+  ---
+  duration_ms: 1.062922
+  type: 'test'
+  ...
+# Subtest: invalid UTF-8 and extra frames are rejected
+ok 15 - invalid UTF-8 and extra frames are rejected
+  ---
+  duration_ms: 1.192978
+  type: 'test'
+  ...
+# Subtest: u64 response overflow is rejected rather than truncated
+ok 16 - u64 response overflow is rejected rather than truncated
+  ---
+  duration_ms: 1.626258
+  type: 'test'
+  ...
+# Subtest: concurrent sends serialize sequences per topic/partition, not globally
+ok 17 - concurrent sends serialize sequences per topic/partition, not globally
+  ---
+  duration_ms: 23.673748
+  type: 'test'
+  ...
+# Subtest: definite rejection does not consume a sequence
+ok 18 - definite rejection does not consume a sequence
+  ---
+  duration_ms: 2.933503
+  type: 'test'
+  ...
+# Subtest: lost ACK blocks the stream and explicit retry resends identical bytes
+ok 19 - lost ACK blocks the stream and explicit retry resends identical bytes
+  ---
+  duration_ms: 2.78545
+  type: 'test'
+  ...
+# Subtest: later rejection cannot resolve an earlier unknown outcome
+ok 20 - later rejection cannot resolve an earlier unknown outcome
+  ---
+  duration_ms: 2.663991
+  type: 'test'
+  ...
+# Subtest: producer queue saturation rejects excess work without allocating a sequence
+ok 21 - producer queue saturation rejects excess work without allocating a sequence
+  ---
+  duration_ms: 1.717441
+  type: 'test'
+  ...
+# Subtest: aborting before dispatch leaves sequence reusable and no pending write
+ok 22 - aborting before dispatch leaves sequence reusable and no pending write
+  ---
+  duration_ms: 1.19969
+  type: 'test'
+  ...
+# Subtest: tracked stream capacity does not evict an existing sequence
+ok 23 - tracked stream capacity does not evict an existing sequence
+  ---
+  duration_ms: 1.396059
+  type: 'test'
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 23
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 184.13216

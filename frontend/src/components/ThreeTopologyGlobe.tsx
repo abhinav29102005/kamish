@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import type { RegionId } from '../types';
 import { Shield, Globe, RotateCw, Zap } from 'lucide-react';
 
@@ -66,7 +66,7 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
 
   // Interaction & orientation tracking refs
   const autoRotateRef = useRef<boolean>(autoRotate);
-  autoRotateRef.current = autoRotate;
+  useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
   const isDraggingRef = useRef<boolean>(false);
   const previousPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const targetRotationRef = useRef<{ x: number; y: number } | null>(null);
@@ -465,7 +465,8 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
     };
-  }, []);
+  }, [isGlobalBackground, nodes.EU_WEST.lat, nodes.EU_WEST.lng,
+    nodes.US_EAST.lat, nodes.US_EAST.lng, nodes.AP_SOUTH.lat, nodes.AP_SOUTH.lng]);
 
   // Dynamically update Epoch Lease Halo color as lease countdown ticks
   useEffect(() => {

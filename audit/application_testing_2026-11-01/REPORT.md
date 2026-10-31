@@ -1,5 +1,9 @@
 # Kamish — application test report
 
+**Historical test snapshot.** See the [subsequent resolution report](../application_resolution_2026-11-01/REPORT.md)
+for fixed bugs, green quality gates, and the two remaining extended requirements.
+The original results below are retained rather than rewritten as passing evidence.
+
 **Verdict: FAIL for public/production release. Existing regression tests pass,
 but additional contract tests and user-flow tests expose important gaps.**
 

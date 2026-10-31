@@ -1,0 +1,370 @@
+{
+  "started_at": "2026-10-31T19:31:57.097099+00:00",
+  "revision": "663f8f6064c2ebe26882c489b4f3ed7be9c7f79d",
+  "checks": [
+    {
+      "name": "rust-check",
+      "command": [
+        "cargo",
+        "check",
+        "--workspace",
+        "--all-targets"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.263,
+      "output": "results/rust-check.txt"
+    },
+    {
+      "name": "rust-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 3.935,
+      "output": "results/rust-tests.txt"
+    },
+    {
+      "name": "research-probes",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--manifest-path",
+        "early_research/probes/Cargo.toml",
+        "--target-dir",
+        "target",
+        "--",
+        "--test-threads=1"
+      ],
+      "cwd": ".",
+      "exit_code": 101,
+      "duration_seconds": 0.316,
+      "output": "results/research-probes.txt"
+    },
+    {
+      "name": "rust-format",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.122,
+      "output": "results/rust-format.txt"
+    },
+    {
+      "name": "rust-clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.149,
+      "output": "results/rust-clippy.txt"
+    },
+    {
+      "name": "broker-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-broker",
+        "--",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.099,
+      "output": "results/broker-help.txt"
+    },
+    {
+      "name": "agent-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-agent",
+        "--",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.058,
+      "output": "results/agent-help.txt"
+    },
+    {
+      "name": "ctl-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.06,
+      "output": "results/ctl-help.txt"
+    },
+    {
+      "name": "ctl-produce-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "produce",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.055,
+      "output": "results/ctl-produce-help.txt"
+    },
+    {
+      "name": "ctl-consume-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "consume",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.057,
+      "output": "results/ctl-consume-help.txt"
+    },
+    {
+      "name": "ctl-watermark-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "watermark",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.053,
+      "output": "results/ctl-watermark-help.txt"
+    },
+    {
+      "name": "ctl-verify-audit-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "verify-audit",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.05,
+      "output": "results/ctl-verify-audit-help.txt"
+    },
+    {
+      "name": "ctl-demo-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "demo",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.054,
+      "output": "results/ctl-demo-help.txt"
+    },
+    {
+      "name": "ctl-benchmark-help",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "benchmark",
+        "--help"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.053,
+      "output": "results/ctl-benchmark-help.txt"
+    },
+    {
+      "name": "demo-script",
+      "command": [
+        "bash",
+        "scripts/run_demo.sh"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 4.059,
+      "output": "results/demo-script.txt"
+    },
+    {
+      "name": "benchmark-smoke",
+      "command": [
+        "cargo",
+        "run",
+        "-p",
+        "kamish-ctl",
+        "--",
+        "benchmark",
+        "--count",
+        "64",
+        "--concurrency",
+        "2"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.13,
+      "output": "results/benchmark-smoke.txt"
+    },
+    {
+      "name": "sdk-typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "cwd": "packages/kamish-client",
+      "exit_code": 0,
+      "duration_seconds": 1.119,
+      "output": "results/sdk-typecheck.txt"
+    },
+    {
+      "name": "sdk-tests",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "cwd": "packages/kamish-client",
+      "exit_code": 0,
+      "duration_seconds": 1.461,
+      "output": "results/sdk-tests.txt"
+    },
+    {
+      "name": "sdk-rust-integration",
+      "command": [
+        "npm",
+        "run",
+        "test:integration"
+      ],
+      "cwd": "packages/kamish-client",
+      "exit_code": 0,
+      "duration_seconds": 1.476,
+      "output": "results/sdk-rust-integration.txt"
+    },
+    {
+      "name": "sdk-package-consumer",
+      "command": [
+        "npm",
+        "run",
+        "test:package"
+      ],
+      "cwd": "packages/kamish-client",
+      "exit_code": 0,
+      "duration_seconds": 3.2,
+      "output": "results/sdk-package-consumer.txt"
+    },
+    {
+      "name": "sdk-runtime-audit",
+      "command": [
+        "npm",
+        "audit",
+        "--omit=dev",
+        "--json"
+      ],
+      "cwd": "packages/kamish-client",
+      "exit_code": 0,
+      "duration_seconds": 0.247,
+      "output": "results/sdk-runtime-audit.txt"
+    },
+    {
+      "name": "frontend-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "cwd": "frontend",
+      "exit_code": 0,
+      "duration_seconds": 0.881,
+      "output": "results/frontend-build.txt"
+    },
+    {
+      "name": "frontend-lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "cwd": "frontend",
+      "exit_code": 0,
+      "duration_seconds": 0.278,
+      "output": "results/frontend-lint.txt"
+    },
+    {
+      "name": "frontend-tests",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "cwd": "frontend",
+      "exit_code": 0,
+      "duration_seconds": 0.302,
+      "output": "results/frontend-tests.txt"
+    },
+    {
+      "name": "frontend-typecheck",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "cwd": "frontend",
+      "exit_code": 0,
+      "duration_seconds": 0.353,
+      "output": "results/frontend-typecheck.txt"
+    },
+    {
+      "name": "git-whitespace",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "duration_seconds": 0.022,
+      "output": "results/git-whitespace.txt"
+    }
+  ],
+  "finished_at": "2026-10-31T19:32:15.953633+00:00"
+}

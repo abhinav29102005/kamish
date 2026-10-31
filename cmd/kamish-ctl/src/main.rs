@@ -40,7 +40,7 @@ enum Commands {
         log_path: String,
     },
 
-    /// Produce an event to a running Kamish broker instance with client-side policy validation
+    /// Produce a new-session event; retrying an unknown outcome in another invocation may duplicate it
     Produce {
         #[arg(short, long, default_value = "127.0.0.1:9092")]
         addr: String,
@@ -301,8 +301,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "\x1b[1;34m[kamish-ctl]\x1b[0m Inspecting cryptographic audit log at: {}",
                 log_path
             );
-            let log = AuditLog::open(&log_path)?;
-            let count = log.verify_integrity()?;
+            let count = AuditLog::verify_file(&log_path)?;
             println!(
                 "\x1b[1;32m[kamish-ctl]\x1b[0m  Audit log integrity verified: {} entries unbroken in cryptographic chain.",
                 count
@@ -339,9 +338,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 addr, region_id, residency
             );
 
-            let producer =
-                KamishProducer::connect(&addr, 1001, region_id.clone(), Some(engine.clone()))
-                    .await?;
+            // Each independent CLI invocation starts a new producer session.
+            // Reusing ID 1001/epoch 1/sequence 0 makes a second payload conflict.
+            let producer_id = rand::random::<u64>();
+            let producer = KamishProducer::connect(
+                &addr,
+                producer_id,
+                region_id.clone(),
+                Some(engine.clone()),
+            )
+            .await?;
             let ack = producer
                 .send(
                     &topic,

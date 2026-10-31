@@ -20,16 +20,22 @@ const fallback = utility(undefined);
 const message = 'synthetic application-test canary';
 const expected = createHash('sha256').update(message).digest('hex');
 const secureHash = await secure.sha256Hex(message);
-const fallbackHash = await fallback.sha256Hex(message);
+let fallbackHash;
+let rejectedUnavailableCrypto = false;
+try { fallbackHash = await fallback.sha256Hex(message); }
+catch (error) { rejectedUnavailableCrypto = /WebCrypto is unavailable/.test(String(error)); }
 const first = await secure.computeAuditEntryHash('genesis', 1, 'Ingress', 'a:b', 'c', 'target', 1, 'AllowCleartext', 'ok');
 const second = await secure.computeAuditEntryHash('genesis', 1, 'Ingress', 'a', 'b:c', 'target', 1, 'AllowCleartext', 'ok');
 const results = [
   { name: 'webcrypto-sha256-known-answer', passed: secureHash === expected },
-  { name: 'fallback-must-not-masquerade-as-sha256', passed: fallbackHash === expected,
-    observed: 'Fallback returned a repeated 16-character pseudo-hash rather than SHA-256' },
+  { name: 'fallback-must-not-masquerade-as-sha256', passed: rejectedUnavailableCrypto || fallbackHash === expected,
+    observed: rejectedUnavailableCrypto ? 'Unavailable WebCrypto was rejected explicitly' : 'Fallback output must equal real SHA-256' },
   { name: 'frontend-audit-field-boundaries', passed: first !== second,
     observed: 'Distinct topic/source fields containing colons produced the same audit digest' },
 ];
-await writeFile(new URL('frontend-crypto.json', import.meta.url), JSON.stringify(results, null, 2) + '\n');
+const destination = process.env.KAMISH_CRYPTO_OUTPUT
+  ? new URL(process.env.KAMISH_CRYPTO_OUTPUT, `file://${process.cwd()}/`)
+  : new URL('frontend-crypto.json', import.meta.url);
+await writeFile(destination, JSON.stringify(results, null, 2) + '\n');
 for (const result of results) console.log(`${result.name}: ${result.passed ? 'PASS' : 'FAIL'}`);
 process.exitCode = results.some(result => !result.passed) ? 1 : 0;

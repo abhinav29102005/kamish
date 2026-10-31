@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Send, ShieldCheck, Database, Terminal, Flame, AlertTriangle } from 'lucide-react';
+import { X, Send } from 'lucide-react';
 
 export default function ContactModal({ isOpen, onClose, onProduceEvent }) {
   const [topic, setTopic] = useState('telemetry.s-rank');
@@ -21,7 +21,7 @@ export default function ContactModal({ isOpen, onClose, onProduceEvent }) {
       timestamp_ms: Date.now(),
     };
     onProduceEvent(result);
-    setLogStatus(`Event #${result.id} ingested at ${region}. Policy: [${policy.toUpperCase()}] enforced!`);
+    setLogStatus(`Demo event #${result.id} submitted to the local callback. No broker enforcement is confirmed.`);
   };
 
   return (

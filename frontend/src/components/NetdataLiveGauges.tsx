@@ -1,5 +1,5 @@
 import React from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import { Activity, Clock, Database, Gauge, HardDrive, Zap, ShieldCheck } from 'lucide-react';
 
 interface GaugeProps {

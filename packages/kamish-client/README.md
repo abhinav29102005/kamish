@@ -23,6 +23,10 @@ publication until the name and release/security gates are approved.
   guarantee of compatibility with other Kamish revisions.
 - Regional quorum durability, distributed ownership, topic authorization and
   other server gaps remain open. The SDK does not repair or certify them.
+- A partition's class, producer restriction and admitted destinations are fixed
+  by its first local record. Changes require a new topic/stream rather than an
+  offset-preserving mirror with policy-filtered holes. Rejections do not mean
+  the client may silently broaden or reclassify an existing stream.
 - `SealedCiphertext` is modeled for wire compatibility, but the remediated broker
   currently rejects sealed replication. It does not encrypt data in this SDK.
 - Fetched checksum fields are returned but not independently verified. Structural

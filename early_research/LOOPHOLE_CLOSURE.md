@@ -1,5 +1,9 @@
 # Loophole closure ledger — implementation stages 1–2
 
+**Subsequent fixes:** [Application resolution report](../audit/application_resolution_2026-11-01/REPORT.md)
+tracks replication ACK/range/stream-contract fixes, CLI corrections and truthful
+frontend simulation. Consensus ownership and trusted audit completeness remain open.
+
 **Follow-up testing:** [Application test report, 1 Nov 2026](../audit/application_testing_2026-11-01/REPORT.md)
 reconfirms the original 11 checks and adds six failing broader-contract probes.
 The statuses below describe their original scoped fixes, not closure of those

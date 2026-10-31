@@ -1,0 +1,16 @@
+[
+  {
+    "name": "webcrypto-sha256-known-answer",
+    "passed": true
+  },
+  {
+    "name": "fallback-must-not-masquerade-as-sha256",
+    "passed": true,
+    "observed": "Unavailable WebCrypto was rejected explicitly"
+  },
+  {
+    "name": "frontend-audit-field-boundaries",
+    "passed": true,
+    "observed": "Distinct topic/source fields containing colons produced the same audit digest"
+  }
+]

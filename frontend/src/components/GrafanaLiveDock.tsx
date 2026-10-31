@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import { Activity, ExternalLink, Sliders } from 'lucide-react';
 
 interface GrafanaLiveDockProps {

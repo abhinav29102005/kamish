@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Gauge, Server, Cpu, Database, Zap } from 'lucide-react';
 
 export default function TelemetryPage() {
   const [metrics, setMetrics] = useState({
@@ -29,7 +28,7 @@ export default function TelemetryPage() {
     <div style={{ paddingBottom: '120px', maxWidth: '1100px', margin: '0 auto', paddingLeft: '1.5rem', paddingRight: '1.5rem' }}>
       <div style={{ marginTop: '2rem', marginBottom: '2rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-          <span className="mono-tag mono-tag-emerald">REAL-TIME TELEMETRY</span>
+          <span className="mono-tag mono-tag-emerald">SIMULATED TELEMETRY</span>
           <span className="mono-tag mono-tag-crimson">KAMISH BENCHMARK</span>
         </div>
         <h1

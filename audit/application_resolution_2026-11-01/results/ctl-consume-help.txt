@@ -1,0 +1,14 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/kamish-ctl consume --help`
+Sequentially consume records from a Kamish broker partition up to HWM (INV-4)
+
+Usage: kamish-ctl consume [OPTIONS]
+
+Options:
+  -a, --addr <ADDR>                [default: 127.0.0.1:9092]
+  -t, --topic <TOPIC>              [default: telemetry]
+  -p, --partition <PARTITION>      [default: 0]
+  -c, --class-id <CLASS_ID>        [default: general]
+  -o, --offset <OFFSET>            [default: 0]
+  -m, --max-records <MAX_RECORDS>  [default: 10]
+  -h, --help                       Print help

@@ -1,5 +1,6 @@
 """Real Rust CLI smoke tests against the synthetic SDK broker fixture."""
 from pathlib import Path
+import argparse
 import json
 import os
 import selectors
@@ -10,8 +11,11 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-OUTPUT = HERE / "results"
-OUTPUT.mkdir(exist_ok=True)
+parser = argparse.ArgumentParser()
+parser.add_argument("--output-dir", type=Path, default=HERE)
+RESULT_ROOT = parser.parse_args().output_dir.resolve()
+OUTPUT = RESULT_ROOT / "results"
+OUTPUT.mkdir(exist_ok=True, parents=True)
 subprocess.run(["cargo", "build", "-p", "kamish-client", "--example", "sdk_test_broker"],
                cwd=ROOT, check=True)
 subprocess.run(["cargo", "build", "-p", "kamish-ctl"], cwd=ROOT, check=True)
@@ -57,5 +61,5 @@ with tempfile.TemporaryDirectory(prefix="kamish-cli-test-", dir="/tmp/opencode")
             except subprocess.TimeoutExpired:
                 broker.kill()
                 broker.wait()
-(HERE / "cli-smoke.json").write_text(json.dumps(summary, indent=2) + "\n")
+(RESULT_ROOT / "cli-smoke.json").write_text(json.dumps(summary, indent=2) + "\n")
 sys.exit(1 if any(not check["contract_passed"] for check in summary) else 0)

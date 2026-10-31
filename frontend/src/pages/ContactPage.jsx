@@ -9,12 +9,6 @@ export default function ContactPage() {
   const handleSubmit = (e) => {
     e.preventDefault();
     setSent(true);
-    setTimeout(() => {
-      setName('');
-      setEmail('');
-      setMessage('');
-      setSent(false);
-    }, 2500);
   };
 
   return (
@@ -44,7 +38,7 @@ export default function ContactPage() {
       <div className="brutal-card-offset" style={{ padding: '2.5rem' }}>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
           <div>
-            <label
+            <label htmlFor="contact-name"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
@@ -57,7 +51,7 @@ export default function ContactPage() {
             >
               NAME
             </label>
-            <input
+            <input id="contact-name"
               type="text"
               required
               value={name}
@@ -68,7 +62,7 @@ export default function ContactPage() {
           </div>
 
           <div>
-            <label
+            <label htmlFor="contact-email"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
@@ -81,7 +75,7 @@ export default function ContactPage() {
             >
               EMAIL
             </label>
-            <input
+            <input id="contact-email"
               type="email"
               required
               value={email}
@@ -92,7 +86,7 @@ export default function ContactPage() {
           </div>
 
           <div>
-            <label
+            <label htmlFor="contact-message"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
@@ -105,7 +99,7 @@ export default function ContactPage() {
             >
               MESSAGE
             </label>
-            <textarea
+            <textarea id="contact-message"
               rows={5}
               required
               value={message}
@@ -126,7 +120,7 @@ export default function ContactPage() {
                 padding: '8px 12px',
               }}
             >
-              Message transmitted to American Hunter Bureau & Kamish Master Node!
+              Local message preview only. Nothing was transmitted or sent.
             </div>
           )}
 
@@ -140,7 +134,7 @@ export default function ContactPage() {
                 fontWeight: 800,
               }}
             >
-              SEND MESSAGE
+              PREVIEW MESSAGE LOCALLY
             </button>
           </div>
         </form>

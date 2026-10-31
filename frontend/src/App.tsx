@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { KamishProvider, useKamish } from './context/KamishContext';
+import { KamishProvider } from './context/KamishContext';
+import { useKamish } from './context/useKamish';
 import { Header } from './components/Header';
 import { ThreeTopologyGlobe } from './components/ThreeTopologyGlobe';
 import { NetdataLiveGauges } from './components/NetdataLiveGauges';
@@ -205,4 +206,3 @@ export default function App() {
     </KamishProvider>
   );
 }
-

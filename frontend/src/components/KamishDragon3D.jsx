@@ -8,7 +8,7 @@ export default function KamishDragon3D({ isFlameOn }) {
   const [loadProgress, setLoadProgress] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  flameRef.current = isFlameOn;
+  useEffect(() => { flameRef.current = isFlameOn; }, [isFlameOn]);
 
   useEffect(() => {
     const container = mountRef.current;

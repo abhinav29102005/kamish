@@ -369,6 +369,10 @@ impl PartitionLog {
         self.inner.read().unwrap().next_offset
     }
 
+    pub fn current_epoch(&self) -> u64 {
+        self.inner.read().unwrap().current_epoch
+    }
+
     pub fn high_watermark(&self) -> u64 {
         self.inner.read().unwrap().high_watermark
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 # ANSI Color Codes
 CYAN='\033[0;36m'
@@ -23,10 +23,10 @@ echo -e "${GREEN}   Workspace compiled cleanly with 0 errors and 0 warnings.${NC
 
 echo -e "${YELLOW}>> [00:15] Step 2: Executing Full Workspace Invariant Test Suite...${NC}"
 cargo test --workspace --quiet
-echo -e "${GREEN}   All 23 invariant tests passed across 10 crates (INV-1 through INV-9).${NC}\n"
+echo -e "${GREEN}   Workspace regression tests passed; use Cargo's actual totals above.${NC}\n"
 
 echo -e "${MAGENTA}${BOLD}--------------------------------------------------------------------------${NC}"
-echo -e "${CYAN}${BOLD}>> EXECUTING LIVE DEMONSTRATION SCENARIOS (Developer B Deliverables)${NC}"
+echo -e "${CYAN}${BOLD}>> EXECUTING SIMULATED DEMONSTRATION SCENARIOS${NC}"
 echo -e "${MAGENTA}${BOLD}--------------------------------------------------------------------------${NC}\n"
 
 echo -e "${BOLD}--- SCENARIO A (Gate 2 / Demo A Ready): Regional Data Residency Enforcement ---${NC}"
@@ -40,14 +40,14 @@ echo -e "   Simulating healthy 10ms WAN link (Replication Lag = 0)..."
 echo -e "   Injecting 300ms WAN latency via chaos proxy on US_EAST link..."
 echo -e "   Local producer writes 50 records during degraded link..."
 cargo test -p kamish-meta --test developer_b_scenarios test_scenario_b_slow_link_and_backpressure_demo -- --nocapture | grep "DEMO SCENARIO"
-echo -e "${GREEN}   Result: PASS. Local write latency unaffected (<1ms) while lag metric exposed = 50.${NC}\n"
+echo -e "${GREEN}   Result: PASS for this simulation; inspect the measured batch duration and average above.${NC}\n"
 
 echo -e "${BOLD}--- SCENARIO C (Gate 4 / Demo C Ready): Regional Outage & Resumable Recovery ---${NC}"
 echo -e "   Simulating catastrophic failure of remote Region B (US_EAST severed)..."
 echo -e "   Region A buffers 15 new records in bounded durable outbox..."
 echo -e "   Region B recovers -> Handshake reconciles from durable watermark..."
 cargo test -p kamish-meta --test developer_b_scenarios test_scenario_c_regional_outage_and_recovery_demo -- --nocapture | grep "DEMO SCENARIO"
-echo -e "${GREEN}   Result: PASS. Region B caught up 15 records from watermark with ZERO data loss.${NC}\n"
+echo -e "${GREEN}   Result: PASS. Simulated 15-record backlog caught up; this is not a production RPO guarantee.${NC}\n"
 
 echo -e "${GREEN}${BOLD}"
 echo "=========================================================================="

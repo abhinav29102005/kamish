@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import { Flame, ShieldAlert, Sparkles, ChevronDown, ChevronUp, Zap, Swords } from 'lucide-react';
 
 export const KamishDragonBanner: React.FC = () => {

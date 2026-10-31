@@ -1,18 +1,7 @@
-import React from 'react';
+import { useDemoTasks } from '../context/useDemoTasks.js';
 
 export default function TasksPage({ onSelectTask, onNewTask }) {
-  const taskList = [
-    { id: 'TSK-001', title: 'Segmented Commit Log Fsync Durability & Offset Sequential Reads', status: 'PASS' },
-    { id: 'TSK-002', title: 'Session Manager Producer Sequence Deduplication (INV-6)', status: 'PASS' },
-    { id: 'TSK-003', title: 'Bounded Durable Outbox & Destination Watermark Trimming', status: 'PASS' },
-    { id: 'TSK-004', title: 'Single Decision Function Mapping E1 to E10 Enforcement Points', status: 'PASS' },
-    { id: 'TSK-005', title: 'Sealed Destination Mode & Regional Key Residency Service', status: 'PASS' },
-    { id: 'TSK-006', title: 'Dynamic WAN Route Selection with Hysteresis & Dwell Time', status: 'PASS' },
-    { id: 'TSK-007', title: 'Partition Ownership, Lease Expiry, Fencing, and Quarantine Store', status: 'PASS' },
-    { id: 'TSK-008', title: 'Zero-Payload Cryptographic SHA-256 Hash Chained Audit Log', status: 'PASS' },
-    { id: 'TSK-009', title: 'Canary Scanner, Ordering Checker, and Epoch Auditor', status: 'PASS' },
-    { id: 'TSK-010', title: 'Sustained Throughput Benchmark (12,479 msg/s & 59µs p50 Latency)', status: 'PASS' },
-  ];
+  const { tasks: taskList, storageError } = useDemoTasks();
 
   return (
     <div
@@ -57,11 +46,21 @@ export default function TasksPage({ onSelectTask, onNewTask }) {
         </button>
       </div>
 
+      <p>Local demo tasks and prototype status — not live verification results.</p>
+      {storageError && <p role="alert">{storageError}</p>}
       {/* Task Rows matching Page 3 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         {taskList.map((task) => (
           <div
             key={task.id}
+            role="button"
+            tabIndex={0}
+            onKeyDown={event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onSelectTask(task.id);
+              }
+            }}
             onClick={() => onSelectTask(task.id)}
             style={{
               background: '#120b22',
@@ -72,6 +71,8 @@ export default function TasksPage({ onSelectTask, onNewTask }) {
               justifyContent: 'space-between',
               alignItems: 'center',
               cursor: 'pointer',
+              flexWrap: 'wrap',
+              gap: '1rem',
               transition: 'all 0.15s ease',
             }}
             onMouseEnter={(e) => {
@@ -83,7 +84,7 @@ export default function TasksPage({ onSelectTask, onNewTask }) {
               e.currentTarget.style.boxShadow = '6px 6px 0px var(--purple-glow)';
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2rem', minWidth: 0, flex: 1 }}>
               <span
                 style={{
                   fontFamily: 'var(--font-mono)',
@@ -93,13 +94,14 @@ export default function TasksPage({ onSelectTask, onNewTask }) {
                   minWidth: '90px',
                 }}
               >
-                {task.id}
+                {task.id.startsWith('DEMO-') ? `${task.id.slice(0, 13)}…` : task.id}
               </span>
               <span
                 style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.95rem',
                   color: '#e2d9f3',
+                  overflowWrap: 'anywhere',
                 }}
               >
                 [{task.title}]

@@ -1118,7 +1118,8 @@ mod tests {
         assert_eq!(pending[1].start_offset, 3);
 
         // 4. Test deduplication on reconnect (INV-6):
-        // If sender accidentally retransmits already-committed range [0..2], receiver must return idempotent duplicate no-op
+        // Retransmit the already-committed record at [0..1]. The wire format is
+        // one record per request; a claimed two-record range is not a valid retry.
         let dup_req = ReplicationRequest {
             topic: "orders".to_string(),
             partition: 0,
@@ -1127,7 +1128,7 @@ mod tests {
             class_id: "global-stream".to_string(),
             epoch: 1,
             from_offset: 0,
-            to_offset: 2,
+            to_offset: 1,
             payload: b"order-0".to_vec(),
             is_sealed: false,
         };
@@ -1343,13 +1344,9 @@ mod tests {
             payload: b"stale-write".to_vec(),
             is_sealed: false,
         };
-        let err = broker_b.handle_replication(req_stale).unwrap_err();
-        assert!(matches!(
-            err,
-            kamish_broker::BrokerError::Log(kamish_log::LogError::StaleEpoch {
-                current: 2,
-                requested: 1
-            })
-        ));
+        let response = broker_b.handle_replication(req_stale).unwrap();
+        assert!(!response.accepted);
+        assert_eq!(response.applied_watermark, 1);
+        assert_eq!(response.reason, "replication_target_or_epoch_mismatch");
     }
 }

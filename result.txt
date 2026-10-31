@@ -1,1695 +1,58 @@
 ==========================================
  KAMISH - WORKSPACE VALIDATION REPORT
- Date: Sunday 01 November 2026 12:20:17 AM IST
+ Date: Sunday 01 November 2026 12:49:47 AM IST
 ==========================================
 
 
 ========== 1. CARGO FMT ==========
 
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent/src/lib.rs:476:
-             .update_watermark(topic, partition, target_region, remote_watermark);
- 
-         // Repopulate outbox from disk log if there are committed records ahead of remote watermark
-[31m-        self.local_broker.repopulate_outbox_from_log(topic, partition, target_region)?;
-(B[m[32m+        self.local_broker
-(B[m[32m+            .repopulate_outbox_from_log(topic, partition, target_region)?;
-(B[m 
-         info!(
-             target = %target_region,
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:15:
- 
- use kamish_audit::AuditAction;
- use kamish_enforce::{EnforcementRequest, Enforcer};
-[31m-use kamish_log::{LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager};
-(B[m[32m+use kamish_log::{
-(B[m[32m+    LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager,
-(B[m[32m+};
-(B[m use kamish_meta::{MetadataStore, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
- use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
- use kamish_policy::DestinationMode;
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:181:
-     }
- 
-     pub fn keys(&self) -> Vec<K> {
-[31m-        self.stripes.iter().flat_map(|stripe| {
-(B[m[31m-            stripe.read().unwrap().keys().cloned().collect::<Vec<_>>()
-(B[m[31m-        }).collect()
-(B[m[32m+        self.stripes
-(B[m[32m+            .iter()
-(B[m[32m+            .flat_map(|stripe| stripe.read().unwrap().keys().cloned().collect::<Vec<_>>())
-(B[m[32m+            .collect()
-(B[m     }
- 
-     pub fn get_or_insert_with<F: FnOnce() -> V>(&self, key: K, default_fn: F) -> V {
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:199:
-     }
- 
-     pub fn get_or_try_insert_with<E>(
-[31m-        &self, key: K, create: impl FnOnce() -> Result<V, E>,
-(B[m[32m+        &self,
-(B[m[32m+        key: K,
-(B[m[32m+        create: impl FnOnce() -> Result<V, E>,
-(B[m     ) -> Result<V, E> {
-         let idx = self.get_stripe_index(&key);
-         let mut guard = self.stripes[idx].write().unwrap();
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:278:
-         };
-         for entry in std::fs::read_dir(&broker.data_dir)? {
-             let entry = entry?;
-[31m-            if !entry.file_type()?.is_dir() { continue; }
-(B[m[31m-            if !entry.path().join("partition.data").exists() { continue; }
-(B[m[32m+            if !entry.file_type()?.is_dir() {
-(B[m[32m+                continue;
-(B[m[32m+            }
-(B[m[32m+            if !entry.path().join("partition.data").exists() {
-(B[m[32m+                continue;
-(B[m[32m+            }
-(B[m             let name = entry.file_name().to_string_lossy().to_string();
-[31m-            let (topic, partition) = name.rsplit_once('-')
-(B[m[32m+            let (topic, partition) = name
-(B[m[32m+                .rsplit_once('-')
-(B[m                 .ok_or_else(|| std::io::Error::other("invalid stored partition directory"))?;
-[31m-            let partition = partition.parse::<u32>()
-(B[m[32m+            let partition = partition
-(B[m[32m+                .parse::<u32>()
-(B[m                 .map_err(|_| std::io::Error::other("invalid stored partition number"))?;
-             let log = broker.get_or_create_log(topic, partition, 1)?;
-             broker.get_or_create_session(topic, partition, &log);
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:309:
-     /// deduplication, disk persistence, and outbox egress replication planning.
-     pub fn produce(&self, req: ProduceRequest) -> Result<ProduceResponse, BrokerError> {
-         Self::validate_topic(&req.topic)?;
-[31m-        let operation = self.partition_operations.get_or_insert_with(
-(B[m[31m-            (req.topic.clone(), req.partition), || Arc::new(Mutex::new(())),
-(B[m[31m-        );
-(B[m[32m+        let operation = self
-(B[m[32m+            .partition_operations
-(B[m[32m+            .get_or_insert_with((req.topic.clone(), req.partition), || {
-(B[m[32m+                Arc::new(Mutex::new(()))
-(B[m[32m+            });
-(B[m         // Session check + durable append + session update + outbox publication
-         // form one operation, not separate independently thread-safe steps.
-         let _operation = operation.lock().unwrap();
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:321:
-             if let Some(owner) = ownership {
-                 let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
-                 if owner.owner_region != self.region || now >= owner.lease_expiry_ns {
-[31m-                    return Err(BrokerError::PolicyDenied("not_current_partition_owner".into()));
-(B[m[32m+                    return Err(BrokerError::PolicyDenied(
-(B[m[32m+                        "not_current_partition_owner".into(),
-(B[m[32m+                    ));
-(B[m                 }
-             }
-             // Preserve the existing unregistered, single-node prototype mode.
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:333:
-                 if now >= owner.lease_expiry_ns {
-                     // Append may have committed; never send a successful ACK
-                     // after lease expiry. The client must resolve/retry identity.
-[31m-                    return Err(BrokerError::PolicyDenied("lease_expired_outcome_unknown".into()));
-(B[m[32m+                    return Err(BrokerError::PolicyDenied(
-(B[m[32m+                        "lease_expired_outcome_unknown".into(),
-(B[m[32m+                    ));
-(B[m                 }
-             }
-             Ok(response)
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:340:
-         })
-     }
- 
-[31m-    fn produce_at_epoch(&self, req: ProduceRequest, epoch: u64) -> Result<ProduceResponse, BrokerError> {
-(B[m[32m+    fn produce_at_epoch(
-(B[m[32m+        &self,
-(B[m[32m+        req: ProduceRequest,
-(B[m[32m+        epoch: u64,
-(B[m[32m+    ) -> Result<ProduceResponse, BrokerError> {
-(B[m         // 1. Resolve canonical StreamEvent for the PolicyEngine trait contract
-         // Class rules remain authoritative; an optional producer restriction may
-         // only narrow them. Never infer authorization from class-name substrings.
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:347:
-[31m-        let residency = req.residency_rule.clone().unwrap_or(ResidencyPolicy::GlobalCleartext);
-(B[m[32m+        let residency = req
-(B[m[32m+            .residency_rule
-(B[m[32m+            .clone()
-(B[m[32m+            .unwrap_or(ResidencyPolicy::GlobalCleartext);
-(B[m         if matches!(residency, ResidencyPolicy::SealedCiphertext(_)) {
-[31m-            return Err(BrokerError::PolicyDenied("sealed_replication_not_configured".into()));
-(B[m[32m+            return Err(BrokerError::PolicyDenied(
-(B[m[32m+                "sealed_replication_not_configured".into(),
-(B[m[32m+            ));
-(B[m         }
-[31m-        let request_policy = serde_json::to_string(&residency)
-(B[m[31m-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-(B[m[32m+        let request_policy =
-(B[m[32m+            serde_json::to_string(&residency).map_err(|e| std::io::Error::other(e.to_string()))?;
-(B[m 
-         let stream_event = StreamEvent::new(
-             req.sequence_base as u64,
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:408:
-             let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
-             let records = log.read(cached_offset, 1);
-             if !records.first().is_some_and(|record| {
-[31m-                record.payload == req.payload && record.class_id == req.class_id
-(B[m[31m-                    && record.context.as_ref().is_some_and(|ctx| ctx.request_policy == request_policy)
-(B[m[32m+                record.payload == req.payload
-(B[m[32m+                    && record.class_id == req.class_id
-(B[m[32m+                    && record
-(B[m[32m+                        .context
-(B[m[32m+                        .as_ref()
-(B[m[32m+                        .is_some_and(|ctx| ctx.request_policy == request_policy)
-(B[m             }) {
-[31m-                return Err(BrokerError::PolicyDenied("producer_sequence_content_conflict".into()));
-(B[m[32m+                return Err(BrokerError::PolicyDenied(
-(B[m[32m+                    "producer_sequence_content_conflict".into(),
-(B[m[32m+                ));
-(B[m             }
-             return Ok(ProduceResponse {
-                 base_offset: cached_offset,
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:462:
-                 // Fail closed until an authenticated encryption/key-custody
-                 // integration exists. A boolean flag is not encryption.
-                 if send_decision.mode == DestinationMode::SealedOnly {
-[31m-                    return Err(BrokerError::PolicyDenied("sealed_replication_not_configured".into()));
-(B[m[32m+                    return Err(BrokerError::PolicyDenied(
-(B[m[32m+                        "sealed_replication_not_configured".into(),
-(B[m[32m+                    ));
-(B[m                 }
-                 let outbox = self.get_or_create_outbox(peer);
-                 match outbox.reserve_capacity(estimated_range_size) {
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:507:
-             sequence: req.sequence_base,
-             origin_region: self.region.clone(),
-             request_policy,
-[31m-            replication_targets: reservations.iter().map(|(peer, _, _)| peer.clone()).collect(),
-(B[m[32m+            replication_targets: reservations
-(B[m[32m+                .iter()
-(B[m[32m+                .map(|(peer, _, _)| peer.clone())
-(B[m[32m+                .collect(),
-(B[m         };
-         let offset = log.append_with_context(
-             epoch,
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:573:
-                 return Err(BrokerError::PolicyDenied("fetch_class_mismatch".into()));
-             }
-             let decision = self.enforcer.decide(EnforcementRequest::new(
-[31m-                AuditAction::ConsumerFetch, &record.class_id, &self.region, &self.region,
-(B[m[32m+                AuditAction::ConsumerFetch,
-(B[m[32m+                &record.class_id,
-(B[m[32m+                &self.region,
-(B[m[32m+                &self.region,
-(B[m             ));
-             if !decision.allowed {
-                 return Err(BrokerError::PolicyDenied(decision.reason));
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:591:
-         req: ReplicationRequest,
-     ) -> Result<ReplicationResponse, BrokerError> {
-         Self::validate_topic(&req.topic)?;
-[31m-        let operation = self.partition_operations.get_or_insert_with(
-(B[m[31m-            (req.topic.clone(), req.partition), || Arc::new(Mutex::new(())),
-(B[m[31m-        );
-(B[m[32m+        let operation = self
-(B[m[32m+            .partition_operations
-(B[m[32m+            .get_or_insert_with((req.topic.clone(), req.partition), || {
-(B[m[32m+                Arc::new(Mutex::new(()))
-(B[m[32m+            });
-(B[m         let _operation = operation.lock().unwrap();
-         // E5: Replication Receiver Policy Check
-         let enf_req = EnforcementRequest::new(
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:612:
-         }
-         if req.is_sealed || decision.mode == DestinationMode::SealedOnly {
-             return Ok(ReplicationResponse {
-[31m-                accepted: false, applied_watermark: 0,
-(B[m[32m+                accepted: false,
-(B[m[32m+                applied_watermark: 0,
-(B[m                 reason: "sealed_replication_not_configured".into(),
-             });
-         }
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:708:
-         target_region: &str,
-     ) -> Result<usize, BrokerError> {
-         Self::validate_topic(topic)?;
-[31m-        let operation = self.partition_operations.get_or_insert_with(
-(B[m[31m-            (topic.to_string(), partition), || Arc::new(Mutex::new(())),
-(B[m[31m-        );
-(B[m[32m+        let operation = self
-(B[m[32m+            .partition_operations
-(B[m[32m+            .get_or_insert_with((topic.to_string(), partition), || Arc::new(Mutex::new(())));
-(B[m         let _operation = operation.lock().unwrap();
-         let outbox = self.get_or_create_outbox(target_region);
-         let start_offset = outbox.durable_partition_watermark(topic, partition);
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:730:
-                 // Old envelopes did not preserve producer-supplied restrictions.
-                 // They cannot be reconstructed under a guessed class policy.
-                 let Some(context) = record.context.as_ref() else {
-[31m-                    tracing::warn!(topic, partition, offset = record.base_offset,
-(B[m[31m-                        "Skipping outbound recovery of legacy/replica record without admission context");
-(B[m[32m+                    tracing::warn!(
-(B[m[32m+                        topic,
-(B[m[32m+                        partition,
-(B[m[32m+                        offset = record.base_offset,
-(B[m[32m+                        "Skipping outbound recovery of legacy/replica record without admission context"
-(B[m[32m+                    );
-(B[m                     continue;
-                 };
-                 if context.origin_region != self.region
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:738:
-[31m-                    || !context.replication_targets.iter().any(|r| r == target_region)
-(B[m[32m+                    || !context
-(B[m[32m+                        .replication_targets
-(B[m[32m+                        .iter()
-(B[m[32m+                        .any(|r| r == target_region)
-(B[m                 {
-                     continue;
-                 }
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:824:
-         // Topic names are a single bounded path component, never a path. Keep
-         // the existing on-disk naming scheme while rejecting traversal and
-         // absolute paths before any directory creation/open.
-[31m-        if topic.is_empty() || topic.len() > 249 || topic == "." || topic == ".."
-(B[m[31m-            || !topic.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-(B[m[32m+        if topic.is_empty()
-(B[m[32m+            || topic.len() > 249
-(B[m[32m+            || topic == "."
-(B[m[32m+            || topic == ".."
-(B[m[32m+            || !topic
-(B[m[32m+                .bytes()
-(B[m[32m+                .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-(B[m         {
-             return Err(BrokerError::PolicyDenied("invalid_topic_name".into()));
-         }
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:832:
-         Ok(())
-     }
- 
-[31m-    fn get_or_create_session(&self, topic: &str, partition: u32, log: &PartitionLog) -> SessionManager {
-(B[m[32m+    fn get_or_create_session(
-(B[m[32m+        &self,
-(B[m[32m+        topic: &str,
-(B[m[32m+        partition: u32,
-(B[m[32m+        log: &PartitionLog,
-(B[m[32m+    ) -> SessionManager {
-(B[m         let key = (topic.to_string(), partition);
-         self.sessions.get_or_insert_with(key, || {
-             let sessions = SessionManager::new();
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:841:
-                 for record in log.read(offset, 128) {
-                     if let Some(context) = &record.context {
-                         if context.origin_region == self.region {
-[31m-                            sessions.update(context.producer_id, context.producer_epoch,
-(B[m[31m-                                context.sequence, record.base_offset);
-(B[m[32m+                            sessions.update(
-(B[m[32m+                                context.producer_id,
-(B[m[32m+                                context.producer_epoch,
-(B[m[32m+                                context.sequence,
-(B[m[32m+                                record.base_offset,
-(B[m[32m+                            );
-(B[m                         }
-                     }
-                     offset = record.base_offset + 1;
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1142:
-             },
-         );
- 
-[31m-        classes.insert("sealed-data".into(), ClassRule {
-(B[m[31m-            class_id: "sealed-data".into(), description: "Requires unavailable sealed integration".into(),
-(B[m[31m-            legal_regions: ["region-eu".into(), "region-us".into()].into(),
-(B[m[31m-            destination_modes: [("region-eu".into(), DestinationMode::Cleartext),
-(B[m[31m-                ("region-us".into(), DestinationMode::SealedOnly)].into(),
-(B[m[31m-            ack_mode: AckMode::LocalMajority, failover_candidates: vec![], transit_allowed: false,
-(B[m[31m-        });
-(B[m[32m+        classes.insert(
-(B[m[32m+            "sealed-data".into(),
-(B[m[32m+            ClassRule {
-(B[m[32m+                class_id: "sealed-data".into(),
-(B[m[32m+                description: "Requires unavailable sealed integration".into(),
-(B[m[32m+                legal_regions: ["region-eu".into(), "region-us".into()].into(),
-(B[m[32m+                destination_modes: [
-(B[m[32m+                    ("region-eu".into(), DestinationMode::Cleartext),
-(B[m[32m+                    ("region-us".into(), DestinationMode::SealedOnly),
-(B[m[32m+                ]
-(B[m[32m+                .into(),
-(B[m[32m+                ack_mode: AckMode::LocalMajority,
-(B[m[32m+                failover_candidates: vec![],
-(B[m[32m+                transit_allowed: false,
-(B[m[32m+            },
-(B[m[32m+        );
-(B[m         let policy_doc = PolicyDocument {
-             policy_id: "pol-test".to_string(),
-             version: 1,
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1230:
-     #[test]
-     fn fetch_cannot_relabel_stored_records() {
-         let (broker, _dir) = setup_test_broker("region-eu", vec![]);
-[31m-        broker.produce(ProduceRequest {
-(B[m[31m-            topic: "restricted".into(), partition: 0, producer_id: 1, producer_epoch: 1,
-(B[m[31m-            sequence_base: 0, class_id: "eu-strict".into(), payload: b"private".to_vec(),
-(B[m[31m-            residency_rule: None,
-(B[m[31m-        }).unwrap();
-(B[m[31m-        let error = broker.fetch(FetchRequest {
-(B[m[31m-            topic: "restricted".into(), partition: 0, class_id: "global-data".into(),
-(B[m[31m-            start_offset: 0, max_records: 10,
-(B[m[31m-        }).unwrap_err();
-(B[m[31m-        assert!(matches!(error, BrokerError::PolicyDenied(reason) if reason == "fetch_class_mismatch"));
-(B[m[32m+        broker
-(B[m[32m+            .produce(ProduceRequest {
-(B[m[32m+                topic: "restricted".into(),
-(B[m[32m+                partition: 0,
-(B[m[32m+                producer_id: 1,
-(B[m[32m+                producer_epoch: 1,
-(B[m[32m+                sequence_base: 0,
-(B[m[32m+                class_id: "eu-strict".into(),
-(B[m[32m+                payload: b"private".to_vec(),
-(B[m[32m+                residency_rule: None,
-(B[m[32m+            })
-(B[m[32m+            .unwrap();
-(B[m[32m+        let error = broker
-(B[m[32m+            .fetch(FetchRequest {
-(B[m[32m+                topic: "restricted".into(),
-(B[m[32m+                partition: 0,
-(B[m[32m+                class_id: "global-data".into(),
-(B[m[32m+                start_offset: 0,
-(B[m[32m+                max_records: 10,
-(B[m[32m+            })
-(B[m[32m+            .unwrap_err();
-(B[m[32m+        assert!(
-(B[m[32m+            matches!(error, BrokerError::PolicyDenied(reason) if reason == "fetch_class_mismatch")
-(B[m[32m+        );
-(B[m     }
- 
-     #[test]
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1248:
-         let broker = Arc::new(broker);
-         let barrier = Arc::new(std::sync::Barrier::new(8));
-         let request = ProduceRequest {
-[31m-            topic: "concurrent-retry".into(), partition: 0, producer_id: 1, producer_epoch: 1,
-(B[m[31m-            sequence_base: 0, class_id: "global-data".into(), payload: vec![7; 100_000],
-(B[m[32m+            topic: "concurrent-retry".into(),
-(B[m[32m+            partition: 0,
-(B[m[32m+            producer_id: 1,
-(B[m[32m+            producer_epoch: 1,
-(B[m[32m+            sequence_base: 0,
-(B[m[32m+            class_id: "global-data".into(),
-(B[m[32m+            payload: vec![7; 100_000],
-(B[m             residency_rule: None,
-         };
-[31m-        let workers: Vec<_> = (0..8).map(|_| {
-(B[m[31m-            let broker = broker.clone();
-(B[m[31m-            let barrier = barrier.clone();
-(B[m[31m-            let request = request.clone();
-(B[m[31m-            std::thread::spawn(move || {
-(B[m[31m-                barrier.wait();
-(B[m[31m-                broker.produce(request).unwrap()
-(B[m[32m+        let workers: Vec<_> = (0..8)
-(B[m[32m+            .map(|_| {
-(B[m[32m+                let broker = broker.clone();
-(B[m[32m+                let barrier = barrier.clone();
-(B[m[32m+                let request = request.clone();
-(B[m[32m+                std::thread::spawn(move || {
-(B[m[32m+                    barrier.wait();
-(B[m[32m+                    broker.produce(request).unwrap()
-(B[m[32m+                })
-(B[m             })
-[31m-        }).collect();
-(B[m[32m+            .collect();
-(B[m         for worker in workers {
-             assert_eq!(worker.join().unwrap().base_offset, 0);
-         }
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1267:
-[31m-        assert_eq!(broker.fetch(FetchRequest {
-(B[m[31m-            topic: request.topic.clone(), partition: 0, class_id: request.class_id.clone(),
-(B[m[31m-            start_offset: 0, max_records: 100,
-(B[m[31m-        }).unwrap().records.len(), 1);
-(B[m[32m+        assert_eq!(
-(B[m[32m+            broker
-(B[m[32m+                .fetch(FetchRequest {
-(B[m[32m+                    topic: request.topic.clone(),
-(B[m[32m+                    partition: 0,
-(B[m[32m+                    class_id: request.class_id.clone(),
-(B[m[32m+                    start_offset: 0,
-(B[m[32m+                    max_records: 100,
-(B[m[32m+                })
-(B[m[32m+                .unwrap()
-(B[m[32m+                .records
-(B[m[32m+                .len(),
-(B[m[32m+            1
-(B[m[32m+        );
-(B[m         let mut changed = request;
-         changed.payload = b"different".to_vec();
-         assert!(broker.produce(changed).is_err());
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1277:
-     fn topic_paths_cannot_escape_data_directory() {
-         let (broker, dir) = setup_test_broker("region-eu", vec![]);
-         for topic in ["../escape", "/absolute", "a/b", "a\\b", "", ".", ".."] {
-[31m-            assert!(broker.fetch(FetchRequest {
-(B[m[31m-                topic: topic.into(), partition: 0, class_id: "global-data".into(),
-(B[m[31m-                start_offset: 0, max_records: 1,
-(B[m[31m-            }).is_err(), "{topic}");
-(B[m[32m+            assert!(
-(B[m[32m+                broker
-(B[m[32m+                    .fetch(FetchRequest {
-(B[m[32m+                        topic: topic.into(),
-(B[m[32m+                        partition: 0,
-(B[m[32m+                        class_id: "global-data".into(),
-(B[m[32m+                        start_offset: 0,
-(B[m[32m+                        max_records: 1,
-(B[m[32m+                    })
-(B[m[32m+                    .is_err(),
-(B[m[32m+                "{topic}"
-(B[m[32m+            );
-(B[m         }
-         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
-     }
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1290:
-         let (mut broker, dir) = setup_test_broker("region-eu", vec!["region-us".into()]);
-         broker.policy_engine = None;
-         let request = ProduceRequest {
-[31m-            topic: "restart".into(), partition: 0, producer_id: 42, producer_epoch: 1,
-(B[m[31m-            sequence_base: 0, class_id: "global-data".into(), payload: b"local".to_vec(),
-(B[m[32m+            topic: "restart".into(),
-(B[m[32m+            partition: 0,
-(B[m[32m+            producer_id: 42,
-(B[m[32m+            producer_epoch: 1,
-(B[m[32m+            sequence_base: 0,
-(B[m[32m+            class_id: "global-data".into(),
-(B[m[32m+            payload: b"local".to_vec(),
-(B[m             residency_rule: Some(ResidencyPolicy::StrictLocal),
-         };
-         assert_eq!(broker.produce(request.clone()).unwrap().base_offset, 0);
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1298:
-         let enforcer = broker.enforcer.clone();
-         drop(broker);
-[31m-        let restarted = BrokerServer::try_new("region-eu", enforcer,
-(B[m[31m-            Arc::new(MetadataStore::new()), vec!["region-us".into()], dir.path()).unwrap();
-(B[m[32m+        let restarted = BrokerServer::try_new(
-(B[m[32m+            "region-eu",
-(B[m[32m+            enforcer,
-(B[m[32m+            Arc::new(MetadataStore::new()),
-(B[m[32m+            vec!["region-us".into()],
-(B[m[32m+            dir.path(),
-(B[m[32m+        )
-(B[m[32m+        .unwrap();
-(B[m         assert_eq!(restarted.produce(request.clone()).unwrap().base_offset, 0);
-[31m-        assert!(restarted.get_outbox("region-us").unwrap().next_transfer_batch(10).is_empty());
-(B[m[32m+        assert!(
-(B[m[32m+            restarted
-(B[m[32m+                .get_outbox("region-us")
-(B[m[32m+                .unwrap()
-(B[m[32m+                .next_transfer_batch(10)
-(B[m[32m+                .is_empty()
-(B[m[32m+        );
-(B[m         let mut changed = request;
-         changed.residency_rule = Some(ResidencyPolicy::GlobalCleartext);
-         assert!(restarted.produce(changed).is_err());
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1311:
-         let (source, _a) = setup_test_broker("region-eu", vec!["region-us".into()]);
-         let (target, _b) = setup_test_broker("region-us", vec![]);
-         let result = source.produce(ProduceRequest {
-[31m-            topic: "sealed".into(), partition: 0, producer_id: 1, producer_epoch: 1,
-(B[m[31m-            sequence_base: 0, class_id: "sealed-data".into(), payload: b"sensitive".to_vec(),
-(B[m[32m+            topic: "sealed".into(),
-(B[m[32m+            partition: 0,
-(B[m[32m+            producer_id: 1,
-(B[m[32m+            producer_epoch: 1,
-(B[m[32m+            sequence_base: 0,
-(B[m[32m+            class_id: "sealed-data".into(),
-(B[m[32m+            payload: b"sensitive".to_vec(),
-(B[m             residency_rule: None,
-         });
-[31m-        assert!(matches!(result, Err(BrokerError::PolicyDenied(reason)) if reason == "sealed_replication_not_configured"));
-(B[m[31m-        assert!(source.get_outbox("region-us").unwrap().next_transfer_batch(10).is_empty());
-(B[m[32m+        assert!(
-(B[m[32m+            matches!(result, Err(BrokerError::PolicyDenied(reason)) if reason == "sealed_replication_not_configured")
-(B[m[32m+        );
-(B[m[32m+        assert!(
-(B[m[32m+            source
-(B[m[32m+                .get_outbox("region-us")
-(B[m[32m+                .unwrap()
-(B[m[32m+                .next_transfer_batch(10)
-(B[m[32m+                .is_empty()
-(B[m[32m+        );
-(B[m         for is_sealed in [false, true] {
-[31m-            let response = target.handle_replication(ReplicationRequest {
-(B[m[31m-                topic: "sealed".into(), partition: 0, source_region: "region-eu".into(),
-(B[m[31m-                target_region: "region-us".into(), class_id: "sealed-data".into(), epoch: 1,
-(B[m[31m-                from_offset: 0, to_offset: 1, payload: b"sensitive".to_vec(), is_sealed,
-(B[m[31m-            }).unwrap();
-(B[m[32m+            let response = target
-(B[m[32m+                .handle_replication(ReplicationRequest {
-(B[m[32m+                    topic: "sealed".into(),
-(B[m[32m+                    partition: 0,
-(B[m[32m+                    source_region: "region-eu".into(),
-(B[m[32m+                    target_region: "region-us".into(),
-(B[m[32m+                    class_id: "sealed-data".into(),
-(B[m[32m+                    epoch: 1,
-(B[m[32m+                    from_offset: 0,
-(B[m[32m+                    to_offset: 1,
-(B[m[32m+                    payload: b"sensitive".to_vec(),
-(B[m[32m+                    is_sealed,
-(B[m[32m+                })
-(B[m[32m+                .unwrap();
-(B[m             assert!(!response.accepted);
-         }
-         assert_eq!(target.get_watermark("sealed", 0, "region-eu"), 0);
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1332:
-     fn registered_wrong_or_expired_owner_cannot_acknowledge() {
-         let (broker, _dir) = setup_test_broker("region-eu", vec![]);
-         let req = ProduceRequest {
-[31m-            topic: "owned".into(), partition: 0, producer_id: 1, producer_epoch: 1,
-(B[m[31m-            sequence_base: 0, class_id: "global-data".into(), payload: vec![1], residency_rule: None,
-(B[m[32m+            topic: "owned".into(),
-(B[m[32m+            partition: 0,
-(B[m[32m+            producer_id: 1,
-(B[m[32m+            producer_epoch: 1,
-(B[m[32m+            sequence_base: 0,
-(B[m[32m+            class_id: "global-data".into(),
-(B[m[32m+            payload: vec![1],
-(B[m[32m+            residency_rule: None,
-(B[m         };
-[31m-        broker.meta.set_ownership("owned", 0, "region-us", 7, 60_000).unwrap();
-(B[m[32m+        broker
-(B[m[32m+            .meta
-(B[m[32m+            .set_ownership("owned", 0, "region-us", 7, 60_000)
-(B[m[32m+            .unwrap();
-(B[m         assert!(broker.produce(req.clone()).is_err());
-[31m-        broker.meta.set_ownership("owned", 0, "region-eu", 8, -1).unwrap();
-(B[m[32m+        broker
-(B[m[32m+            .meta
-(B[m[32m+            .set_ownership("owned", 0, "region-eu", 8, -1)
-(B[m[32m+            .unwrap();
-(B[m         assert!(broker.produce(req.clone()).is_err());
-[31m-        broker.meta.set_ownership("owned", 0, "region-eu", 9, 60_000).unwrap();
-(B[m[32m+        broker
-(B[m[32m+            .meta
-(B[m[32m+            .set_ownership("owned", 0, "region-eu", 9, 60_000)
-(B[m[32m+            .unwrap();
-(B[m         let response = broker.produce(req).unwrap();
-         assert_eq!(response.committed_epoch, 9);
-         assert_eq!(response.base_offset, 0);
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1486:
-             };
-             let rep_res = broker_b.handle_replication(rep_req).unwrap();
-             assert!(rep_res.accepted);
-[31m-            outbox_a.advance_watermark(rep_res.applied_watermark).unwrap();
-(B[m[32m+            outbox_a
-(B[m[32m+                .advance_watermark(rep_res.applied_watermark)
-(B[m[32m+                .unwrap();
-(B[m         }
- 
-         // 3. Verify Broker A outbox is fully drained (watermark = 3)
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1552:
-             };
-             let rep_res = broker_b.handle_replication(rep_req).unwrap();
-             assert!(rep_res.accepted);
-[31m-            outbox_a.advance_watermark(rep_res.applied_watermark).unwrap();
-(B[m[32m+            outbox_a
-(B[m[32m+                .advance_watermark(rep_res.applied_watermark)
-(B[m[32m+                .unwrap();
-(B[m         }
- 
-         assert_eq!(outbox_a.durable_watermark(), 5);
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/admission_control_race.rs:435:
- 
-         // Advance restarted outbox watermark to 2 (learned via remote handshake)
-         let outbox = broker_restarted.get_outbox("US_EAST").unwrap();
-[31m-        assert_eq!(outbox.next_transfer_batch(10).len(), 5,
-(B[m[31m-            "Startup must reconstruct pending work without an explicit recovery call");
-(B[m[32m+        assert_eq!(
-(B[m[32m+            outbox.next_transfer_batch(10).len(),
-(B[m[32m+            5,
-(B[m[32m+            "Startup must reconstruct pending work without an explicit recovery call"
-(B[m[32m+        );
-(B[m         outbox.advance_partition_watermark("audit-stream", 0, 2);
- 
-         // Repopulate pending replication obligations from disk commit log
-Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-ctl/src/main.rs:108:
-     #[test]
-     fn every_subcommand_accepts_help() {
-         Cli::command().debug_assert();
-[31m-        for command in ["verify-audit", "produce", "consume", "watermark", "demo", "benchmark"] {
-(B[m[32m+        for command in [
-(B[m[32m+            "verify-audit",
-(B[m[32m+            "produce",
-(B[m[32m+            "consume",
-(B[m[32m+            "watermark",
-(B[m[32m+            "demo",
-(B[m[32m+            "benchmark",
-(B[m[32m+        ] {
-(B[m             let error = Cli::try_parse_from(["kamish-ctl", command, "--help"]).unwrap_err();
-[31m-            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp, "{command}");
-(B[m[32m+            assert_eq!(
-(B[m[32m+                error.kind(),
-(B[m[32m+                clap::error::ErrorKind::DisplayHelp,
-(B[m[32m+                "{command}"
-(B[m[32m+            );
-(B[m         }
-     }
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit/src/lib.rs:125:
-     ) -> String {
-         let mut hasher = Sha256::new();
-         hasher.update(b"kamish-audit-v2\0");
-[31m-        hasher.update(serde_json::to_vec(&(
-(B[m[31m-            sequence, timestamp_ns, prev_hash, action, class_id, source_region,
-(B[m[31m-            target_region, policy_version, outcome, reason,
-(B[m[31m-        )).expect("audit fields contain only serializable primitive values"));
-(B[m[32m+        hasher.update(
-(B[m[32m+            serde_json::to_vec(&(
-(B[m[32m+                sequence,
-(B[m[32m+                timestamp_ns,
-(B[m[32m+                prev_hash,
-(B[m[32m+                action,
-(B[m[32m+                class_id,
-(B[m[32m+                source_region,
-(B[m[32m+                target_region,
-(B[m[32m+                policy_version,
-(B[m[32m+                outcome,
-(B[m[32m+                reason,
-(B[m[32m+            ))
-(B[m[32m+            .expect("audit fields contain only serializable primitive values"),
-(B[m[32m+        );
-(B[m         hex::encode(hasher.finalize())
-     }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit/src/lib.rs:250:
- 
-         // Verify the sink is writable before admitting traffic. Never silently
-         // downgrade a configured disk audit to an in-memory log.
-[31m-        let file = OpenOptions::new().create(true).append(true).open(&path_buf)?;
-(B[m[32m+        let file = OpenOptions::new()
-(B[m[32m+            .create(true)
-(B[m[32m+            .append(true)
-(B[m[32m+            .open(&path_buf)?;
-(B[m         file.sync_all()?;
-         #[cfg(unix)]
-[31m-        File::open(path_buf.parent().filter(|p| !p.as_os_str().is_empty())
-(B[m[31m-            .unwrap_or_else(|| Path::new(".")))?.sync_all()?;
-(B[m[32m+        File::open(
-(B[m[32m+            path_buf
-(B[m[32m+                .parent()
-(B[m[32m+                .filter(|p| !p.as_os_str().is_empty())
-(B[m[32m+                .unwrap_or_else(|| Path::new(".")),
-(B[m[32m+        )?
-(B[m[32m+        .sync_all()?;
-(B[m         Ok(Self {
-             inner: Arc::new(Mutex::new(AuditLogInner {
-                 writer_failed: false,
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit/tests/integrity_contract.rs:1:
- use kamish_audit::{AuditAction, AuditEntry, AuditError, AuditLog, DecisionOutcome};
- 
- fn record(log: &AuditLog) -> Result<AuditEntry, AuditError> {
-[31m-    log.record(AuditAction::BrokerAppend, "class", "eu", "us", 1, DecisionOutcome::AllowCleartext, "ok")
-(B[m[32m+    log.record(
-(B[m[32m+        AuditAction::BrokerAppend,
-(B[m[32m+        "class",
-(B[m[32m+        "eu",
-(B[m[32m+        "us",
-(B[m[32m+        1,
-(B[m[32m+        DecisionOutcome::AllowCleartext,
-(B[m[32m+        "ok",
-(B[m[32m+    )
-(B[m }
- 
- #[test]
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit/tests/integrity_contract.rs:8:
- fn adjacent_field_boundaries_are_authenticated() {
-[31m-    let hash = |class, source| AuditEntry::compute_hash(
-(B[m[31m-        0, 1, "genesis", AuditAction::BrokerAppend, class, source, "us", 1,
-(B[m[31m-        DecisionOutcome::AllowCleartext, "ok",
-(B[m[31m-    );
-(B[m[32m+    let hash = |class, source| {
-(B[m[32m+        AuditEntry::compute_hash(
-(B[m[32m+            0,
-(B[m[32m+            1,
-(B[m[32m+            "genesis",
-(B[m[32m+            AuditAction::BrokerAppend,
-(B[m[32m+            class,
-(B[m[32m+            source,
-(B[m[32m+            "us",
-(B[m[32m+            1,
-(B[m[32m+            DecisionOutcome::AllowCleartext,
-(B[m[32m+            "ok",
-(B[m[32m+        )
-(B[m[32m+    };
-(B[m     assert_ne!(hash("ab", "c"), hash("a", "bc"));
-     assert_ne!(hash("", "a"), hash("a", ""));
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit/tests/integrity_contract.rs:19:
-     let dir = tempfile::tempdir().unwrap();
-     let path = dir.path().join("audit.log");
-     let log = AuditLog::open(&path).unwrap();
-[31m-    let mut entry = log.record(AuditAction::BrokerAppend, "ab", "c", "us", 1,
-(B[m[31m-        DecisionOutcome::AllowCleartext, "ok").unwrap();
-(B[m[32m+    let mut entry = log
-(B[m[32m+        .record(
-(B[m[32m+            AuditAction::BrokerAppend,
-(B[m[32m+            "ab",
-(B[m[32m+            "c",
-(B[m[32m+            "us",
-(B[m[32m+            1,
-(B[m[32m+            DecisionOutcome::AllowCleartext,
-(B[m[32m+            "ok",
-(B[m[32m+        )
-(B[m[32m+        .unwrap();
-(B[m     entry.class_id = "a".into();
-     entry.source_region = "bc".into();
-[31m-    std::fs::write(&path, format!("{}\n", serde_json::to_string(&entry).unwrap())).unwrap();
-(B[m[31m-    assert!(matches!(AuditLog::open(path), Err(AuditError::EntryHashMismatch { .. })));
-(B[m[32m+    std::fs::write(
-(B[m[32m+        &path,
-(B[m[32m+        format!("{}\n", serde_json::to_string(&entry).unwrap()),
-(B[m[32m+    )
-(B[m[32m+    .unwrap();
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        AuditLog::open(path),
-(B[m[32m+        Err(AuditError::EntryHashMismatch { .. })
-(B[m[32m+    ));
-(B[m }
- 
- #[test]
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit/tests/integrity_contract.rs:35:
-     entry.format_version = 0;
-     let bytes = serde_json::to_vec(&entry).unwrap();
-     std::fs::write(&path, &bytes).unwrap();
-[31m-    assert!(matches!(AuditLog::open(&path), Err(AuditError::UnsupportedFormat(0))));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        AuditLog::open(&path),
-(B[m[32m+        Err(AuditError::UnsupportedFormat(0))
-(B[m[32m+    ));
-(B[m     assert_eq!(std::fs::read(path).unwrap(), bytes);
- }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-client/examples/sdk_test_broker.rs:5:
- use kamish_broker::BrokerServer;
- use kamish_enforce::Enforcer;
- use kamish_meta::MetadataStore;
-[31m-use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
-(B[m[32m+use kamish_policy::{
-(B[m[32m+    AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
-(B[m[32m+};
-(B[m use std::collections::{HashMap, HashSet};
- use std::sync::{Arc, RwLock};
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-client/examples/sdk_test_broker.rs:12:
- #[tokio::main]
- async fn main() -> Result<(), Box<dyn std::error::Error>> {
-[31m-    let data_dir = std::env::args().nth(1).ok_or("Provide an isolated test data directory")?;
-(B[m[32m+    let data_dir = std::env::args()
-(B[m[32m+        .nth(1)
-(B[m[32m+        .ok_or("Provide an isolated test data directory")?;
-(B[m     let key = SigningKey::from_bytes(&[11; 32]);
-     let public_key = hex::encode(key.verifying_key().to_bytes());
-     let region = "EU_WEST";
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-client/examples/sdk_test_broker.rs:34:
-         transit_rules: HashMap::new(),
-     };
-     let mut cache = PolicyCache::new(HashSet::from([public_key]));
-[31m-    cache.update(SignedPolicy::sign(policy, &key), chrono::Utc::now().timestamp())?;
-(B[m[32m+    cache.update(
-(B[m[32m+        SignedPolicy::sign(policy, &key),
-(B[m[32m+        chrono::Utc::now().timestamp(),
-(B[m[32m+    )?;
-(B[m     let enforcer = Arc::new(Enforcer::new(
-[31m-        region, Arc::new(RwLock::new(cache)), AuditLog::new_in_memory(),
-(B[m[32m+        region,
-(B[m[32m+        Arc::new(RwLock::new(cache)),
-(B[m[32m+        AuditLog::new_in_memory(),
-(B[m     ));
-     let broker = Arc::new(BrokerServer::try_new(
-[31m-        region, enforcer, Arc::new(MetadataStore::new()), vec![], data_dir,
-(B[m[32m+        region,
-(B[m[32m+        enforcer,
-(B[m[32m+        Arc::new(MetadataStore::new()),
-(B[m[32m+        vec![],
-(B[m[32m+        data_dir,
-(B[m     )?);
-     let (addr, task) = broker.start_tcp_listener("127.0.0.1:0").await?;
-[31m-    println!("{}", serde_json::json!({ "host": "127.0.0.1", "port": addr.port() }));
-(B[m[32m+    println!(
-(B[m[32m+        "{}",
-(B[m[32m+        serde_json::json!({ "host": "127.0.0.1", "port": addr.port() })
-(B[m[32m+    );
-(B[m     tokio::signal::ctrl_c().await?;
-     task.abort();
-     Ok(())
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce/src/lib.rs:283:
-                 // Until telemetry has its own classification schema, it must
-                 // obey the supplied class's cleartext destination restrictions.
-                 if class_rule.mode_for_region(&req.target_region) != DestinationMode::Cleartext {
-[31m-                    return self.record_decision(req, policy_version, false,
-(B[m[31m-                        DestinationMode::Deny, "telemetry_destination_denied");
-(B[m[32m+                    return self.record_decision(
-(B[m[32m+                        req,
-(B[m[32m+                        policy_version,
-(B[m[32m+                        false,
-(B[m[32m+                        DestinationMode::Deny,
-(B[m[32m+                        "telemetry_destination_denied",
-(B[m[32m+                    );
-(B[m                 }
-                 self.record_decision(
-                     req,
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce/src/lib.rs:335:
-                         "transit_denied_for_cleartext",
-                     );
-                 }
-[31m-                let permitted = signed_policy.policy.transit_rules.get(&req.source_region)
-(B[m[32m+                let permitted = signed_policy
-(B[m[32m+                    .policy
-(B[m[32m+                    .transit_rules
-(B[m[32m+                    .get(&req.source_region)
-(B[m                     .is_some_and(|regions| regions.contains(&req.target_region));
-                 if !permitted {
-[31m-                    return self.record_decision(req, policy_version, false,
-(B[m[31m-                        DestinationMode::Deny, "relay_not_in_transit_allowlist");
-(B[m[32m+                    return self.record_decision(
-(B[m[32m+                        req,
-(B[m[32m+                        policy_version,
-(B[m[32m+                        false,
-(B[m[32m+                        DestinationMode::Deny,
-(B[m[32m+                        "relay_not_in_transit_allowlist",
-(B[m[32m+                    );
-(B[m                 }
-                 self.record_decision(
-                     req,
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce/src/lib.rs:371:
-         };
- 
-         // Append to hash-chained decision log (FR-13)
-[31m-        if self.audit_log.record(
-(B[m[31m-            req.action,
-(B[m[31m-            &req.class_id,
-(B[m[31m-            &req.source_region,
-(B[m[31m-            &req.target_region,
-(B[m[31m-            policy_version,
-(B[m[31m-            outcome,
-(B[m[31m-            reason,
-(B[m[31m-        ).is_err() {
-(B[m[32m+        if self
-(B[m[32m+            .audit_log
-(B[m[32m+            .record(
-(B[m[32m+                req.action,
-(B[m[32m+                &req.class_id,
-(B[m[32m+                &req.source_region,
-(B[m[32m+                &req.target_region,
-(B[m[32m+                policy_version,
-(B[m[32m+                outcome,
-(B[m[32m+                reason,
-(B[m[32m+            )
-(B[m[32m+            .is_err()
-(B[m[32m+        {
-(B[m             return EnforcementDecision {
-                 allowed: false,
-                 mode: DestinationMode::Deny,
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce/src/lib.rs:514:
-         std::fs::rename(&path, dir.path().join("saved.log")).unwrap();
-         std::fs::create_dir(&path).unwrap();
-         let decision = enforcer.decide(EnforcementRequest::new(
-[31m-            AuditAction::BrokerAppend, "EU-restricted", "region-eu-1", "region-eu-1",
-(B[m[32m+            AuditAction::BrokerAppend,
-(B[m[32m+            "EU-restricted",
-(B[m[32m+            "region-eu-1",
-(B[m[32m+            "region-eu-1",
-(B[m         ));
-         assert!(!decision.allowed);
-         assert_eq!(decision.mode, DestinationMode::Deny);
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce/src/lib.rs:524:
-     #[test]
-     fn sealed_only_region_cannot_process_or_export_cleartext() {
-         let base = setup_test_enforcer();
-[31m-        let enforcer = Enforcer::new("region-eu-2", base.policy_cache.clone(), AuditLog::new_in_memory());
-(B[m[31m-        for action in [AuditAction::Ingress, AuditAction::BrokerAppend, AuditAction::InRegionReplica,
-(B[m[31m-            AuditAction::AdminReplay, AuditAction::Promote, AuditAction::BackupExport,
-(B[m[31m-            AuditAction::TelemetryExport]
-(B[m[31m-        {
-(B[m[32m+        let enforcer = Enforcer::new(
-(B[m[32m+            "region-eu-2",
-(B[m[32m+            base.policy_cache.clone(),
-(B[m[32m+            AuditLog::new_in_memory(),
-(B[m[32m+        );
-(B[m[32m+        for action in [
-(B[m[32m+            AuditAction::Ingress,
-(B[m[32m+            AuditAction::BrokerAppend,
-(B[m[32m+            AuditAction::InRegionReplica,
-(B[m[32m+            AuditAction::AdminReplay,
-(B[m[32m+            AuditAction::Promote,
-(B[m[32m+            AuditAction::BackupExport,
-(B[m[32m+            AuditAction::TelemetryExport,
-(B[m[32m+        ] {
-(B[m             let decision = enforcer.decide(EnforcementRequest::new(
-[31m-                action, "EU-restricted", "region-eu-1", "region-eu-2",
-(B[m[32m+                action,
-(B[m[32m+                "EU-restricted",
-(B[m[32m+                "region-eu-1",
-(B[m[32m+                "region-eu-2",
-(B[m             ));
-             assert!(!decision.allowed, "{action:?}");
-         }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce/src/lib.rs:539:
-     #[test]
-     fn ciphertext_does_not_authorize_an_unlisted_relay() {
-         let enforcer = setup_test_enforcer();
-[31m-        let decision = enforcer.decide(EnforcementRequest::new(
-(B[m[31m-            AuditAction::RelayTransit, "EU-restricted", "region-eu-1", "unlisted",
-(B[m[31m-        ).with_ciphertext(true));
-(B[m[32m+        let decision = enforcer.decide(
-(B[m[32m+            EnforcementRequest::new(
-(B[m[32m+                AuditAction::RelayTransit,
-(B[m[32m+                "EU-restricted",
-(B[m[32m+                "region-eu-1",
-(B[m[32m+                "unlisted",
-(B[m[32m+            )
-(B[m[32m+            .with_ciphertext(true),
-(B[m[32m+        );
-(B[m         assert!(!decision.allowed);
-         assert_eq!(decision.reason, "relay_not_in_transit_allowlist");
-     }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:110:
-     }
- 
-     pub fn verify_checksum(&self) -> bool {
-[31m-        self.expected_checksum().is_some_and(|computed| computed == self.checksum)
-(B[m[32m+        self.expected_checksum()
-(B[m[32m+            .is_some_and(|computed| computed == self.checksum)
-(B[m     }
- 
-     fn expected_checksum(&self) -> Option<u32> {
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:117:
-         match (self.magic, &self.context) {
-             (RECORD_MAGIC_V1, None) => Some(Self::compute_checksum(
-[31m-                self.epoch, &self.class_id, self.policy_version, self.base_offset, &self.payload,
-(B[m[32m+                self.epoch,
-(B[m[32m+                &self.class_id,
-(B[m[32m+                self.policy_version,
-(B[m[32m+                self.base_offset,
-(B[m[32m+                &self.payload,
-(B[m             )),
-             (RECORD_MAGIC_V2, Some(context)) => {
-                 let bytes = serde_json::to_vec(&(
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:123:
-[31m-                    self.magic, self.epoch, &self.class_id, self.policy_version,
-(B[m[31m-                    self.base_offset, &self.payload, context,
-(B[m[31m-                )).ok()?;
-(B[m[32m+                    self.magic,
-(B[m[32m+                    self.epoch,
-(B[m[32m+                    &self.class_id,
-(B[m[32m+                    self.policy_version,
-(B[m[32m+                    self.base_offset,
-(B[m[32m+                    &self.payload,
-(B[m[32m+                    context,
-(B[m[32m+                ))
-(B[m[32m+                .ok()?;
-(B[m                 Some(crc32fast::hash(&bytes))
-             }
-             _ => None,
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:184:
- 
-                 match bincode_deserialize_envelope(&mut cursor) {
-                     Ok(envelope) => {
-[31m-                        let computed = envelope.expected_checksum()
-(B[m[32m+                        let computed = envelope
-(B[m[32m+                            .expected_checksum()
-(B[m                             .ok_or(LogError::InvalidMagic(envelope.magic))?;
-                         if computed != envelope.checksum {
-                             return Err(LogError::ChecksumMismatch {
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:225:
-         }
- 
-         let high_watermark = records.len() as u64;
-[31m-        let recovered_epoch = records.iter().map(|record| record.epoch).max().unwrap_or(initial_epoch);
-(B[m[32m+        let recovered_epoch = records
-(B[m[32m+            .iter()
-(B[m[32m+            .map(|record| record.epoch)
-(B[m[32m+            .max()
-(B[m[32m+            .unwrap_or(initial_epoch);
-(B[m 
-         Ok(Self {
-             inner: Arc::new(RwLock::new(PartitionLogInner {
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:581:
-             }
- 
-             if producer_epoch > state.producer_epoch {
-[31m-                return if seq == 0 { Ok(None) } else {
-(B[m[31m-                    Err(SessionError::OutOfOrderSequence { expected: 0, received: seq })
-(B[m[32m+                return if seq == 0 {
-(B[m[32m+                    Ok(None)
-(B[m[32m+                } else {
-(B[m[32m+                    Err(SessionError::OutOfOrderSequence {
-(B[m[32m+                        expected: 0,
-(B[m[32m+                        received: seq,
-(B[m[32m+                    })
-(B[m                 };
-             }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:591:
-                 return Ok(Some(state.last_offset));
-             }
- 
-[31m-            let expected = state.last_seq.checked_add(1).ok_or(SessionError::SequenceExhausted)?;
-(B[m[32m+            let expected = state
-(B[m[32m+                .last_seq
-(B[m[32m+                .checked_add(1)
-(B[m[32m+                .ok_or(SessionError::SequenceExhausted)?;
-(B[m             if seq != expected {
-                 return Err(SessionError::OutOfOrderSequence {
-                     expected,
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/tests/record_context.rs:2:
- 
- fn context() -> RecordContext {
-     RecordContext {
-[31m-        producer_id: 42, producer_epoch: 3, sequence: 0,
-(B[m[31m-        origin_region: "eu".into(), request_policy: "StrictLocal".into(),
-(B[m[32m+        producer_id: 42,
-(B[m[32m+        producer_epoch: 3,
-(B[m[32m+        sequence: 0,
-(B[m[32m+        origin_region: "eu".into(),
-(B[m[32m+        request_policy: "StrictLocal".into(),
-(B[m         replication_targets: vec![],
-     }
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/tests/record_context.rs:13:
-     let dir = tempfile::tempdir().unwrap();
-     {
-         let log = PartitionLog::open(dir.path(), 1).unwrap();
-[31m-        log.append_with_context(7, "class", 2, b"payload".to_vec(), Some(context())).unwrap();
-(B[m[32m+        log.append_with_context(7, "class", 2, b"payload".to_vec(), Some(context()))
-(B[m[32m+            .unwrap();
-(B[m     }
-     let log = PartitionLog::open(dir.path(), 1).unwrap();
-     let mut record = log.read(0, 1).remove(0);
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/tests/record_context.rs:20:
-     assert_eq!(record.context.as_ref(), Some(&context()));
-     assert!(record.verify_checksum());
-[31m-    record.context.as_mut().unwrap().replication_targets.push("us".into());
-(B[m[32m+    record
-(B[m[32m+        .context
-(B[m[32m+        .as_mut()
-(B[m[32m+        .unwrap()
-(B[m[32m+        .replication_targets
-(B[m[32m+        .push("us".into());
-(B[m     assert!(!record.verify_checksum());
-     assert!(log.append(1, "class", 2, b"stale".to_vec()).is_err());
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/tests/record_context.rs:27:
- #[test]
- fn legacy_records_remain_readable_without_fabricated_admission_context() {
-     let dir = tempfile::tempdir().unwrap();
-[31m-    PartitionLog::open(dir.path(), 1).unwrap().append(1, "class", 1, vec![1]).unwrap();
-(B[m[31m-    let record = PartitionLog::open(dir.path(), 1).unwrap().read(0, 1).remove(0);
-(B[m[32m+    PartitionLog::open(dir.path(), 1)
-(B[m[32m+        .unwrap()
-(B[m[32m+        .append(1, "class", 1, vec![1])
-(B[m[32m+        .unwrap();
-(B[m[32m+    let record = PartitionLog::open(dir.path(), 1)
-(B[m[32m+        .unwrap()
-(B[m[32m+        .read(0, 1)
-(B[m[32m+        .remove(0);
-(B[m     assert!(record.context.is_none());
-     assert!(record.verify_checksum());
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta/src/lib.rs:613:
-     /// prevents local ownership changes during an append/ack operation. This
-     /// does NOT turn this store into a distributed metadata quorum.
-     pub fn with_ownership<R>(
-[31m-        &self, topic: &str, partition: u32,
-(B[m[32m+        &self,
-(B[m[32m+        topic: &str,
-(B[m[32m+        partition: u32,
-(B[m         operation: impl FnOnce(Option<&PartitionOwnership>) -> R,
-     ) -> R {
-         let inner = self.inner.read().unwrap();
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/src/lib.rs:16:
- 
- #[derive(Debug, Error)]
- pub enum OutboxError {
-[31m-    #[error("An unscoped watermark requires exactly one known stream; use advance_partition_watermark")]
-(B[m[32m+    #[error(
-(B[m[32m+        "An unscoped watermark requires exactly one known stream; use advance_partition_watermark"
-(B[m[32m+    )]
-(B[m     AmbiguousStream,
-     #[error("Outbox queue capacity exceeded: current bytes {current}, max {max}")]
-     QueueCapacityExceeded { current: usize, max: usize },
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/src/lib.rs:95:
-                 let additional = actual_size - self.reserved_bytes;
-                 if additional > inner.max_bytes.saturating_sub(inner.queued_bytes) {
-                     return Err(OutboxError::QueueCapacityExceeded {
-[31m-                        current: inner.queued_bytes, max: inner.max_bytes,
-(B[m[32m+                        current: inner.queued_bytes,
-(B[m[32m+                        max: inner.max_bytes,
-(B[m                     });
-                 }
-                 inner.queued_bytes += additional;
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/src/lib.rs:226:
-     /// to unrelated partitions. Multi-stream callers must specify the stream.
-     pub fn advance_watermark(&self, new_watermark: u64) -> Result<(), OutboxError> {
-         let mut inner = self.inner.write().unwrap();
-[31m-        let streams: std::collections::HashSet<_> = inner.watermarks.keys().cloned()
-(B[m[31m-            .chain(inner.ranges.iter().map(|r| (r.topic.clone(), r.partition))).collect();
-(B[m[32m+        let streams: std::collections::HashSet<_> = inner
-(B[m[32m+            .watermarks
-(B[m[32m+            .keys()
-(B[m[32m+            .cloned()
-(B[m[32m+            .chain(inner.ranges.iter().map(|r| (r.topic.clone(), r.partition)))
-(B[m[32m+            .collect();
-(B[m         if streams.len() != 1 {
-             return Err(OutboxError::AmbiguousStream);
-         }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/src/lib.rs:234:
-         let key = streams.into_iter().next().unwrap();
-         let current = inner.watermarks.get(&key).copied().unwrap_or(0);
-[31m-        if new_watermark <= current { return Ok(()); }
-(B[m[32m+        if new_watermark <= current {
-(B[m[32m+            return Ok(());
-(B[m[32m+        }
-(B[m         inner.watermarks.insert(key.clone(), new_watermark);
-         inner.durable_watermark = inner.durable_watermark.max(new_watermark);
-         let mut trimmed_bytes = 0;
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/tests/stream_isolation.rs:1:
- use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
- 
- fn range(partition: u32) -> OutboxRange {
-[31m-    OutboxRange { topic: "events".into(), partition, epoch: 1, start_offset: 0, end_offset: 1,
-(B[m[31m-        class_id: "class".into(), payload: vec![0; 36], is_sealed: false }
-(B[m[32m+    OutboxRange {
-(B[m[32m+        topic: "events".into(),
-(B[m[32m+        partition,
-(B[m[32m+        epoch: 1,
-(B[m[32m+        start_offset: 0,
-(B[m[32m+        end_offset: 1,
-(B[m[32m+        class_id: "class".into(),
-(B[m[32m+        payload: vec![0; 36],
-(B[m[32m+        is_sealed: false,
-(B[m[32m+    }
-(B[m }
- 
- #[test]
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/tests/stream_isolation.rs:15:
-     assert_eq!(outbox.durable_partition_watermark("events", 1), 0);
-     assert!(!outbox.contains_partition_offset("events", 2, 0));
-     assert_eq!(outbox.durable_partition_watermark("other-topic", 0), 0);
-[31m-    assert!(matches!(outbox.advance_watermark(2), Err(OutboxError::AmbiguousStream)));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        outbox.advance_watermark(2),
-(B[m[32m+        Err(OutboxError::AmbiguousStream)
-(B[m[32m+    ));
-(B[m     assert_eq!(outbox.next_transfer_batch(10), vec![range(1)]);
- }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/tests/stream_isolation.rs:22:
- #[test]
- fn unscoped_ack_cannot_initialize_an_unknown_stream() {
-     let outbox = DestinationOutbox::new("b", 1000, BackpressureRule::Reject);
-[31m-    assert!(matches!(outbox.advance_watermark(100), Err(OutboxError::AmbiguousStream)));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        outbox.advance_watermark(100),
-(B[m[32m+        Err(OutboxError::AmbiguousStream)
-(B[m[32m+    ));
-(B[m     outbox.enqueue(range(0)).unwrap();
-     assert_eq!(outbox.next_transfer_batch(1).len(), 1);
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox/tests/stream_isolation.rs:31:
- fn commit_growth_must_fit_capacity_and_failed_commit_releases_reservation() {
-     let outbox = DestinationOutbox::new("b", 90, BackpressureRule::Reject);
-     let reservation = outbox.reserve_capacity(50).unwrap();
-[31m-    assert!(matches!(reservation.commit(range(0)), Err(OutboxError::QueueCapacityExceeded { .. })));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        reservation.commit(range(0)),
-(B[m[32m+        Err(OutboxError::QueueCapacityExceeded { .. })
-(B[m[32m+    ));
-(B[m     assert_eq!(outbox.queued_bytes(), 0);
-     assert!(outbox.next_transfer_batch(10).is_empty());
- }
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/src/lib.rs:120:
-             failover_candidates: &'a [String],
-             transit_allowed: bool,
-         }
-[31m-        let classes: BTreeMap<_, _> = self.classes.iter().map(|(id, rule)| {
-(B[m[31m-            (id.as_str(), CanonicalClass {
-(B[m[31m-                class_id: &rule.class_id,
-(B[m[31m-                description: &rule.description,
-(B[m[31m-                legal_regions: rule.legal_regions.iter().map(String::as_str).collect(),
-(B[m[31m-                destination_modes: rule.destination_modes.iter().map(|(r, m)| (r.as_str(), *m)).collect(),
-(B[m[31m-                ack_mode: rule.ack_mode,
-(B[m[31m-                failover_candidates: &rule.failover_candidates,
-(B[m[31m-                transit_allowed: rule.transit_allowed,
-(B[m[32m+        let classes: BTreeMap<_, _> = self
-(B[m[32m+            .classes
-(B[m[32m+            .iter()
-(B[m[32m+            .map(|(id, rule)| {
-(B[m[32m+                (
-(B[m[32m+                    id.as_str(),
-(B[m[32m+                    CanonicalClass {
-(B[m[32m+                        class_id: &rule.class_id,
-(B[m[32m+                        description: &rule.description,
-(B[m[32m+                        legal_regions: rule.legal_regions.iter().map(String::as_str).collect(),
-(B[m[32m+                        destination_modes: rule
-(B[m[32m+                            .destination_modes
-(B[m[32m+                            .iter()
-(B[m[32m+                            .map(|(r, m)| (r.as_str(), *m))
-(B[m[32m+                            .collect(),
-(B[m[32m+                        ack_mode: rule.ack_mode,
-(B[m[32m+                        failover_candidates: &rule.failover_candidates,
-(B[m[32m+                        transit_allowed: rule.transit_allowed,
-(B[m[32m+                    },
-(B[m[32m+                )
-(B[m             })
-[31m-        }).collect();
-(B[m[31m-        let transit: BTreeMap<_, BTreeSet<_>> = self.transit_rules.iter().map(|(source, regions)| {
-(B[m[31m-            (source.as_str(), regions.iter().map(String::as_str).collect())
-(B[m[31m-        }).collect();
-(B[m[32m+            .collect();
-(B[m[32m+        let transit: BTreeMap<_, BTreeSet<_>> = self
-(B[m[32m+            .transit_rules
-(B[m[32m+            .iter()
-(B[m[32m+            .map(|(source, regions)| {
-(B[m[32m+                (
-(B[m[32m+                    source.as_str(),
-(B[m[32m+                    regions.iter().map(String::as_str).collect(),
-(B[m[32m+                )
-(B[m[32m+            })
-(B[m[32m+            .collect();
-(B[m         let serialized = serde_json::to_vec(&(
-[31m-            &self.policy_id, self.version, self.issued_at_sec, self.ttl_seconds,
-(B[m[31m-            &self.issuer_pubkey_hex, classes, transit,
-(B[m[31m-        )).expect("policy contains only serializable primitive values");
-(B[m[32m+            &self.policy_id,
-(B[m[32m+            self.version,
-(B[m[32m+            self.issued_at_sec,
-(B[m[32m+            self.ttl_seconds,
-(B[m[32m+            &self.issuer_pubkey_hex,
-(B[m[32m+            classes,
-(B[m[32m+            transit,
-(B[m[32m+        ))
-(B[m[32m+        .expect("policy contains only serializable primitive values");
-(B[m         let mut hasher = Sha256::new();
-         hasher.update(b"kamish-policy-signature-v2\0");
-         hasher.update(&serialized);
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/src/lib.rs:200:
-     }
- 
-     fn expires_at(&self) -> Option<i64> {
-[31m-        self.policy.issued_at_sec.checked_add(i64::try_from(self.policy.ttl_seconds).ok()?)
-(B[m[32m+        self.policy
-(B[m[32m+            .issued_at_sec
-(B[m[32m+            .checked_add(i64::try_from(self.policy.ttl_seconds).ok()?)
-(B[m     }
- }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/tests/signature_contract.rs:1:
- use ed25519_dalek::SigningKey;
-[31m-use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, PolicyError, SignedPolicy};
-(B[m[32m+use kamish_policy::{
-(B[m[32m+    AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, PolicyError, SignedPolicy,
-(B[m[32m+};
-(B[m use std::collections::HashMap;
- 
- fn fixture() -> (SigningKey, PolicyDocument) {
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/tests/signature_contract.rs:6:
-     let key = SigningKey::from_bytes(&[17; 32]);
-[31m-    let classes = (0..32).map(|i| {
-(B[m[31m-        let id = format!("class-{i}");
-(B[m[31m-        (id.clone(), ClassRule {
-(B[m[31m-            class_id: id, description: "test".into(),
-(B[m[31m-            legal_regions: ["eu".into(), "us".into(), "ap".into()].into(),
-(B[m[31m-            destination_modes: [("eu".into(), DestinationMode::Cleartext),
-(B[m[31m-                ("us".into(), DestinationMode::SealedOnly)].into(),
-(B[m[31m-            ack_mode: AckMode::LocalMajority,
-(B[m[31m-            failover_candidates: vec!["eu".into(), "us".into()],
-(B[m[31m-            transit_allowed: true,
-(B[m[32m+    let classes = (0..32)
-(B[m[32m+        .map(|i| {
-(B[m[32m+            let id = format!("class-{i}");
-(B[m[32m+            (
-(B[m[32m+                id.clone(),
-(B[m[32m+                ClassRule {
-(B[m[32m+                    class_id: id,
-(B[m[32m+                    description: "test".into(),
-(B[m[32m+                    legal_regions: ["eu".into(), "us".into(), "ap".into()].into(),
-(B[m[32m+                    destination_modes: [
-(B[m[32m+                        ("eu".into(), DestinationMode::Cleartext),
-(B[m[32m+                        ("us".into(), DestinationMode::SealedOnly),
-(B[m[32m+                    ]
-(B[m[32m+                    .into(),
-(B[m[32m+                    ack_mode: AckMode::LocalMajority,
-(B[m[32m+                    failover_candidates: vec!["eu".into(), "us".into()],
-(B[m[32m+                    transit_allowed: true,
-(B[m[32m+                },
-(B[m[32m+            )
-(B[m         })
-[31m-    }).collect();
-(B[m[32m+        .collect();
-(B[m     let doc = PolicyDocument {
-[31m-        policy_id: "test".into(), version: u64::MAX,
-(B[m[31m-        issued_at_sec: 1000, ttl_seconds: 100,
-(B[m[31m-        issuer_pubkey_hex: hex::encode(key.verifying_key().to_bytes()), classes,
-(B[m[32m+        policy_id: "test".into(),
-(B[m[32m+        version: u64::MAX,
-(B[m[32m+        issued_at_sec: 1000,
-(B[m[32m+        ttl_seconds: 100,
-(B[m[32m+        issuer_pubkey_hex: hex::encode(key.verifying_key().to_bytes()),
-(B[m[32m+        classes,
-(B[m         transit_rules: [("eu".into(), vec!["us".into(), "ap".into()])].into(),
-     };
-     (key, doc)
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/tests/signature_contract.rs:42:
-     let (key, doc) = fixture();
-     let signed = SignedPolicy::sign(doc, &key);
-     let mut reordered = signed.clone();
-[31m-    reordered.policy.classes = signed.policy.classes.iter().map(|(id, rule)| {
-(B[m[31m-        let mut rule = rule.clone();
-(B[m[31m-        rule.legal_regions = rule.legal_regions.iter().cloned().collect();
-(B[m[31m-        rule.destination_modes = rule.destination_modes.iter().map(|(r, m)| (r.clone(), *m)).collect();
-(B[m[31m-        (id.clone(), rule)
-(B[m[31m-    }).collect::<HashMap<_, _>>();
-(B[m[31m-    reordered.policy.transit_rules.get_mut("eu").unwrap().reverse();
-(B[m[32m+    reordered.policy.classes = signed
-(B[m[32m+        .policy
-(B[m[32m+        .classes
-(B[m[32m+        .iter()
-(B[m[32m+        .map(|(id, rule)| {
-(B[m[32m+            let mut rule = rule.clone();
-(B[m[32m+            rule.legal_regions = rule.legal_regions.iter().cloned().collect();
-(B[m[32m+            rule.destination_modes = rule
-(B[m[32m+                .destination_modes
-(B[m[32m+                .iter()
-(B[m[32m+                .map(|(r, m)| (r.clone(), *m))
-(B[m[32m+                .collect();
-(B[m[32m+            (id.clone(), rule)
-(B[m[32m+        })
-(B[m[32m+        .collect::<HashMap<_, _>>();
-(B[m[32m+    reordered
-(B[m[32m+        .policy
-(B[m[32m+        .transit_rules
-(B[m[32m+        .get_mut("eu")
-(B[m[32m+        .unwrap()
-(B[m[32m+        .reverse();
-(B[m     reordered.verify_signature().unwrap();
-[31m-    reordered.policy.classes.get_mut("class-0").unwrap().failover_candidates.reverse();
-(B[m[32m+    reordered
-(B[m[32m+        .policy
-(B[m[32m+        .classes
-(B[m[32m+        .get_mut("class-0")
-(B[m[32m+        .unwrap()
-(B[m[32m+        .failover_candidates
-(B[m[32m+        .reverse();
-(B[m     assert!(reordered.verify_signature().is_err());
- }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/tests/signature_contract.rs:63:
-     cache.update(original, 1050).unwrap();
-     let mut changed = doc.clone();
-     changed.classes.clear();
-[31m-    assert!(matches!(cache.update(SignedPolicy::sign(changed, &key), 1050), Err(PolicyError::VersionConflict(_))));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        cache.update(SignedPolicy::sign(changed, &key), 1050),
-(B[m[32m+        Err(PolicyError::VersionConflict(_))
-(B[m[32m+    ));
-(B[m     let mut changed = doc;
-     changed.policy_id = "different-authority-scope".into();
-[31m-    assert!(matches!(cache.update(SignedPolicy::sign(changed, &key), 1050), Err(PolicyError::IdentityChanged)));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        cache.update(SignedPolicy::sign(changed, &key), 1050),
-(B[m[32m+        Err(PolicyError::IdentityChanged)
-(B[m[32m+    ));
-(B[m     assert_eq!(cache.current().unwrap().policy.classes.len(), 32);
- }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy/tests/signature_contract.rs:92:
-     let mut json = serde_json::to_value(&signed).unwrap();
-     json.as_object_mut().unwrap().remove("signature_format");
-     let legacy: SignedPolicy = serde_json::from_value(json).unwrap();
-[31m-    assert!(matches!(legacy.verify_signature(), Err(PolicyError::UnsupportedFormat(0))));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        legacy.verify_signature(),
-(B[m[32m+        Err(PolicyError::UnsupportedFormat(0))
-(B[m[32m+    ));
-(B[m     let mut future = signed;
-     future.signature_format = 999;
-[31m-    assert!(matches!(future.verify_signature(), Err(PolicyError::UnsupportedFormat(999))));
-(B[m[32m+    assert!(matches!(
-(B[m[32m+        future.verify_signature(),
-(B[m[32m+        Err(PolicyError::UnsupportedFormat(999))
-(B[m[32m+    ));
-(B[m }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/src/lib.rs:59:
- 
-     fn valid_metrics(&self) -> bool {
-         let m = self.metrics;
-[31m-        [m.rtt_ms, m.loss_rate, m.queue_delay_ms, m.cost_weight, m.congestion_risk]
-(B[m[31m-            .iter().all(|v| v.is_finite() && *v >= 0.0)
-(B[m[31m-            && m.loss_rate <= 1.0 && m.congestion_risk <= 1.0
-(B[m[32m+        [
-(B[m[32m+            m.rtt_ms,
-(B[m[32m+            m.loss_rate,
-(B[m[32m+            m.queue_delay_ms,
-(B[m[32m+            m.cost_weight,
-(B[m[32m+            m.congestion_risk,
-(B[m[32m+        ]
-(B[m[32m+        .iter()
-(B[m[32m+        .all(|v| v.is_finite() && *v >= 0.0)
-(B[m[32m+            && m.loss_rate <= 1.0
-(B[m[32m+            && m.congestion_risk <= 1.0
-(B[m             && self.compute_cost().is_finite()
-     }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/src/lib.rs:170:
-                     &cand.target_region,
-                 );
-                 let send_dec = self.enforcer.decide(send_req);
-[31m-                send_dec.allowed && (is_ciphertext || send_dec.mode != kamish_policy::DestinationMode::SealedOnly)
-(B[m[32m+                send_dec.allowed
-(B[m[32m+                    && (is_ciphertext
-(B[m[32m+                        || send_dec.mode != kamish_policy::DestinationMode::SealedOnly)
-(B[m             })
-             .collect();
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/src/lib.rs:197:
-         // Resolve the old route against this call's freshly authorized candidates
-         // and measurements. Never let hysteresis retain a revoked/missing route.
-         let current = previous.as_ref().and_then(|old| {
-[31m-            scored.iter().find(|(candidate, _)| candidate.same_route(old))
-(B[m[32m+            scored
-(B[m[32m+                .iter()
-(B[m[32m+                .find(|(candidate, _)| candidate.same_route(old))
-(B[m                 .map(|(candidate, _)| (*candidate).clone())
-         });
-         let chosen = if let Some(current) = current {
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/src/lib.rs:204:
-[31m-            let dwell = inner.last_switch.get(&key)
-(B[m[32m+            let dwell = inner
-(B[m[32m+                .last_switch
-(B[m[32m+                .get(&key)
-(B[m                 .is_none_or(|last| now.duration_since(*last) >= self.min_dwell);
-             if dwell && best_cost < current.compute_cost() * (1.0 - self.hysteresis_margin) {
-                 best_candidate
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:2:
- use ed25519_dalek::SigningKey;
- use kamish_audit::AuditLog;
- use kamish_enforce::Enforcer;
-[31m-use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
-(B[m[32m+use kamish_policy::{
-(B[m[32m+    AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
-(B[m[32m+};
-(B[m use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
- use std::sync::{Arc, RwLock};
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:9:
- fn fixture() -> (RouteSelector, Arc<RwLock<PolicyCache>>, SigningKey) {
-     let key = SigningKey::from_bytes(&[23; 32]);
-     let class = ClassRule {
-[31m-        class_id: "open".into(), description: String::new(),
-(B[m[32m+        class_id: "open".into(),
-(B[m[32m+        description: String::new(),
-(B[m         legal_regions: ["a".into(), "b".into(), "c".into()].into(),
-[31m-        destination_modes: [("a".into(), DestinationMode::Cleartext),
-(B[m[31m-            ("b".into(), DestinationMode::Cleartext), ("c".into(), DestinationMode::Cleartext)].into(),
-(B[m[31m-        ack_mode: AckMode::LocalMajority, failover_candidates: vec!["a".into()],
-(B[m[32m+        destination_modes: [
-(B[m[32m+            ("a".into(), DestinationMode::Cleartext),
-(B[m[32m+            ("b".into(), DestinationMode::Cleartext),
-(B[m[32m+            ("c".into(), DestinationMode::Cleartext),
-(B[m[32m+        ]
-(B[m[32m+        .into(),
-(B[m[32m+        ack_mode: AckMode::LocalMajority,
-(B[m[32m+        failover_candidates: vec!["a".into()],
-(B[m         transit_allowed: true,
-     };
-     let mut restricted = class.clone();
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:20:
-     restricted.class_id = "restricted".into();
-     restricted.transit_allowed = false;
-     let doc = PolicyDocument {
-[31m-        policy_id: "routes".into(), version: 1, issued_at_sec: Utc::now().timestamp() - 1,
-(B[m[31m-        ttl_seconds: 3600, issuer_pubkey_hex: hex::encode(key.verifying_key().to_bytes()),
-(B[m[32m+        policy_id: "routes".into(),
-(B[m[32m+        version: 1,
-(B[m[32m+        issued_at_sec: Utc::now().timestamp() - 1,
-(B[m[32m+        ttl_seconds: 3600,
-(B[m[32m+        issuer_pubkey_hex: hex::encode(key.verifying_key().to_bytes()),
-(B[m         classes: [("open".into(), class), ("restricted".into(), restricted)].into(),
-         transit_rules: [("a".into(), vec!["relay".into()])].into(),
-     };
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:28:
-     let mut cache = PolicyCache::new([doc.issuer_pubkey_hex.clone()].into());
-[31m-    cache.update(SignedPolicy::sign(doc, &key), Utc::now().timestamp()).unwrap();
-(B[m[32m+    cache
-(B[m[32m+        .update(SignedPolicy::sign(doc, &key), Utc::now().timestamp())
-(B[m[32m+        .unwrap();
-(B[m     let cache = Arc::new(RwLock::new(cache));
-     let enforcer = Enforcer::new("a", cache.clone(), AuditLog::new_in_memory());
-     (RouteSelector::new("a", enforcer), cache, key)
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:33:
- }
- 
- fn path(relay: Option<&str>, rtt: f64) -> PathCandidate {
-[31m-    PathCandidate { target_region: "b".into(), relay_region: relay.map(str::to_string),
-(B[m[31m-        metrics: LinkMetrics { rtt_ms: rtt, ..Default::default() } }
-(B[m[32m+    PathCandidate {
-(B[m[32m+        target_region: "b".into(),
-(B[m[32m+        relay_region: relay.map(str::to_string),
-(B[m[32m+        metrics: LinkMetrics {
-(B[m[32m+            rtt_ms: rtt,
-(B[m[32m+            ..Default::default()
-(B[m[32m+        },
-(B[m[32m+    }
-(B[m }
- 
- #[test]
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:41:
- fn revocation_bypasses_dwell_and_revalidates_cached_route() {
-     let (router, cache, key) = fixture();
-     let paths = [path(Some("relay"), 1.0), path(None, 100.0)];
-[31m-    assert_eq!(router.pick_path_for_payload("b", "open", &paths, true).unwrap().relay_region.as_deref(), Some("relay"));
-(B[m[32m+    assert_eq!(
-(B[m[32m+        router
-(B[m[32m+            .pick_path_for_payload("b", "open", &paths, true)
-(B[m[32m+            .unwrap()
-(B[m[32m+            .relay_region
-(B[m[32m+            .as_deref(),
-(B[m[32m+        Some("relay")
-(B[m[32m+    );
-(B[m     let mut doc = cache.read().unwrap().current().unwrap().policy.clone();
-     doc.version += 1;
-     doc.transit_rules.clear();
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:48:
-[31m-    cache.write().unwrap().update(SignedPolicy::sign(doc, &key), Utc::now().timestamp()).unwrap();
-(B[m[31m-    assert_eq!(router.pick_path_for_payload("b", "open", &paths, true).unwrap().relay_region, None);
-(B[m[32m+    cache
-(B[m[32m+        .write()
-(B[m[32m+        .unwrap()
-(B[m[32m+        .update(SignedPolicy::sign(doc, &key), Utc::now().timestamp())
-(B[m[32m+        .unwrap();
-(B[m[32m+    assert_eq!(
-(B[m[32m+        router
-(B[m[32m+            .pick_path_for_payload("b", "open", &paths, true)
-(B[m[32m+            .unwrap()
-(B[m[32m+            .relay_region,
-(B[m[32m+        None
-(B[m[32m+    );
-(B[m }
- 
- #[test]
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:53:
- fn class_caches_are_isolated_and_plaintext_never_gets_a_relay() {
-     let (router, _, _) = fixture();
-     let paths = [path(Some("relay"), 1.0), path(None, 100.0)];
-[31m-    assert!(router.pick_path_for_payload("b", "open", &paths, true).unwrap().relay_region.is_some());
-(B[m[31m-    assert!(router.pick_path_for_payload("b", "restricted", &paths, true).unwrap().relay_region.is_none());
-(B[m[31m-    assert!(router.pick_path("b", "open", &paths).unwrap().relay_region.is_none());
-(B[m[32m+    assert!(
-(B[m[32m+        router
-(B[m[32m+            .pick_path_for_payload("b", "open", &paths, true)
-(B[m[32m+            .unwrap()
-(B[m[32m+            .relay_region
-(B[m[32m+            .is_some()
-(B[m[32m+    );
-(B[m[32m+    assert!(
-(B[m[32m+        router
-(B[m[32m+            .pick_path_for_payload("b", "restricted", &paths, true)
-(B[m[32m+            .unwrap()
-(B[m[32m+            .relay_region
-(B[m[32m+            .is_none()
-(B[m[32m+    );
-(B[m[32m+    assert!(
-(B[m[32m+        router
-(B[m[32m+            .pick_path("b", "open", &paths)
-(B[m[32m+            .unwrap()
-(B[m[32m+            .relay_region
-(B[m[32m+            .is_none()
-(B[m[32m+    );
-(B[m     assert!(router.pick_path("b", "open", &paths[..1]).is_none());
- }
- 
-Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-route/tests/route_safety.rs:62:
- #[test]
- fn unknown_relays_and_wrong_destinations_are_rejected() {
-     let (router, _, _) = fixture();
-[31m-    assert!(router.pick_path_for_payload("b", "open", &[path(Some("unlisted"), 1.0)], true).is_none());
-(B[m[32m+    assert!(
-(B[m[32m+        router
-(B[m[32m+            .pick_path_for_payload("b", "open", &[path(Some("unlisted"), 1.0)], true)
-(B[m[32m+            .is_none()
-(B[m[32m+    );
-(B[m     let mut wrong = path(None, 1.0);
-     wrong.target_region = "c".into();
-     assert!(router.pick_path("b", "open", &[wrong]).is_none());
-Exit code: 1
+Exit code: 0
 
 
 ========== 2. CARGO CLIPPY ==========
 
+    Checking kamish-audit v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit)
+    Checking kamish-policy v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy)
+    Checking kamish-log v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-log)
+    Checking kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+    Checking kamish-enforce v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce)
+    Checking kamish-seal v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-seal)
+    Checking kamish-checkers v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-checkers)
+    Checking kamish-outbox v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox)
+    Checking kamish-route v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-route)
+    Checking kamish-own v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-own)
     Checking kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
-error: very complex type used. Consider factoring parts into `type` definitions
-   --> cmd/kamish-broker/src/lib.rs:228:27
-    |
-228 |     partition_operations: Arc<StripedStore<(String, u32), Arc<Mutex<()>>>>,
-    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    |
-    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
-    = note: `-D clippy::type-complexity` implied by `-D warnings`
-    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
-
-error: this `if` statement can be collapsed
-   --> cmd/kamish-broker/src/lib.rs:842:21
-    |
-842 | /                     if let Some(context) = &record.context {
-843 | |                         if context.origin_region == self.region {
-844 | |                             sessions.update(context.producer_id, context.producer_epoch,
-845 | |                                 context.sequence, record.base_offset);
-846 | |                         }
-847 | |                     }
-    | |_____________________^
-    |
-    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#collapsible_if
-    = note: `-D clippy::collapsible-if` implied by `-D warnings`
-    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
-help: collapse nested if block
-    |
-842 ~                     if let Some(context) = &record.context
-843 ~                         && context.origin_region == self.region {
-844 |                             sessions.update(context.producer_id, context.producer_epoch,
-845 |                                 context.sequence, record.base_offset);
-846 ~                         }
-    |
-
-error: could not compile `kamish-broker` (lib) due to 2 previous errors
-warning: build failed, waiting for other jobs to finish...
-error: could not compile `kamish-broker` (lib test) due to 2 previous errors
-Exit code: 101
+    Checking kamish-client v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-client)
+    Checking kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+    Checking kamish-ctl v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-ctl)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.38s
+Exit code: 0
 
 
 ========== 3. CARGO TEST ==========
 
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+   Compiling kamish-audit v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit)
+   Compiling kamish-enforce v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce)
+   Compiling kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+   Compiling kamish-checkers v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-checkers)
+   Compiling kamish-outbox v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox)
+   Compiling kamish-route v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-route)
+   Compiling kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+   Compiling kamish-own v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-own)
+   Compiling kamish-client v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-client)
+   Compiling kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+   Compiling kamish-ctl v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-ctl)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.77s
      Running unittests src/lib.rs (target/debug/deps/kamish_agent-b3f6dc5b385662b0)
 
 running 9 tests
-test tests::test_missing_offset_range_gap_rejection ... ok
-test tests::test_partial_overlap_resynchronization ... ok
-test tests::test_agent_simulated_slow_link ... ok
-test tests::test_bounded_replication_queue_and_backpressure ... ok
-test tests::test_agent_replication_and_lag_monitoring ... ok
-test tests::test_stale_replication_worker_after_epoch_change ... ok
 test tests::test_destination_persistence_followed_by_lost_ack ... ok
+test tests::test_agent_replication_and_lag_monitoring ... ok
+test tests::test_partial_overlap_resynchronization ... ok
+test tests::test_bounded_replication_queue_and_backpressure ... ok
+test tests::test_stale_replication_worker_after_epoch_change ... ok
+test tests::test_agent_simulated_slow_link ... ok
+test tests::test_missing_offset_range_gap_rejection ... ok
 test tests::test_offset_cursor_synchronization_and_deduplication_on_reconnect ... ok
 test tests::test_retry_worker_with_backoff_and_recovery ... ok
 
@@ -1712,33 +75,36 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
      Running tests/integrity_contract.rs (target/debug/deps/integrity_contract-ef933d04c5fe0220)
 
-running 4 tests
+running 5 tests
 test adjacent_field_boundaries_are_authenticated ... ok
+test read_only_verification_never_creates_missing_evidence ... ok
 test unsupported_format_is_rejected_without_modifying_existing_file ... ok
 test disk_tampering_by_repartitioning_fields_is_detected ... ok
 test failed_disk_append_latches_writer_until_reopen ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
      Running unittests src/lib.rs (target/debug/deps/kamish_broker-5bac1d3e3c989920)
 
-running 14 tests
+running 16 tests
+test tests::registered_wrong_or_expired_owner_cannot_acknowledge ... ok
 test tests::fetch_cannot_relabel_stored_records ... ok
+test tests::changing_stream_policy_is_rejected_without_consuming_producer_sequence ... ok
+test tests::test_broker_outbox_replication_filter ... ok
 test tests::test_broker_strict_residency_rejection ... ok
 test tests::topic_paths_cannot_escape_data_directory ... ok
+test tests::test_broker_produce_fetch_and_deduplication ... ok
+test tests::replication_rejects_stale_conflicting_and_invalid_ranges_before_ack ... ok
 test tests::startup_restores_sessions_and_preserves_narrowing_without_optional_hook ... ok
-test tests::registered_wrong_or_expired_owner_cannot_acknowledge ... ok
 test tests::test_ingress_and_egress_interceptor_hooks ... ok
 test tests::test_async_framed_tcp_listener_and_client ... ok
-test tests::test_broker_produce_fetch_and_deduplication ... ok
-test tests::test_broker_outbox_replication_filter ... ok
 test tests::unsupported_sealed_replication_fails_before_storage_even_with_forged_flag ... ok
 test tests::test_regional_outage_buffering_and_recovery ... ok
 test tests::test_multi_broker_replication_and_watermark_catchup ... ok
 test tests::simultaneous_retries_append_once_and_reject_changed_payload ... ok
 test tests::test_concurrent_multi_partition_lock_striping_and_reader_decoupling ... ok
 
-test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
 
      Running unittests src/main.rs (target/debug/deps/kamish_broker-068793821c72796a)
 
@@ -1750,9 +116,9 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running tests/admission_control_race.rs (target/debug/deps/admission_control_race-38ec6f891c958272)
 
 running 5 tests
+test test_producer_retry_after_rejection_no_duplicates ... ok
 test test_multi_destination_partial_saturation_atomic_rollback ... ok
 test test_destination_recovery_after_saturation ... ok
-test test_producer_retry_after_rejection_no_duplicates ... ok
 test test_concurrent_producers_outbox_saturation_zero_silent_drop ... ok
 test test_broker_restart_with_pending_replication_obligations ... ok
 
@@ -1773,8 +139,8 @@ test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running unittests src/lib.rs (target/debug/deps/kamish_checkers-749e86e77fcb6216)
 
 running 2 tests
-test tests::test_canary_scanner_detects_leak ... ok
 test tests::test_ordering_checker_detects_gap ... ok
+test tests::test_canary_scanner_detects_leak ... ok
 
 test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -1795,10 +161,10 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running unittests src/lib.rs (target/debug/deps/kamish_enforce-8cb33fd03cb35f5f)
 
 running 4 tests
-test tests::test_enforce_e1_to_e10 ... ok
-test tests::audit_failure_denies_previously_allowed_operation ... ok
 test tests::ciphertext_does_not_authorize_an_unlisted_relay ... ok
 test tests::sealed_only_region_cannot_process_or_export_cleartext ... ok
+test tests::audit_failure_denies_previously_allowed_operation ... ok
+test tests::test_enforce_e1_to_e10 ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
@@ -1808,8 +174,8 @@ running 6 tests
 test test_cross_border_key_custody_denial ... ok
 test test_missing_policy_denies_all_operations_closed ... ok
 test test_audit_ledger_zero_payload_disclosure ... ok
-test test_invalid_signature_and_tampered_policy_rejection ... ok
 test test_unauthorized_destination_egress_denial ... ok
+test test_invalid_signature_and_tampered_policy_rejection ... ok
 test test_expired_policy_denies_operations ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.11s
@@ -1823,14 +189,14 @@ test tests::test_monotonic_offset_and_crc_verification ... ok
 test tests::test_torn_write_tail_truncation_recovery ... ok
 test tests::test_fsync_flush_durability_and_sequential_reads ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
      Running tests/adversarial_durability.rs (target/debug/deps/adversarial_durability-b98aa7b18598633b)
 
 running 4 tests
 test test_truncated_header_recovery ... ok
-test test_middle_of_segment_corruption_detected ... ok
 test test_truncated_payload_recovery ... ok
+test test_middle_of_segment_corruption_detected ... ok
 test test_repeated_restarts_and_monotonicity ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -1866,19 +232,19 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
      Running unittests src/lib.rs (target/debug/deps/kamish_outbox-5bcc52f55e3b4b50)
 
 running 3 tests
+test tests::test_outbox_enqueue_advance_and_trim ... ok
 test tests::test_outbox_bounded_capacity ... ok
 test tests::test_outbox_atomic_reservation_and_rollback ... ok
-test tests::test_outbox_enqueue_advance_and_trim ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
      Running tests/stream_isolation.rs (target/debug/deps/stream_isolation-eef48ee2230064ac)
 
 running 4 tests
-test arithmetic_overflow_cannot_bypass_capacity ... ok
-test commit_growth_must_fit_capacity_and_failed_commit_releases_reservation ... ok
-test unscoped_ack_cannot_initialize_an_unknown_stream ... ok
 test ack_does_not_hide_a_new_partition_or_topic ... ok
+test unscoped_ack_cannot_initialize_an_unknown_stream ... ok
+test commit_growth_must_fit_capacity_and_failed_commit_releases_reservation ... ok
+test arithmetic_overflow_cannot_bypass_capacity ... ok
 
 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -1886,8 +252,8 @@ test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 running 3 tests
 test tests::test_promotion_before_lease_expires_fails ... ok
-test tests::test_promotion_after_lease_expires_succeeds ... ok
 test tests::test_quarantine_superseded_records ... ok
+test tests::test_promotion_after_lease_expires_succeeds ... ok
 
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
 
@@ -1908,7 +274,7 @@ test map_and_set_order_is_irrelevant_but_preference_order_is_signed ... ok
 test changed_same_version_and_policy_identity_are_rejected ... ok
 test signature_survives_repeated_wire_roundtrips ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
 
      Running unittests src/lib.rs (target/debug/deps/kamish_route-8cec9024b03f6804)
 
@@ -1922,8 +288,8 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 5 tests
 test invalid_measurements_cannot_win_or_retain_a_route ... ok
 test retained_route_uses_current_measurements ... ok
-test unknown_relays_and_wrong_destinations_are_rejected ... ok
 test class_caches_are_isolated_and_plaintext_never_gets_a_relay ... ok
+test unknown_relays_and_wrong_destinations_are_rejected ... ok
 test revocation_bypasses_dwell_and_revalidates_cached_route ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

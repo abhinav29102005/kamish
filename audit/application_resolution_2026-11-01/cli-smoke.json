@@ -1,0 +1,102 @@
+[
+  {
+    "name": "cli-produce-first",
+    "exit_code": 0,
+    "expected_success": true,
+    "contract_passed": true,
+    "arguments": [
+      "produce",
+      "--addr",
+      "127.0.0.1:36533",
+      "--topic",
+      "cli-events",
+      "--partition",
+      "0",
+      "--class-id",
+      "general",
+      "--payload",
+      "first-cli-event",
+      "--region",
+      "EU_WEST",
+      "--policy",
+      "strict-local"
+    ],
+    "output": "results/cli-produce-first.txt"
+  },
+  {
+    "name": "cli-consume",
+    "exit_code": 0,
+    "expected_success": true,
+    "contract_passed": true,
+    "arguments": [
+      "consume",
+      "--addr",
+      "127.0.0.1:36533",
+      "--topic",
+      "cli-events",
+      "--partition",
+      "0",
+      "--class-id",
+      "general",
+      "--offset",
+      "0",
+      "--max-records",
+      "10"
+    ],
+    "output": "results/cli-consume.txt"
+  },
+  {
+    "name": "cli-watermark",
+    "exit_code": 0,
+    "expected_success": true,
+    "contract_passed": true,
+    "arguments": [
+      "watermark",
+      "--addr",
+      "127.0.0.1:36533",
+      "--topic",
+      "cli-events",
+      "--partition",
+      "0",
+      "--source-region",
+      "EU_WEST"
+    ],
+    "output": "results/cli-watermark.txt"
+  },
+  {
+    "name": "cli-produce-second",
+    "exit_code": 0,
+    "expected_success": true,
+    "contract_passed": true,
+    "arguments": [
+      "produce",
+      "--addr",
+      "127.0.0.1:36533",
+      "--topic",
+      "cli-events",
+      "--partition",
+      "0",
+      "--class-id",
+      "general",
+      "--payload",
+      "second-cli-event",
+      "--region",
+      "EU_WEST",
+      "--policy",
+      "strict-local"
+    ],
+    "output": "results/cli-produce-second.txt"
+  },
+  {
+    "name": "cli-verify-missing-evidence",
+    "exit_code": 1,
+    "expected_success": false,
+    "contract_passed": true,
+    "arguments": [
+      "verify-audit",
+      "--log-path",
+      "/tmp/opencode/kamish-cli-test-48wudphs/does-not-exist.log"
+    ],
+    "output": "results/cli-verify-missing-evidence.txt"
+  }
+]

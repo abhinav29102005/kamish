@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import KamishDragon3D from '../components/KamishDragon3D';
 
 export default function HomePage({ onNavigate }) {
@@ -9,7 +9,7 @@ export default function HomePage({ onNavigate }) {
 
   const handleToggleFlame = async () => {
     setIsFlameOn((prev) => !prev);
-    // Broadcast real sovereign event to the broker cluster
+    // Update the local demonstration only; this does not call a broker.
     try {
       const ok = await produceCustomEvent(
         'kamish-calamity-stream',
@@ -17,11 +17,13 @@ export default function HomePage({ onNavigate }) {
         { type: 'StrictLocal' }
       );
       if (ok) {
-        setLastProducedMsg('EVENT RECORD COMMITTED TO CLUSTER LOG');
+        setLastProducedMsg('LOCAL DEMO EVENT CREATED — NO BROKER WRITE');
         setTimeout(() => setLastProducedMsg(null), 3500);
+      } else {
+        setLastProducedMsg('DEMO EVENT: CROSS-REGION TRANSFER DENIED');
       }
     } catch (err) {
-      console.warn('Produce event err:', err);
+      setLastProducedMsg(err instanceof Error ? err.message : 'Demo event failed');
     }
   };
 
@@ -140,7 +142,7 @@ export default function HomePage({ onNavigate }) {
         <span>SOVEREIGN EVENT BROKER</span>
         <span>·</span>
         <span style={{ color: '#c084fc' }}>
-          {(currentTelemetry?.throughputEps || 12479).toLocaleString()} MSG/S SUSTAINED
+          {(currentTelemetry?.throughputEps || 0).toLocaleString()} SIMULATED MSG/S
         </span>
         <span>·</span>
         <button
@@ -156,7 +158,7 @@ export default function HomePage({ onNavigate }) {
             fontWeight: 600,
           }}
         >
-          VIEW LIVE DASHBOARD →
+          VIEW DEMO DASHBOARD →
         </button>
       </div>
     </div>

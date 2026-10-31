@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 import { CheckCircle2, Sliders, TrendingUp } from 'lucide-react';
 
 export const GrafanaTelemetryDashboard: React.FC = () => {

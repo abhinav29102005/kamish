@@ -1,0 +1,17 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/kamish-ctl --help`
+Kamish Administrative, Policy, and Demonstration Control Tool
+
+Usage: kamish-ctl <COMMAND>
+
+Commands:
+  verify-audit  Verify the cryptographic integrity of a hash-chained audit log (FR-13)
+  produce       Produce an event to a running Kamish broker instance with client-side policy validation
+  consume       Sequentially consume records from a Kamish broker partition up to HWM (INV-4)
+  watermark     Query the durable replication watermark from a remote broker (INV-6)
+  demo          Run the Developer B 3-Scenario verification suite (Residency, Slow-Link, Outage)
+  benchmark     Benchmark sustained produce throughput (msg/s) and p50/p99 latency under normal and degraded links
+  help          Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help  Print help

@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { KamishContext } from './useKamish';
 import type {
   RegionId,
   ResidencyPolicy,
@@ -11,41 +12,7 @@ import type {
   ScenarioId,
 } from '../types';
 import { computeAuditEntryHash, GENESIS_HASH } from '../utils/crypto';
-
-interface KamishContextType {
-  nodes: Record<RegionId, RegionNodeState>;
-  links: LinkState[];
-  telemetryHistory: TelemetrySample[];
-  currentTelemetry: TelemetrySample;
-  auditLedger: AuditRecord[];
-  recentEvents: StreamEvent[];
-  scenarioState: ScenarioState;
-  
-  // Chaos & Controls
-  wanDelayMs: number;
-  setWanDelayMs: (ms: number) => void;
-  isPartitioned: boolean;
-  setIsPartitioned: (partitioned: boolean) => void;
-  adaptiveRoutingActive: boolean;
-  setAdaptiveRoutingActive: (active: boolean) => void;
-  trafficRateEps: number;
-  setTrafficRateEps: (rate: number) => void;
-  isShadowMonarchMode: boolean;
-  setIsShadowMonarchMode: (mode: boolean) => void;
-  
-  // Actions
-  runScenario: (id: ScenarioId) => void;
-  resetCluster: () => void;
-  produceCustomEvent: (
-    topic: string,
-    key: string,
-    policy: ResidencyPolicy,
-    targetRegion?: RegionId
-  ) => Promise<boolean>;
-  verifyAuditLedgerIntegrity: () => Promise<{ valid: boolean; count: number; error?: string }>;
-}
-
-const KamishContext = createContext<KamishContextType | null>(null);
+import { validateDemoPolicy } from '../utils/demoPolicy.js';
 
 const INITIAL_NODES: Record<RegionId, RegionNodeState> = {
   EU_WEST: {
@@ -147,6 +114,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [nodes, setNodes] = useState<Record<RegionId, RegionNodeState>>(INITIAL_NODES);
   const [links, setLinks] = useState<LinkState[]>(INITIAL_LINKS);
   const [auditLedger, setAuditLedger] = useState<AuditRecord[]>([]);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [recentEvents, setRecentEvents] = useState<StreamEvent[]>([]);
   
   // Chaos & tuning states
@@ -158,7 +126,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Telemetry buffer
   const [telemetryHistory, setTelemetryHistory] = useState<TelemetrySample[]>([]);
-  const [currentTelemetry, setCurrentTelemetry] = useState<TelemetrySample>({
+  const [currentTelemetry, setCurrentTelemetry] = useState<TelemetrySample>(() => ({
     timestamp: Date.now(),
     localCommitted: 1240,
     remoteWatermark: 1240,
@@ -168,9 +136,9 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ingressEps: 8,
     writeLatencyMs: 0.42,
     leaseExpiresInSec: 9.8,
-    throughputEps: 12479,
+    throughputEps: 8,
     p99LatencyMs: 0.42,
-  });
+  }));
 
   // Scenario execution state
   const [scenarioState, setScenarioState] = useState<ScenarioState>({
@@ -184,10 +152,13 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   });
 
   const ledgerRef = useRef<AuditRecord[]>([]);
-  ledgerRef.current = auditLedger;
+  const auditQueue = useRef<Promise<void>>(Promise.resolve());
+  const initializationStarted = useRef(false);
 
   // Initialize genesis audit record
   useEffect(() => {
+    if (initializationStarted.current) return;
+    initializationStarted.current = true;
     async function initAudit() {
       const h1 = await computeAuditEntryHash(
         GENESIS_HASH,
@@ -198,7 +169,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         'EU_WEST',
         1,
         'AllowCleartext',
-        'Genesis node startup and monotonic epoch initialized'
+        'Local demo genesis initialized; no broker connection'
       );
       const genesisRecord: AuditRecord = {
         seq: 1,
@@ -209,7 +180,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         targetRegion: 'EU_WEST',
         policyVersion: 1,
         outcome: 'AllowCleartext',
-        reason: 'Genesis node startup and monotonic epoch initialized',
+        reason: 'Local demo genesis initialized; no broker connection',
         prevHash: GENESIS_HASH,
         hash: h1,
       };
@@ -223,7 +194,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         'EU_WEST',
         1,
         'AllowCleartext',
-        'Active residency policy loaded: StrictLocal enforced'
+        'Local StrictLocal policy example; not a server policy receipt'
       );
       const secondRecord: AuditRecord = {
         seq: 2,
@@ -234,14 +205,17 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         targetRegion: 'EU_WEST',
         policyVersion: 1,
         outcome: 'AllowCleartext',
-        reason: 'Active residency policy loaded: StrictLocal enforced',
+        reason: 'Local StrictLocal policy example; not a server policy receipt',
         prevHash: h1,
         hash: h2,
       };
 
-      setAuditLedger([genesisRecord, secondRecord]);
+      ledgerRef.current = [genesisRecord, secondRecord];
+      setAuditLedger(ledgerRef.current);
     }
-    initAudit();
+    auditQueue.current = auditQueue.current.then(initAudit).catch(error => {
+      setAuditError(error instanceof Error ? error.message : 'Demo audit initialization failed');
+    });
   }, []);
 
   // Helper to record an audit entry
@@ -253,6 +227,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     outcome: AuditRecord['outcome'],
     reason: string
   ): Promise<AuditRecord> => {
+    const task = auditQueue.current.then(async () => {
     const list = ledgerRef.current;
     const prev = list.length > 0 ? list[list.length - 1] : null;
     const prevHash = prev ? prev.hash : GENESIS_HASH;
@@ -284,8 +259,15 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       hash,
     };
 
-    setAuditLedger((prevList) => [...prevList, record]);
+    ledgerRef.current = [...list, record];
+    setAuditLedger(ledgerRef.current);
+    setAuditError(null);
     return record;
+    });
+    auditQueue.current = task.then(() => {}, error => {
+      setAuditError(error instanceof Error ? error.message : 'Demo audit append failed');
+    });
+    return task;
   };
 
   // High-frequency 10Hz tick simulation (Netdata sub-second responsiveness)
@@ -316,7 +298,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Background traffic ingestion
         if (trafficRateEps > 0 && scenarioState.status !== 'running') {
           const delta = trafficRateEps * 0.1; // per 100ms
-          const increment = Math.random() < delta ? 1 : 0;
+          const increment = Math.floor(delta) + (Math.random() < delta % 1 ? 1 : 0);
           if (increment > 0) {
             eu.localCommittedOffset += increment;
             if (isPartitioned) {
@@ -367,10 +349,15 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [trafficRateEps, wanDelayMs, isPartitioned, adaptiveRoutingActive, scenarioState.status]);
 
   // Telemetry stream sampler (every 500ms)
+  const simulationRef = useRef({ nodes, wanDelayMs, isPartitioned, trafficRateEps });
+  useEffect(() => {
+    simulationRef.current = { nodes, wanDelayMs, isPartitioned, trafficRateEps };
+  }, [nodes, wanDelayMs, isPartitioned, trafficRateEps]);
   useEffect(() => {
     const timer = setInterval(() => {
-      const eu = nodes.EU_WEST;
-      const us = nodes.US_EAST;
+      const { nodes: sampledNodes, wanDelayMs, isPartitioned, trafficRateEps } = simulationRef.current;
+      const eu = sampledNodes.EU_WEST;
+      const us = sampledNodes.US_EAST;
       const lag = Math.max(0, eu.localCommittedOffset - us.durableWatermark);
       const effectiveRtt = isPartitioned ? 999 : 14.5 + wanDelayMs;
       const writeLat = 0.35 + Math.random() * 0.15; // Local fsync is always sub-millisecond!
@@ -385,7 +372,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ingressEps: trafficRateEps,
         writeLatencyMs: parseFloat(writeLat.toFixed(2)),
         leaseExpiresInSec: eu.leaseExpiresInSec,
-        throughputEps: (trafficRateEps || 8) * 1560,
+        throughputEps: trafficRateEps,
         p99LatencyMs: 0.42,
       };
 
@@ -397,7 +384,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, 500);
 
     return () => clearInterval(timer);
-  }, [nodes, wanDelayMs, isPartitioned, trafficRateEps]);
+  }, []);
 
   // Produce a custom event
   const produceCustomEvent = async (
@@ -406,6 +393,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     policy: ResidencyPolicy,
     targetRegion: RegionId = 'US_EAST'
   ): Promise<boolean> => {
+    validateDemoPolicy(policy);
     const id = Date.now();
     const event: StreamEvent = {
       id,
@@ -803,12 +791,14 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     count: number;
     error?: string;
   }> => {
+    await auditQueue.current;
     const list = ledgerRef.current;
-    if (list.length === 0) return { valid: true, count: 0 };
+    if (list.length === 0 || auditError) return { valid: false, count: 0, error: auditError || 'No demo audit entries available' };
 
     for (let i = 0; i < list.length; i++) {
       const entry = list[i];
       const expectedPrev = i === 0 ? GENESIS_HASH : list[i - 1].hash;
+      if (entry.seq !== i + 1) return { valid: false, count: i, error: 'Demo audit sequence mismatch' };
       if (entry.prevHash !== expectedPrev) {
         return {
           valid: false,
@@ -849,6 +839,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         telemetryHistory,
         currentTelemetry,
         auditLedger,
+        auditError,
         recentEvents,
         scenarioState,
         wanDelayMs,
@@ -870,12 +861,4 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       {children}
     </KamishContext.Provider>
   );
-};
-
-export const useKamish = () => {
-  const context = useContext(KamishContext);
-  if (!context) {
-    throw new Error('useKamish must be used within a KamishProvider');
-  }
-  return context;
 };

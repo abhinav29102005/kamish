@@ -95,3 +95,17 @@ fn failed_disk_append_latches_writer_until_reopen() {
     let reopened = AuditLog::open(path).unwrap();
     assert_eq!(record(&reopened).unwrap().sequence, 1);
 }
+
+#[test]
+fn read_only_verification_never_creates_missing_evidence() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.log");
+    assert!(AuditLog::verify_file(&missing).is_err());
+    assert!(!missing.exists());
+    let existing = dir.path().join("existing.log");
+    let log = AuditLog::open(&existing).unwrap();
+    record(&log).unwrap();
+    let original = std::fs::read(&existing).unwrap();
+    assert_eq!(AuditLog::verify_file(&existing).unwrap(), 1);
+    assert_eq!(std::fs::read(&existing).unwrap(), original);
+}

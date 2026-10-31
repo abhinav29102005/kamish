@@ -1,0 +1,11 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `target/debug/kamish-ctl benchmark --help`
+Benchmark sustained produce throughput (msg/s) and p50/p99 latency under normal and degraded links
+
+Usage: kamish-ctl benchmark [OPTIONS]
+
+Options:
+  -c, --count <COUNT>              [default: 1000]
+  -a, --addr <ADDR>                
+  -j, --concurrency <CONCURRENCY>  [default: 1]
+  -h, --help                       Print help

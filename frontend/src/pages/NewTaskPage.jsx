@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useDemoTasks } from '../context/useDemoTasks.js';
 
 export default function NewTaskPage({ onCreated }) {
   const [title, setTitle] = useState('');
@@ -8,24 +8,19 @@ export default function NewTaskPage({ onCreated }) {
   const [policy, setPolicy] = useState('EU_GDPR_STRICT');
   const [description, setDescription] = useState('');
   const [success, setSuccess] = useState(false);
-  const { produceCustomEvent } = useKamish();
+  const [error, setError] = useState(null);
+  const { createDemoTask } = useDemoTasks();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError(null);
     try {
-      await produceCustomEvent(
-        `task-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-        `TASK-${Date.now().toString(36).toUpperCase()}`,
-        policy
-      );
+      const task = createDemoTask({ title, owner, status, policy, description });
       setSuccess(true);
-      setTimeout(() => {
-        onCreated();
-      }, 1200);
+      onCreated(task);
     } catch (err) {
-      console.error('Task dispatch err:', err);
-      setSuccess(true);
-      setTimeout(() => onCreated(), 1000);
+      setSuccess(false);
+      setError(err instanceof Error ? err.message : 'Could not save demo task');
     }
   };
 
@@ -56,7 +51,7 @@ export default function NewTaskPage({ onCreated }) {
       <div className="brutal-card-offset" style={{ padding: '2.5rem' }}>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
           <div>
-            <label
+            <label htmlFor="task-title"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
@@ -69,7 +64,7 @@ export default function NewTaskPage({ onCreated }) {
             >
               TITLE
             </label>
-            <input
+            <input id="task-title"
               type="text"
               required
               value={title}
@@ -80,7 +75,7 @@ export default function NewTaskPage({ onCreated }) {
           </div>
 
           <div>
-            <label
+            <label htmlFor="task-owner"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
@@ -93,7 +88,7 @@ export default function NewTaskPage({ onCreated }) {
             >
               OWNER / LEAD
             </label>
-            <input
+            <input id="task-owner"
               type="text"
               required
               value={owner}
@@ -105,7 +100,7 @@ export default function NewTaskPage({ onCreated }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             <div>
-              <label
+              <label htmlFor="task-status"
                 style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.8rem',
@@ -118,7 +113,7 @@ export default function NewTaskPage({ onCreated }) {
               >
                 STATUS
               </label>
-              <select
+              <select id="task-status"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 className="neo-input"
@@ -127,12 +122,12 @@ export default function NewTaskPage({ onCreated }) {
                 <option value="ACTIVE">[ACTIVE]</option>
                 <option value="IN_PROGRESS">[IN PROGRESS]</option>
                 <option value="BLOCKED">[BLOCKED]</option>
-                <option value="DONE">[DONE / PASS]</option>
+                <option value="DONE">[DONE — DEMO]</option>
               </select>
             </div>
 
             <div>
-              <label
+              <label htmlFor="task-policy"
                 style={{
                   fontFamily: 'var(--font-mono)',
                   fontSize: '0.8rem',
@@ -145,21 +140,21 @@ export default function NewTaskPage({ onCreated }) {
               >
                 RESIDENCY POLICY
               </label>
-              <select
+              <select id="task-policy"
                 value={policy}
                 onChange={(e) => setPolicy(e.target.value)}
                 className="neo-input"
                 style={{ appearance: 'none', background: '#090511' }}
               >
-                <option value="EU_GDPR_STRICT">EU_GDPR_STRICT (Shield)</option>
-                <option value="US_DATA_RESIDENCY">US_DATA_RESIDENCY</option>
-                <option value="GLOBAL_REPLICATED">GLOBAL_REPLICATED</option>
+                <option value="EU_GDPR_STRICT">EU LOCAL ONLY (DEMO)</option>
+                <option value="US_DATA_RESIDENCY">US DESTINATION (DEMO)</option>
+                <option value="GLOBAL_REPLICATED">ALL DEMO REGIONS</option>
               </select>
             </div>
           </div>
 
           <div>
-            <label
+            <label htmlFor="task-description"
               style={{
                 fontFamily: 'var(--font-mono)',
                 fontSize: '0.8rem',
@@ -172,7 +167,7 @@ export default function NewTaskPage({ onCreated }) {
             >
               DESCRIPTION & SCOPE
             </label>
-            <textarea
+            <textarea id="task-description"
               rows={4}
               required
               value={description}
@@ -183,6 +178,7 @@ export default function NewTaskPage({ onCreated }) {
             />
           </div>
 
+          {error && <p role="alert">{error}</p>}
           {success && (
             <div
               style={{
@@ -194,7 +190,7 @@ export default function NewTaskPage({ onCreated }) {
                 background: 'rgba(52, 211, 153, 0.1)',
               }}
             >
-              ✓ Task registered and dispatched to cluster log! Redirecting...
+              ✓ Demo task saved in this browser. No broker dispatch was performed.
             </div>
           )}
 
@@ -208,7 +204,7 @@ export default function NewTaskPage({ onCreated }) {
                 fontWeight: 800,
               }}
             >
-              CREATE TASK & DISPATCH
+              SAVE DEMO TASK LOCALLY
             </button>
           </div>
         </form>

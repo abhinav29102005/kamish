@@ -1,8 +1,9 @@
 import React from 'react';
-import { useKamish } from '../context/KamishContext';
+import { useKamish } from '../context/useKamish';
 
 export default function Header({ onNavigate, onOpenContact }) {
-  const { nodes, currentTelemetry } = useKamish();
+  const { nodes } = useKamish();
+  const activeRegions = Object.values(nodes).filter(node => node.status === 'HEALTHY').length;
 
   const totalCommitted = Object.values(nodes).reduce(
     (acc, node) => acc + (node.localCommittedOffset || 0),
@@ -28,13 +29,13 @@ export default function Header({ onNavigate, onOpenContact }) {
     >
       {/* Top Left: Brutalist Logo Box */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-        <div
+        <button type="button"
           className="brutal-logo-box"
           onClick={() => onNavigate('home')}
           style={{ cursor: 'pointer' }}
         >
           KAMISH
-        </div>
+        </button>
 
         {/* Live Cluster Health Badge */}
         <div
@@ -62,7 +63,7 @@ export default function Header({ onNavigate, onOpenContact }) {
               display: 'inline-block',
             }}
           />
-          <span>3 REGIONS ACTIVE</span>
+          <span>{activeRegions} SIMULATED REGIONS HEALTHY</span>
           <span style={{ color: '#94a3b8' }}>·</span>
           <span style={{ color: '#c084fc', fontWeight: 600 }}>
             {totalCommitted.toLocaleString()} OFFSETS
