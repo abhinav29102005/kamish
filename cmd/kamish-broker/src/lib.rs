@@ -1621,19 +1621,20 @@ mod tests {
             payload: vec![1],
             residency_rule: None,
         };
+        let stream = kamish_meta::StreamId::new("owned", 0);
         broker
             .meta
-            .set_ownership("owned", 0, "region-us", 7, 60_000)
+            .compare_and_swap_epoch(&stream, 0, 7, "region-us", 60_000)
             .unwrap();
         assert!(broker.produce(req.clone()).is_err());
         broker
             .meta
-            .set_ownership("owned", 0, "region-eu", 8, -1)
+            .compare_and_swap_epoch(&stream, 7, 8, "region-eu", -1)
             .unwrap();
         assert!(broker.produce(req.clone()).is_err());
         broker
             .meta
-            .set_ownership("owned", 0, "region-eu", 9, 60_000)
+            .compare_and_swap_epoch(&stream, 8, 9, "region-eu", 60_000)
             .unwrap();
         let response = broker.produce(req).unwrap();
         assert_eq!(response.committed_epoch, 9);

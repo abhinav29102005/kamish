@@ -598,16 +598,6 @@ pub trait MetadataAuthority: Send + Sync {
     /// Deployment mode of this metadata authority (SingleNodeCompatibility or MultiRegion).
     fn deployment_mode(&self) -> DeploymentMode;
 
-    /// Authoritatively registers or updates partition ownership and initial lease.
-    fn set_ownership(
-        &self,
-        topic: &str,
-        partition: u32,
-        owner_region: &str,
-        epoch: u64,
-        lease_duration_ms: i64,
-    ) -> Result<PartitionOwnership, MetaError>;
-
     /// Compare-and-swap epoch operation across the metadata authority.
     /// Commits a bumped epoch and new owner region if the current committed epoch matches `expected_epoch`.
     fn compare_and_swap_epoch(
@@ -903,6 +893,12 @@ impl MetadataStore {
         lease_duration_ms: i64,
     ) -> Result<PartitionOwnership, MetaError> {
         let mut inner = self.inner.write().unwrap();
+        if inner.mode == DeploymentMode::MultiRegion {
+            return Err(MetaError::AuthorityError(
+                "MultiRegion mode cannot set ownership except through compare_and_swap_epoch"
+                    .to_string(),
+            ));
+        }
         let key = (topic.to_string(), partition);
 
         let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
@@ -1024,17 +1020,6 @@ impl MetadataAuthority for MetadataStore {
         self.inner.read().unwrap().mode
     }
 
-    fn set_ownership(
-        &self,
-        topic: &str,
-        partition: u32,
-        owner_region: &str,
-        epoch: u64,
-        lease_duration_ms: i64,
-    ) -> Result<PartitionOwnership, MetaError> {
-        self.set_ownership(topic, partition, owner_region, epoch, lease_duration_ms)
-    }
-
     fn compare_and_swap_epoch(
         &self,
         stream: &StreamId,
@@ -1049,12 +1034,6 @@ impl MetadataAuthority for MetadataStore {
         let current = match inner.ownerships.get(&key) {
             Some(o) => o,
             None => {
-                if inner.mode == DeploymentMode::MultiRegion {
-                    return Err(MetaError::PartitionNotFound {
-                        topic: stream.topic.clone(),
-                        partition: stream.partition,
-                    });
-                }
                 if expected_epoch != 0 {
                     return Err(MetaError::PartitionNotFound {
                         topic: stream.topic.clone(),
@@ -1465,14 +1444,50 @@ mod tests {
     }
 
     #[test]
-    fn test_metadata_authority_multi_region_fail_closed() {
+    fn test_metadata_authority_multi_region_cannot_set_ownership_except_through_cas() {
         let authority = MetadataStore::new_multi_region();
         assert_eq!(authority.deployment_mode(), DeploymentMode::MultiRegion);
 
+        // 1. Calling set_ownership directly in MultiRegion mode MUST fail
+        let direct_res = authority.set_ownership("unregistered-topic", 0, "region-a", 1, 10_000);
+        assert!(
+            matches!(direct_res, Err(MetaError::AuthorityError(ref msg)) if msg.contains("MultiRegion mode cannot set ownership except through compare_and_swap_epoch")),
+            "Expected InvalidState error, got: {:?}",
+            direct_res
+        );
+
         let stream = StreamId::new("unregistered-topic", 0);
-        // Multi-region mode strictly rejects CAS for unregistered stream
-        let res = authority.compare_and_swap_epoch(&stream, 0, 1, "region-a", 10_000);
-        assert!(matches!(res, Err(MetaError::PartitionNotFound { .. })));
+
+        // 2. CAS with non-zero expected epoch on unregistered stream fails with PartitionNotFound
+        let stale_cas = authority.compare_and_swap_epoch(&stream, 5, 6, "region-a", 10_000);
+        assert!(matches!(
+            stale_cas,
+            Err(MetaError::PartitionNotFound { .. })
+        ));
+
+        // 3. Registering ownership through compare_and_swap_epoch at expected_epoch 0 succeeds
+        let initial_res = authority
+            .compare_and_swap_epoch(&stream, 0, 1, "region-a", 10_000)
+            .expect("CAS registration of initial epoch must succeed");
+        assert_eq!(initial_res.owner_region, "region-a");
+        assert_eq!(initial_res.epoch, 1);
+
+        // 4. Ownership is now visible
+        let active = authority
+            .get_ownership(&stream.topic, stream.partition)
+            .unwrap();
+        assert_eq!(active.owner_region, "region-a");
+        assert_eq!(active.epoch, 1);
+
+        // 5. Competing claimant trying to claim epoch 1 with expected_epoch 0 fails with StaleEpoch
+        let competing = authority.compare_and_swap_epoch(&stream, 0, 1, "region-b", 10_000);
+        assert!(matches!(
+            competing,
+            Err(MetaError::StaleEpoch {
+                current: 1,
+                proposed: 0
+            })
+        ));
     }
 
     #[test]

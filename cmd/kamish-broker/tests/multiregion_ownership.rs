@@ -15,7 +15,7 @@ use ed25519_dalek::SigningKey;
 use kamish_audit::AuditLog;
 use kamish_broker::{BrokerError, BrokerServer, ProduceRequest};
 use kamish_enforce::Enforcer;
-use kamish_meta::{DeploymentMode, MetadataStore, ResidencyPolicy};
+use kamish_meta::{DeploymentMode, MetadataAuthority, MetadataStore, ResidencyPolicy};
 use kamish_policy::{
     AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
 };
@@ -118,11 +118,22 @@ fn test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeed
         unreg_err
     );
 
-    // 2. Authoritatively register ownership and lease for this partition
-    meta.set_ownership("events", 0, "region-a", 1, 60_000)
-        .expect("registration of partition ownership must succeed");
+    // 2. In MultiRegion mode, direct set_ownership MUST fail closed
+    let direct_set_err = meta
+        .set_ownership("events", 0, "region-a", 1, 60_000)
+        .unwrap_err();
+    assert!(
+        matches!(direct_set_err, kamish_meta::MetaError::AuthorityError(ref msg) if msg.contains("MultiRegion mode cannot set ownership except through compare_and_swap_epoch")),
+        "Direct set_ownership in MultiRegion mode must fail closed, got: {:?}",
+        direct_set_err
+    );
 
-    // 3. With registered ownership, produce MUST succeed at committed epoch 1
+    // 3. Authoritatively register ownership and lease via compare_and_swap_epoch
+    let stream_id = kamish_meta::StreamId::new("events", 0);
+    meta.compare_and_swap_epoch(&stream_id, 0, 1, "region-a", 60_000)
+        .expect("CAS registration of partition ownership must succeed");
+
+    // 4. With registered ownership, produce MUST succeed at committed epoch 1
     let success = broker
         .produce(produce_req.clone())
         .expect("registered partition produce must succeed");
@@ -130,8 +141,8 @@ fn test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeed
     assert_eq!(success.committed_epoch, 1);
     assert_eq!(success.base_offset, 0);
 
-    // 4. If partition owner is another region, produce MUST fail closed
-    meta.set_ownership("events", 0, "region-b", 2, 60_000)
+    // 5. If partition owner is another region, produce MUST fail closed
+    meta.compare_and_swap_epoch(&stream_id, 1, 2, "region-b", 60_000)
         .unwrap();
     let wrong_owner_err = broker
         .produce(ProduceRequest {
@@ -145,8 +156,8 @@ fn test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeed
         wrong_owner_err
     );
 
-    // 5. If lease has expired, produce MUST fail closed
-    meta.set_ownership("events", 0, "region-a", 3, -1000)
+    // 6. If lease has expired, produce MUST fail closed
+    meta.compare_and_swap_epoch(&stream_id, 2, 3, "region-a", -1000)
         .unwrap(); // expired 1s ago
     let expired_err = broker
         .produce(ProduceRequest {

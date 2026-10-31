@@ -2625,7 +2625,7 @@ Do not claim novelty for:
 | FR-10 | Canary/checker evidence | Small supplied-data checkers exist; complete independent artifact/history scanner missing |
 | FR-11 | Sealed-only destination | Disabled/contained; secure integration missing |
 | FR-12 | Ciphertext relay transit | Planner allowlist tests; real relay transport/ciphertext proof missing |
-| FR-13 | Region-local hash-chained audit | Local format-2 implementation; completeness anchoring/retention/writer ownership incomplete |
+| FR-13 | Region-local hash-chained audit | Partial: Local format-2 implementation; completeness anchoring/retention/writer ownership incomplete |
 | FR-14 | Derive mode with lineage | Not implemented |
 
 ### 23.2 Nonfunctional requirements
@@ -2636,8 +2636,8 @@ Do not claim novelty for:
 | NFR-02 | Invalid/stale/replayed policy fails closed | Local verification covered; durable restart floor and deployed policy service missing |
 | NFR-03 | Bounded memory/disk and class pressure | Queue/task caps only; full log/audit memory and disk/lifecycle/fairness incomplete |
 | NFR-04 | Smoothed/windowed stable routing | Policy filtering, current metrics and dwell/hysteresis exist; smoothing/window/breaker proof incomplete |
-| NFR-05 | Numbers tied to run/config/date | Evidence organization improved; rigorous performance/failure calibration remains |
-| NFR-06 | Mutual TLS 1.3 | Not implemented in broker/agent transport |
+| NFR-05 | Numbers tied to run/config/date | Improved (raw evidence preserved; performance/failure calibration and final runs not done) |
+| NFR-06 | Mutual TLS 1.3 | Not implemented in broker/agent transport (scheduled for Phase 2 / W09) |
 
 ### 23.3 Original invariant numbering
 
@@ -2651,7 +2651,7 @@ Use `project.md` as the naming authority:
 | INV-4 | Fetch does not exceed committed HWM | Local HWM checks/tests |
 | INV-5 | Destination is exact source prefix | Offset/payload tests; complete-envelope and source-history limitations remain |
 | INV-6 | Applied retry is no-op | Tested local/current single-record scenarios; regional/session history scope incomplete |
-| INV-7 | No two regions commit same partition/epoch | **Failing extended contract** in unregistered independent mode |
+| INV-7 | No two regions commit same partition/epoch | **Failing extended contract** in `independent_regions_must_not_both_accept_unregistered_epoch_one_writes` probe |
 | INV-8 | No unauthorized payload placement | Selected class/mode checks and synthetic scans; no universal/legal/location guarantee |
 | INV-9 | Invalid/unsigned/rolled-back policy never applied | Local signature/cache checks; durable policy-floor scope incomplete |
 

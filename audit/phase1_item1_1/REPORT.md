@@ -55,7 +55,7 @@
 | **FR-10** | Canary scanner and invariant checkers | **Partial** | Invariant checkers and probe suites exist; background continuous scanner pending. |
 | **FR-11** | Sealed-only (ciphertext) destination mode | **Contained** | Explicitly rejected/unsupported until secure implementation. |
 | **FR-12** | Ciphertext relay transit | **Partial** | Planner allowlist tests; real relay transport/ciphertext proof missing. |
-| **FR-13** | Hash-chained, region-local decision log | **Tested** | Local format-2 implementation; completeness anchoring/writer ownership incomplete. |
+| **FR-13** | Hash-chained, region-local decision log | **Partial** | Local format-2 implementation; completeness anchoring/writer ownership incomplete. |
 | **FR-14** | Derive mode with offset lineage | **Not implemented** | Deferred per project specification. |
 
 ### Non-Functional Requirements (`project.md`)
@@ -65,8 +65,8 @@
 | **NFR-02** | Fail-closed on invalid/stale/replayed policy | **Tested (Local)** | Local verification and signature checks covered; durable restart floor and deployed policy service missing. |
 | **NFR-03** | Bounded memory/disk & class pressure | **Partial** | Queue caps exist; full disk/lifecycle fairness incomplete. |
 | **NFR-04** | Smoothed, windowed route evidence | **Partial** | Policy filtering, current metrics and dwell/hysteresis exist; smoothing/window/breaker proof incomplete. |
-| **NFR-05** | Every number links to run/config/date | **Met** | Raw, unedited execution logs captured in `audit/phase1_item1_1/`. |
-| **NFR-06** | All inter-component traffic uses mTLS 1.3 | **Not implemented** | Plaintext loopback; mTLS scheduled for Item 1.3. |
+| **NFR-05** | Every number links to run/config/date | **Improved** | Raw, unedited execution logs captured in `audit/phase1_item1_1/`; calibration and runs not done. |
+| **NFR-06** | All inter-component traffic uses mTLS 1.3 | **Not implemented** | Plaintext loopback; mTLS scheduled for Phase 2 / W09. |
 
 ### Core Invariants (`project.md`)
 | ID | Invariant | Current Status | Evidence / Notes |
@@ -77,7 +77,7 @@
 | **INV-4** | Fetch never returns records beyond committed HWM | **Tested (Local)** | Local HWM verified in broker and client tests. |
 | **INV-5** | Destination log is exact prefix of source log | **Tested (Narrow)** | Single-record offset/payload verified; complete-envelope limitations remain. |
 | **INV-6** | Retrying an applied range is a no-op | **Tested (Local)** | Local single-record deduplication verified; regional session history pending. |
-| **INV-7** | No two regions commit writes for same partition/epoch | **Open Contract Gap** | Probe `two_regions_cannot_both_hold_partition_mastery` correctly failing until etcd authority in Item 1.2. |
+| **INV-7** | No two regions commit writes for same partition/epoch | **Open Contract Gap** | Probe `independent_regions_must_not_both_accept_unregistered_epoch_one_writes` correctly failing until etcd authority in Item 1.2. |
 | **INV-8** | No payload outside legal set (Residency) | **Tested (Selected)** | Selected class/mode checks and synthetic scans; universal verification pending. |
 | **INV-9** | Invalid, unsigned or rolled-back policy never applied | **Tested (Local)** | Local signature/cache checks pass; durable cluster floor pending. |
 
