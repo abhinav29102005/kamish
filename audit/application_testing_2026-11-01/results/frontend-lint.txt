@@ -1,0 +1,34 @@
+
+> frontend@0.0.0 lint
+> oxlint
+
+src/pages/WorkTaskPage.jsx:5:24: warning eslint(no-unused-vars): Variable 'nodes' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/pages/WorkTaskPage.jsx:5:31: warning eslint(no-unused-vars): Variable 'currentTelemetry' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/components/Header.jsx:5:18: warning eslint(no-unused-vars): Variable 'currentTelemetry' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/components/ContactModal.jsx:2:19: warning eslint(no-unused-vars): Identifier 'ShieldCheck' is imported but never used. help: Consider removing this import.
+src/components/ContactModal.jsx:2:32: warning eslint(no-unused-vars): Identifier 'Database' is imported but never used. help: Consider removing this import.
+src/components/ContactModal.jsx:2:42: warning eslint(no-unused-vars): Identifier 'Terminal' is imported but never used. help: Consider removing this import.
+src/components/ContactModal.jsx:2:52: warning eslint(no-unused-vars): Identifier 'Flame' is imported but never used. help: Consider removing this import.
+src/components/ContactModal.jsx:2:59: warning eslint(no-unused-vars): Identifier 'AlertTriangle' is imported but never used. help: Consider removing this import.
+src/pages/TelemetryPage.jsx:2:10: warning eslint(no-unused-vars): Identifier 'Activity' is imported but never used. help: Consider removing this import.
+src/pages/TelemetryPage.jsx:2:20: warning eslint(no-unused-vars): Identifier 'Gauge' is imported but never used. help: Consider removing this import.
+src/pages/TelemetryPage.jsx:2:27: warning eslint(no-unused-vars): Identifier 'Server' is imported but never used. help: Consider removing this import.
+src/pages/TelemetryPage.jsx:2:35: warning eslint(no-unused-vars): Identifier 'Cpu' is imported but never used. help: Consider removing this import.
+src/pages/TelemetryPage.jsx:2:40: warning eslint(no-unused-vars): Identifier 'Database' is imported but never used. help: Consider removing this import.
+src/pages/TelemetryPage.jsx:2:50: warning eslint(no-unused-vars): Identifier 'Zap' is imported but never used. help: Consider removing this import.
+src/App.jsx:56:5: warning react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
+src/components/KamishDragon3D.jsx:11:11: warning react(refs): Cannot access refs during render help: React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected
+src/pages/DashboardPage.jsx:12:5: warning eslint(no-unused-vars): Variable 'runScenario' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/pages/DashboardPage.jsx:13:5: warning eslint(no-unused-vars): Variable 'scenarioState' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/pages/AuditChainPage.jsx:2:10: warning eslint(no-unused-vars): Identifier 'ShieldCheck' is imported but never used. help: Consider removing this import.
+src/pages/AuditChainPage.jsx:2:23: warning eslint(no-unused-vars): Identifier 'Lock' is imported but never used. help: Consider removing this import.
+src/pages/AuditChainPage.jsx:2:29: warning eslint(no-unused-vars): Identifier 'Hash' is imported but never used. help: Consider removing this import.
+src/pages/AuditChainPage.jsx:2:49: warning eslint(no-unused-vars): Identifier 'AlertTriangle' is imported but never used. help: Consider removing this import.
+src/pages/AuditChainPage.jsx:2:64: warning eslint(no-unused-vars): Identifier 'Key' is imported but never used. help: Consider removing this import.
+src/pages/AuditChainPage.jsx:5:19: warning eslint(no-unused-vars): Variable 'setEntries' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/pages/AuditChainPage.jsx:41:10: warning eslint(no-unused-vars): Variable 'verified' is declared but never used. Unused variables should start with a '_'. help: Consider removing this declaration.
+src/context/KamishContext.tsx:875:14: warning react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
+src/context/KamishContext.tsx:162:16: warning react(purity): Cannot call impure function during render help: `Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component re-renders
+src/context/KamishContext.tsx:187:12: warning react(refs): Cannot access refs during render help: React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected
+src/components/ThreeTopologyGlobe.tsx:69:16: warning react(refs): Cannot access refs during render help: React refs are values that are not needed for rendering. Refs should only be accessed outside of render, such as in event handlers or effects. Accessing a ref value (the `current` property) during render can cause your component not to update as expected
+src/components/ThreeTopologyGlobe.tsx:224:52: warning react-hooks(exhaustive-deps): React Hook useEffect has missing dependencies: 'nodes.EU_WEST.lng', 'isGlobalBackground', 'nodes.AP_SOUTH.lng', 'nodes.US_EAST.lng', 'nodes.EU_WEST.lat', 'nodes.AP_SOUTH.lat', and 'nodes.US_EAST.lat' help: Either include it or remove the dependency array.

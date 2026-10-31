@@ -1,0 +1,22 @@
+[
+  {
+    "name": "local-check-runner",
+    "exit_code": 1,
+    "expected_exit_code": 1
+  },
+  {
+    "name": "cli-runner",
+    "exit_code": 1,
+    "expected_exit_code": 1
+  },
+  {
+    "name": "dependency-runner",
+    "exit_code": 1,
+    "expected_exit_code": 1
+  },
+  {
+    "name": "frontend-crypto-runner",
+    "exit_code": 1,
+    "expected_exit_code": 1
+  }
+]

@@ -1,0 +1,23 @@
+[
+  {
+    "name": "frontend-dependency-tree",
+    "exit_code": 1,
+    "command": [
+      "npm",
+      "ls",
+      "--depth=0",
+      "--json"
+    ],
+    "output": "results/frontend-dependency-tree.txt"
+  },
+  {
+    "name": "frontend-dependency-audit",
+    "exit_code": 0,
+    "command": [
+      "npm",
+      "audit",
+      "--json"
+    ],
+    "output": "results/frontend-dependency-audit.txt"
+  }
+]

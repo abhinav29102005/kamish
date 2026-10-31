@@ -1,0 +1,2 @@
+[1;34m[kamish-ctl][0m Inspecting cryptographic audit log at: /tmp/opencode/kamish-cli-test-64jexbj1/does-not-exist.log
+[1;32m[kamish-ctl][0m  Audit log integrity verified: 0 entries unbroken in cryptographic chain.

@@ -1,0 +1,13 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/kamish-broker --help`
+Kamish Regional Broker Daemon
+
+Usage: kamish-broker [OPTIONS]
+
+Options:
+  -r, --region <REGION>      [default: region-a]
+  -d, --data-dir <DATA_DIR>  [default: ./data/broker]
+  -p, --port <PORT>          [default: 8080]
+      --host <HOST>          [default: 127.0.0.1]
+      --peers <PEERS>        
+  -h, --help                 Print help

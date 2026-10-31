@@ -1,0 +1,37 @@
+    Checking kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+error: very complex type used. Consider factoring parts into `type` definitions
+   --> cmd/kamish-broker/src/lib.rs:228:27
+    |
+228 |     partition_operations: Arc<StripedStore<(String, u32), Arc<Mutex<()>>>>,
+    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#type_complexity
+    = note: `-D clippy::type-complexity` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::type_complexity)]`
+
+error: this `if` statement can be collapsed
+   --> cmd/kamish-broker/src/lib.rs:842:21
+    |
+842 | /                     if let Some(context) = &record.context {
+843 | |                         if context.origin_region == self.region {
+844 | |                             sessions.update(context.producer_id, context.producer_epoch,
+845 | |                                 context.sequence, record.base_offset);
+846 | |                         }
+847 | |                     }
+    | |_____________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#collapsible_if
+    = note: `-D clippy::collapsible-if` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::collapsible_if)]`
+help: collapse nested if block
+    |
+842 ~                     if let Some(context) = &record.context
+843 ~                         && context.origin_region == self.region {
+844 |                             sessions.update(context.producer_id, context.producer_epoch,
+845 |                                 context.sequence, record.base_offset);
+846 ~                         }
+    |
+
+error: could not compile `kamish-broker` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `kamish-broker` (lib test) due to 2 previous errors

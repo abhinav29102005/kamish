@@ -1,0 +1,47 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/kamish-ctl benchmark --count 64 --concurrency 2`
+[1;35m==============================================================================[0m
+[1;36m  KAMISH BROKER — SUSTAINED THROUGHPUT & LATENCY BENCHMARK                    [0m
+[1;36m  Measuring Max Sustained Throughput (msg/s) and p50/p99 Latency             [0m
+[1;35m==============================================================================[0m
+[1;34m[Benchmark][0m Initializing isolated broker with active outbox replication...
+>> Target Broker Address  : 127.0.0.1:40903
+>> Requested Concurrency  : 2 worker task(s)
+[1;33m>> Warming up pipelines (100 events)...[0m Done.
+
+[1;33m>> [Scenario 1] Running Sustained Benchmark on NORMAL LINK (64 records)...[0m
+  Total Messages Produced : 64
+  Total Elapsed Time      : 0.007 s
+  Sustained Throughput    : [1;32m9371.5 msg/s[0m
+  Min Latency             : 109.5 µs
+  p50 Latency (median)    : [1;36m191.3 µs[0m
+  p90 Latency             : 244.7 µs
+  p99 Latency (tail)      : [1;33m439.2 µs (0.439 ms)[0m
+  Max Latency             : 439.2 µs (0.439 ms)
+
+[1;33m>> [Scenario 2] Injecting 300ms WAN RTT Chaos on Inter-Region Route...[0m
+[1;33m>> Running Ingestion Benchmark under DEGRADED SLOW LINK (100 records)...[0m
+  Total Messages Produced : 100
+  Total Elapsed Time      : 0.012 s
+  Sustained Throughput    : [1;32m8605.2 msg/s[0m
+  Min Latency             : 108.7 µs
+  p50 Latency (median)    : [1;36m211.6 µs[0m
+  p90 Latency             : 313.3 µs
+  p99 Latency (tail)      : [1;33m384.1 µs (0.384 ms)[0m
+  Max Latency             : 384.1 µs (0.384 ms)
+
+[1;35m==============================================================================[0m
+[1;32m  COMPARATIVE PERFORMANCE MATRIX: NORMAL vs DEGRADED LINK                    [0m
+[1;35m==============================================================================[0m
++-----------------------------+-----------------------+-----------------------+
+| Metric                      | Normal Link           | Degraded Link (300ms) |
++-----------------------------+-----------------------+-----------------------+
+| Sustained Throughput        |            9371.5 msg/s |            8605.2 msg/s |
+| p50 Latency (median)        |               191.3 µs |               211.6 µs |
+| p90 Latency                 |               244.7 µs |               313.3 µs |
+| p99 Tail Latency            |               439.2 µs |               384.1 µs |
+| Max Latency                 |               439.2 µs |               384.1 µs |
+| Ingestion Decoupling        |              ISOLATED |              ISOLATED |
++-----------------------------+-----------------------+-----------------------+
+[1;32m[PASS] Ingestion latency confirmed sub-millisecond and fully isolated from WAN link degradation![0m
+

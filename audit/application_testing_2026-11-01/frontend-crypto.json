@@ -1,0 +1,16 @@
+[
+  {
+    "name": "webcrypto-sha256-known-answer",
+    "passed": true
+  },
+  {
+    "name": "fallback-must-not-masquerade-as-sha256",
+    "passed": false,
+    "observed": "Fallback returned a repeated 16-character pseudo-hash rather than SHA-256"
+  },
+  {
+    "name": "frontend-audit-field-boundaries",
+    "passed": false,
+    "observed": "Distinct topic/source fields containing colons produced the same audit digest"
+  }
+]

@@ -1,0 +1,85 @@
+npm error code ELSPROBLEMS
+npm error missing: @types/node@^24.19.2, required by frontend@0.0.0
+npm error missing: @types/three@^0.187.0, required by frontend@0.0.0
+npm error missing: typescript@~7.0.2, required by frontend@0.0.0
+{
+  "version": "0.0.0",
+  "name": "frontend",
+  "problems": [
+    "missing: @types/node@^24.19.2, required by frontend@0.0.0",
+    "missing: @types/three@^0.187.0, required by frontend@0.0.0",
+    "missing: typescript@~7.0.2, required by frontend@0.0.0"
+  ],
+  "dependencies": {
+    "@types/node": {
+      "required": "^24.19.2",
+      "missing": true,
+      "problems": [
+        "missing: @types/node@^24.19.2, required by frontend@0.0.0"
+      ]
+    },
+    "@types/react-dom": {
+      "version": "19.3.0",
+      "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+      "overridden": false
+    },
+    "@types/react": {
+      "version": "19.3.0",
+      "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+      "overridden": false
+    },
+    "@types/three": {
+      "missing": true,
+      "problems": [
+        "missing: @types/three@^0.187.0, required by frontend@0.0.0"
+      ]
+    },
+    "@vitejs/plugin-react": {
+      "version": "6.1.2",
+      "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-6.1.2.tgz",
+      "overridden": false
+    },
+    "lucide-react": {
+      "version": "1.66.0",
+      "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.66.0.tgz",
+      "overridden": false
+    },
+    "oxlint": {
+      "version": "1.90.0",
+      "resolved": "https://registry.npmjs.org/oxlint/-/oxlint-1.90.0.tgz",
+      "overridden": false
+    },
+    "react-dom": {
+      "version": "19.3.1",
+      "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.1.tgz",
+      "overridden": false
+    },
+    "react": {
+      "version": "19.3.1",
+      "resolved": "https://registry.npmjs.org/react/-/react-19.3.1.tgz",
+      "overridden": false
+    },
+    "three": {
+      "version": "0.187.0",
+      "resolved": "https://registry.npmjs.org/three/-/three-0.187.0.tgz",
+      "overridden": false
+    },
+    "typescript": {
+      "missing": true,
+      "problems": [
+        "missing: typescript@~7.0.2, required by frontend@0.0.0"
+      ]
+    },
+    "vite": {
+      "version": "8.3.5",
+      "resolved": "https://registry.npmjs.org/vite/-/vite-8.3.5.tgz",
+      "overridden": false
+    }
+  },
+  "error": {
+    "code": "ELSPROBLEMS",
+    "summary": "missing: @types/node@^24.19.2, required by frontend@0.0.0\nmissing: @types/three@^0.187.0, required by frontend@0.0.0\nmissing: typescript@~7.0.2, required by frontend@0.0.0",
+    "detail": ""
+  }
+}
+npm error A complete log of this run can be found in: /home/bigboyaks/.npm/_logs/2026-10-31T18_56_14_797Z-debug-0.log

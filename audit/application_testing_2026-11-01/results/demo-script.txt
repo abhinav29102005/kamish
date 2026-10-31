@@ -1,0 +1,252 @@
+[0;36m[1m
+==========================================================================
+      KAMISH DISTRIBUTED EVENT BROKER — 24-HOUR DEMONSTRATION RUNNER      
+        Regional Residency | WAN-Adaptive Lag | Outage Recovery           
+==========================================================================
+[0m
+[1;33m>> [00:00] Step 1: Validating Workspace Compilation & Trait Contracts...[0m
+[0;32m   Workspace compiled cleanly with 0 errors and 0 warnings.[0m
+
+[1;33m>> [00:15] Step 2: Executing Full Workspace Invariant Test Suite...[0m
+
+running 9 tests
+.........
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 14 tests
+..............
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 6 tests
+......
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.11s
+
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+....
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 3 tests
+...
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 2 tests
+..
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 5 tests
+.....
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+[0;32m   All 23 invariant tests passed across 10 crates (INV-1 through INV-9).[0m
+
+[0;35m[1m--------------------------------------------------------------------------[0m
+[0;36m[1m>> EXECUTING LIVE DEMONSTRATION SCENARIOS (Developer B Deliverables)[0m
+[0;35m[1m--------------------------------------------------------------------------[0m
+
+[1m--- SCENARIO A (Gate 2 / Demo A Ready): Regional Data Residency Enforcement ---[0m
+   Ingesting StrictLocal sovereign record into EU_WEST...
+   Replication worker attempts cross-border egress transfer to US_EAST...
+   Compiling syn v2.0.119
+   Compiling once_cell v1.21.4
+   Compiling tempfile v3.27.0
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling curve25519-dalek v4.1.3
+   Compiling ed25519-dalek v2.2.0
+   Compiling kamish-policy v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy)
+   Compiling kamish-enforce v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce)
+   Compiling kamish-outbox v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox)
+   Compiling kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.45s
+     Running tests/developer_b_scenarios.rs (target/debug/deps/developer_b_scenarios-04c7b41f7ca712a4)
+ [DEMO SCENARIO A PASSED] Residency enforcement successfully blocked unauthorized egress to US_EAST with zero-payload audit logging.
+[0;32m   Result: PASS. StrictLocal record blocked, cryptographic audit entry recorded.[0m
+
+[1m--- SCENARIO B (Gate 3 / Demo B Ready): Slow-Link WAN Delay & Dynamic Lag Metrics ---[0m
+   Simulating healthy 10ms WAN link (Replication Lag = 0)...
+   Injecting 300ms WAN latency via chaos proxy on US_EAST link...
+   Local producer writes 50 records during degraded link...
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.81s
+     Running tests/developer_b_scenarios.rs (target/debug/deps/developer_b_scenarios-04c7b41f7ca712a4)
+ [DEMO SCENARIO B PASSED] Injected 300ms delay increased replication lag to 50 without blocking local produce (local write latency 606.708µs).
+[0;32m   Result: PASS. Local write latency unaffected (<1ms) while lag metric exposed = 50.[0m
+
+[1m--- SCENARIO C (Gate 4 / Demo C Ready): Regional Outage & Resumable Recovery ---[0m
+   Simulating catastrophic failure of remote Region B (US_EAST severed)...
+   Region A buffers 15 new records in bounded durable outbox...
+   Region B recovers -> Handshake reconciles from durable watermark...
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running tests/developer_b_scenarios.rs (target/debug/deps/developer_b_scenarios-04c7b41f7ca712a4)
+ [DEMO SCENARIO C PASSED] Region B recovered from outage, successfully synchronized 15 buffered records with ZERO data loss.
+[0;32m   Result: PASS. Region B caught up 15 records from watermark with ZERO data loss.[0m
+
+[0;32m[1m
+==========================================================================
+    ALL 3 HACKATHON DEMONSTRATION SCENARIOS VERIFIED SUCCESSFULLY!        
+==========================================================================
+[0m

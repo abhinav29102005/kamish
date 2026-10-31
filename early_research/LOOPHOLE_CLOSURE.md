@@ -1,5 +1,10 @@
 # Loophole closure ledger — implementation stages 1–2
 
+**Follow-up testing:** [Application test report, 1 Nov 2026](../audit/application_testing_2026-11-01/REPORT.md)
+reconfirms the original 11 checks and adds six failing broader-contract probes.
+The statuses below describe their original scoped fixes, not closure of those
+additional requirements. Use `--lib` to run only the original 11 probes.
+
 **Date:** 2026-10-31. Changes based on `e0cd260`, tested in the working tree.
 
 **Status: in progress, not production-ready.** The 11 research probes now pass,

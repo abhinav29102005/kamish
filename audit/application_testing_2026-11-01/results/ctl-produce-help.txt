@@ -1,0 +1,15 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.03s
+     Running `target/debug/kamish-ctl produce --help`
+Produce an event to a running Kamish broker instance with client-side policy validation
+
+Usage: kamish-ctl produce [OPTIONS] --payload <PAYLOAD>
+
+Options:
+  -a, --addr <ADDR>            [default: 127.0.0.1:9092]
+  -t, --topic <TOPIC>          [default: telemetry]
+  -p, --partition <PARTITION>  [default: 0]
+  -c, --class-id <CLASS_ID>    [default: general]
+  -v, --payload <PAYLOAD>      
+  -r, --region <REGION>        [default: EU_WEST]
+      --policy <POLICY>        [default: strict-local] [possible values: strict-local, global-cleartext, restricted-eu-us]
+  -h, --help                   Print help

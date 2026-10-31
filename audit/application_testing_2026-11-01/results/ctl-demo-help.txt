@@ -1,0 +1,8 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running `target/debug/kamish-ctl demo --help`
+Run the Developer B 3-Scenario verification suite (Residency, Slow-Link, Outage)
+
+Usage: kamish-ctl demo
+
+Options:
+  -h, --help  Print help

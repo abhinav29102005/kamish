@@ -1,0 +1,81 @@
+   Compiling kamish-log v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-log)
+   Compiling kamish-audit v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit)
+   Compiling kamish-policy v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy)
+   Compiling kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+   Compiling kamish-enforce v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce)
+   Compiling kamish-outbox v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox)
+   Compiling kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+   Compiling kamish-repo-review v0.0.0 (/mnt/storage/Projects/crowded-mausoleum/early_research/probes)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.04s
+     Running unittests src/lib.rs (target/debug/deps/kamish_repo_review-74cc536a8ac93ab4)
+
+running 11 tests
+test review::ack_of_one_partition_preserves_other_partition ... ok
+test review::audit_hash_binds_field_boundaries ... ok
+test review::broker_obeys_metadata_owner ... ok
+test review::concurrent_retries_append_once ... ok
+test review::fetch_cannot_bypass_record_policy_with_another_class ... ok
+test review::oversized_outbox_write_is_not_acknowledged ... ok
+test review::pending_replication_survives_broker_restart ... ok
+test review::recovery_preserves_per_record_residency ... ok
+test review::retry_after_restart_is_idempotent ... ok
+test review::sealed_destination_does_not_persist_plaintext ... ok
+test review::signed_policy_survives_wire_roundtrip ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/remaining_gaps.rs (target/debug/deps/remaining_gaps-7af4a35fd804135a)
+
+running 6 tests
+test audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable ... FAILED
+test claimed_multi_record_range_must_match_the_persisted_record_count ... FAILED
+test duplicate_offset_with_different_content_must_be_rejected ... FAILED
+test independent_regions_must_not_both_accept_unregistered_epoch_one_writes ... FAILED
+test mixed_replication_contract_must_not_create_an_unfillable_mirror_gap ... FAILED
+test stale_epoch_duplicate_must_not_acknowledge_a_new_epoch_history ... FAILED
+
+failures:
+
+---- audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable stdout ----
+
+thread 'audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable' (549343) panicked at tests/remaining_gaps.rs:111:5:
+removing a valid audit suffix was undetectable without an external checkpoint
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- claimed_multi_record_range_must_match_the_persisted_record_count stdout ----
+
+thread 'claimed_multi_record_range_must_match_the_persisted_record_count' (549344) panicked at tests/remaining_gaps.rs:68:5:
+range [0,5) was accepted but only one record was durably applied
+
+---- duplicate_offset_with_different_content_must_be_rejected stdout ----
+
+thread 'duplicate_offset_with_different_content_must_be_rejected' (549345) panicked at tests/remaining_gaps.rs:61:5:
+same offset with different bytes was acknowledged as identical
+
+---- independent_regions_must_not_both_accept_unregistered_epoch_one_writes stdout ----
+
+thread 'independent_regions_must_not_both_accept_unregistered_epoch_one_writes' (549346) panicked at tests/remaining_gaps.rs:80:5:
+independent regions both acknowledged partition events/0 at epoch 1
+
+---- mixed_replication_contract_must_not_create_an_unfillable_mirror_gap stdout ----
+
+thread 'mixed_replication_contract_must_not_create_an_unfillable_mirror_gap' (549347) panicked at tests/remaining_gaps.rs:94:5:
+source accepted a replication-contract change that leaves destination missing forbidden offset 0
+
+---- stale_epoch_duplicate_must_not_acknowledge_a_new_epoch_history stdout ----
+
+thread 'stale_epoch_duplicate_must_not_acknowledge_a_new_epoch_history' (549348) panicked at tests/remaining_gaps.rs:53:5:
+stale epoch 1 received a successful duplicate ACK for epoch 7 data
+
+
+failures:
+    audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable
+    claimed_multi_record_range_must_match_the_persisted_record_count
+    duplicate_offset_with_different_content_must_be_rejected
+    independent_regions_must_not_both_accept_unregistered_epoch_one_writes
+    mixed_replication_contract_must_not_create_an_unfillable_mirror_gap
+    stale_epoch_duplicate_must_not_acknowledge_a_new_epoch_history
+
+test result: FAILED. 0 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--test remaining_gaps`

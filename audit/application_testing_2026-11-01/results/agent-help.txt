@@ -1,0 +1,14 @@
+   Compiling kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.67s
+     Running `target/debug/kamish-agent --help`
+Kamish Inter-Region Replication Agent
+
+Usage: kamish-agent [OPTIONS]
+
+Options:
+  -l, --local-region <LOCAL_REGION>          [default: region-a]
+  -t, --target-region <TARGET_REGION>        
+      --target-addr <TARGET_ADDR>            
+  -d, --data-dir <DATA_DIR>                  [default: ./data/broker]
+      --poll-interval-ms <POLL_INTERVAL_MS>  [default: 500]
+  -h, --help                                 Print help
