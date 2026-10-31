@@ -417,6 +417,7 @@ mod tests {
                 sequence_base: seq,
                 class_id: "global-stream".to_string(),
                 payload: format!("payload-{}", seq).into_bytes(),
+                residency_rule: None,
             };
             broker_a.produce(req).unwrap();
         }
@@ -470,6 +471,7 @@ mod tests {
             sequence_base: 0,
             class_id: "global-stream".to_string(),
             payload: b"event-data".to_vec(),
+            residency_rule: None,
         }).unwrap();
 
         // Lag check reflects the slow link RTT accurately

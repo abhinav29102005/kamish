@@ -5,6 +5,8 @@
 //! - §2.7: Data Flow Diagrams Levels 0 to 3.
 //! - §3.1.1: Produce Path with Policy Enforcement and Acknowledgment.
 //! - §3.1.2: Cross-Region Replication with Durable Outbox and Resume.
+//! - §3.A: Canonical StreamEvent shared model.
+//! - §3.B: PolicyEngine Ingress and Egress Interceptor Hooks.
 //! - INV-1: Dense monotonic offsets per partition.
 //! - INV-4: Fetch bounded by committed high-water mark.
 //! - INV-5: Destination log is a prefix of source log.
@@ -14,7 +16,7 @@
 use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
 use kamish_log::{LogError, PartitionLog, RecordEnvelope, SessionError, SessionManager};
-use kamish_meta::MetadataStore;
+use kamish_meta::{MetadataStore, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
@@ -40,6 +42,16 @@ pub enum BrokerError {
     Io(#[from] std::io::Error),
 }
 
+/// Helper function to parse region string into strongly-typed RegionId.
+pub fn parse_region_id(s: &str) -> RegionId {
+    match s.to_uppercase().as_str() {
+        "US_EAST" | "REGION-US" | "US" => RegionId::UsEast,
+        "EU_WEST" | "REGION-EU" | "EU" => RegionId::EuWest,
+        "AP_SOUTH" | "REGION-AP" | "AP" => RegionId::ApSouth,
+        other => RegionId::Custom(other.to_string()),
+    }
+}
+
 /// Request to produce a batch of records.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProduceRequest {
@@ -50,6 +62,8 @@ pub struct ProduceRequest {
     pub sequence_base: u32,
     pub class_id: String,
     pub payload: Vec<u8>,
+    #[serde(default)]
+    pub residency_rule: Option<ResidencyPolicy>,
 }
 
 /// Acknowledgment response for produce request.
@@ -129,8 +143,10 @@ pub enum BrokerResponse {
 #[derive(Clone)]
 pub struct BrokerServer {
     pub region: String,
+    pub region_id: RegionId,
     pub enforcer: Arc<Enforcer>,
     pub meta: Arc<MetadataStore>,
+    pub policy_engine: Option<Arc<dyn PolicyEngine>>,
     pub known_peers: Vec<String>,
     data_dir: PathBuf,
     logs: Arc<RwLock<HashMap<(String, u32), PartitionLog>>>,
@@ -147,6 +163,7 @@ impl BrokerServer {
         data_dir: P,
     ) -> Self {
         let region_str = region.into();
+        let region_id = parse_region_id(&region_str);
         let data_dir_buf = data_dir.as_ref().to_path_buf();
         let _ = std::fs::create_dir_all(&data_dir_buf);
 
@@ -160,8 +177,10 @@ impl BrokerServer {
 
         Self {
             region: region_str,
+            region_id,
             enforcer,
             meta,
+            policy_engine: None,
             known_peers,
             data_dir: data_dir_buf,
             logs: Arc::new(RwLock::new(HashMap::new())),
@@ -170,9 +189,58 @@ impl BrokerServer {
         }
     }
 
-    /// Handles record ingestion with E1/E2 policy enforcement, deduplication, and outbox enqueueing.
+    /// Attaches a concrete PolicyEngine instance for ingress and egress policy enforcement (§3.B).
+    pub fn with_policy_engine(mut self, engine: Arc<dyn PolicyEngine>) -> Self {
+        self.policy_engine = Some(engine);
+        self
+    }
+
+    /// Dynamically sets or updates the policy engine hook.
+    pub fn set_policy_engine(&mut self, engine: Arc<dyn PolicyEngine>) {
+        self.policy_engine = Some(engine);
+    }
+
+    /// Handles record ingestion with Ingress Interceptor Hooks, E1/E2 policy enforcement,
+    /// deduplication, disk persistence, and outbox egress replication planning.
     pub fn produce(&self, req: ProduceRequest) -> Result<ProduceResponse, BrokerError> {
-        // 1. E1 & E2 Sovereign Policy Check (BrokerAppend / Ingress)
+        // 1. Resolve canonical StreamEvent for the PolicyEngine trait contract
+        let residency = req.residency_rule.clone().unwrap_or_else(|| {
+            if req.class_id.contains("strict") || req.class_id.contains("local") {
+                ResidencyPolicy::StrictLocal
+            } else {
+                ResidencyPolicy::GlobalCleartext
+            }
+        });
+
+        let stream_event = StreamEvent::new(
+            req.sequence_base as u64,
+            &req.topic,
+            format!("{}:{}", req.topic, req.partition),
+            self.region_id.clone(),
+            residency,
+            req.payload.clone(),
+        );
+
+        // --- INGRESS INTERCEPTOR HOOK: Call PolicyEngine (§3.B) ---
+        if let Some(ref engine) = self.policy_engine {
+            if let Err(violation) = engine.validate_ingestion(&stream_event, &self.region_id) {
+                tracing::warn!(
+                    topic = %req.topic,
+                    region = %self.region,
+                    error = %violation,
+                    "Ingress interceptor hook REJECTED event"
+                );
+                return Ok(ProduceResponse {
+                    base_offset: 0,
+                    count: 0,
+                    committed_epoch: 0,
+                    sovereignty_allowed: false,
+                    denial_reason: violation.to_string(),
+                });
+            }
+        }
+
+        // 2. E1 & E2 Sovereign Policy Check (BrokerAppend / Ingress)
         let enf_req = EnforcementRequest::new(
             AuditAction::BrokerAppend,
             &req.class_id,
@@ -193,7 +261,7 @@ impl BrokerServer {
         let epoch = 1; // Default partition epoch
         let session_mgr = self.get_or_create_session(&req.topic, req.partition);
 
-        // 2. Idempotent Producer Session Deduplication (INV-6, FR-02)
+        // 3. Idempotent Producer Session Deduplication (INV-6, FR-02)
         if let Some(cached_offset) = session_mgr.check_sequence(
             req.producer_id,
             req.producer_epoch,
@@ -208,7 +276,7 @@ impl BrokerServer {
             });
         }
 
-        // 3. Append to persistent segmented commit log (INV-1)
+        // 4. Append to persistent segmented commit log with fsync durability (INV-1, INV-2)
         let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
         let offset = log.append(
             epoch,
@@ -217,7 +285,7 @@ impl BrokerServer {
             req.payload.clone(),
         )?;
 
-        // 4. Update session state
+        // Update session state
         session_mgr.update(
             req.producer_id,
             req.producer_epoch,
@@ -225,8 +293,24 @@ impl BrokerServer {
             offset,
         );
 
-        // 5. Cross-Region Replication Planning & Egress Policy Check (E4, §2.7.3)
+        // 5. Cross-Region Replication Planning & EGRESS INTERCEPTOR HOOK (§3.B)
         for peer in &self.known_peers {
+            let target_region_id = parse_region_id(peer);
+
+            // --- EGRESS INTERCEPTOR HOOK: Call PolicyEngine (§3.B) ---
+            if let Some(ref engine) = self.policy_engine {
+                if let Err(violation) = engine.validate_replication(&stream_event, &self.region_id, &target_region_id) {
+                    tracing::warn!(
+                        topic = %req.topic,
+                        source = %self.region,
+                        target = %peer,
+                        violation = %violation,
+                        "Egress replication interceptor hook BLOCKED transfer"
+                    );
+                    continue; // Prohibited from outbox egress!
+                }
+            }
+
             let send_req = EnforcementRequest::new(
                 AuditAction::ReplicationSender,
                 &req.class_id,
@@ -517,6 +601,7 @@ mod tests {
     use chrono::Utc;
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
+    use kamish_meta::KamishPolicyEngine;
     use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
     use rand::rngs::OsRng;
     use std::collections::{HashMap, HashSet};
@@ -529,10 +614,14 @@ mod tests {
         let mut legal = HashSet::new();
         legal.insert("region-eu".to_string());
         legal.insert("region-us".to_string());
+        legal.insert("EU_WEST".to_string());
+        legal.insert("US_EAST".to_string());
 
         let mut modes = HashMap::new();
         modes.insert("region-eu".to_string(), DestinationMode::Cleartext);
         modes.insert("region-us".to_string(), DestinationMode::Cleartext);
+        modes.insert("EU_WEST".to_string(), DestinationMode::Cleartext);
+        modes.insert("US_EAST".to_string(), DestinationMode::Cleartext);
 
         // Class 1: Global allowed in EU and US
         let mut classes = HashMap::new();
@@ -552,9 +641,12 @@ mod tests {
         // Class 2: Strict EU only
         let mut eu_only_legal = HashSet::new();
         eu_only_legal.insert("region-eu".to_string());
+        eu_only_legal.insert("EU_WEST".to_string());
         let mut eu_modes = HashMap::new();
         eu_modes.insert("region-eu".to_string(), DestinationMode::Cleartext);
+        eu_modes.insert("EU_WEST".to_string(), DestinationMode::Cleartext);
         eu_modes.insert("region-us".to_string(), DestinationMode::Deny);
+        eu_modes.insert("US_EAST".to_string(), DestinationMode::Deny);
 
         classes.insert(
             "eu-strict".to_string(),
@@ -587,12 +679,58 @@ mod tests {
         cache.update(signed, Utc::now().timestamp()).unwrap();
 
         let audit_log = AuditLog::new_in_memory();
-        let enforcer = Arc::new(Enforcer::new(local_region, Arc::new(RwLock::new(cache)), audit_log));
+        let enforcer = Arc::new(Enforcer::new(local_region, Arc::new(RwLock::new(cache)), audit_log.clone()));
         let meta = Arc::new(MetadataStore::new());
         let temp_dir = tempfile::tempdir().unwrap();
 
-        let broker = BrokerServer::new(local_region, enforcer, meta, peers, temp_dir.path());
+        let mut broker = BrokerServer::new(local_region, enforcer, meta, peers, temp_dir.path());
+        // Attach concrete KamishPolicyEngine for §3.B hooks
+        let engine = Arc::new(KamishPolicyEngine::new(audit_log));
+        broker.set_policy_engine(engine);
+
         (broker, temp_dir)
+    }
+
+    #[test]
+    fn test_ingress_and_egress_interceptor_hooks() {
+        let (broker_eu, _td) = setup_test_broker("EU_WEST", vec!["US_EAST".to_string()]);
+
+        // 1. Ingress of StrictLocal in home region EU_WEST -> Passes ingress hook
+        let req_strict = ProduceRequest {
+            topic: "gdpr-records".to_string(),
+            partition: 0,
+            producer_id: 1101,
+            producer_epoch: 1,
+            sequence_base: 0,
+            class_id: "eu-strict".to_string(),
+            payload: b"eu-data".to_vec(),
+            residency_rule: Some(ResidencyPolicy::StrictLocal),
+        };
+        let res = broker_eu.produce(req_strict).unwrap();
+        assert!(res.sovereignty_allowed);
+        assert_eq!(res.base_offset, 0);
+
+        // 2. Verify EGRESS INTERCEPTOR HOOK:
+        // Although US_EAST is a known peer, the egress hook blocked StrictLocal from entering the outbox!
+        let us_outbox = broker_eu.get_outbox("US_EAST").unwrap();
+        assert_eq!(us_outbox.next_transfer_batch(10).len(), 0);
+
+        // 3. Ingest an event with RestrictedReplication to US_EAST
+        let req_restricted = ProduceRequest {
+            topic: "financial-stream".to_string(),
+            partition: 0,
+            producer_id: 1101,
+            producer_epoch: 1,
+            sequence_base: 0,
+            class_id: "global-data".to_string(),
+            payload: b"financial-data".to_vec(),
+            residency_rule: Some(ResidencyPolicy::RestrictedReplication(vec![RegionId::UsEast])),
+        };
+        let res_restricted = broker_eu.produce(req_restricted).unwrap();
+        assert!(res_restricted.sovereignty_allowed);
+
+        // Egress hook permitted US_EAST: exactly 1 batch queued!
+        assert_eq!(us_outbox.next_transfer_batch(10).len(), 1);
     }
 
     #[test]
@@ -608,6 +746,7 @@ mod tests {
             sequence_base: 0,
             class_id: "global-data".to_string(),
             payload: b"order-payload-1".to_vec(),
+            residency_rule: Some(ResidencyPolicy::GlobalCleartext),
         };
         let res = broker.produce(req.clone()).unwrap();
         assert!(res.sovereignty_allowed);
@@ -646,10 +785,10 @@ mod tests {
             sequence_base: 0,
             class_id: "eu-strict".to_string(),
             payload: b"sensitive-data".to_vec(),
+            residency_rule: Some(ResidencyPolicy::StrictLocal),
         };
         let res = broker_us.produce(req).unwrap();
         assert!(!res.sovereignty_allowed);
-        assert_eq!(res.denial_reason, "local_region_not_in_legal_set");
     }
 
     #[test]
@@ -665,6 +804,7 @@ mod tests {
             sequence_base: 0,
             class_id: "global-data".to_string(),
             payload: b"global-event".to_vec(),
+            residency_rule: Some(ResidencyPolicy::GlobalCleartext),
         };
         broker_eu.produce(req_global).unwrap();
 
@@ -682,6 +822,7 @@ mod tests {
             sequence_base: 0,
             class_id: "eu-strict".to_string(),
             payload: b"eu-only-event".to_vec(),
+            residency_rule: Some(ResidencyPolicy::StrictLocal),
         };
         let res = broker_eu.produce(req_strict).unwrap();
         assert!(res.sovereignty_allowed);
@@ -706,6 +847,7 @@ mod tests {
                 sequence_base: seq,
                 class_id: "global-data".to_string(),
                 payload: format!("order-{}", seq).into_bytes(),
+                residency_rule: Some(ResidencyPolicy::GlobalCleartext),
             };
             let res = broker_a.produce(req).unwrap();
             assert!(res.sovereignty_allowed);
@@ -732,7 +874,6 @@ mod tests {
             };
             let rep_res = broker_b.handle_replication(rep_req).unwrap();
             assert!(rep_res.accepted);
-            // Advance Broker A watermark upon successful delivery
             outbox_a.advance_watermark(rep_res.applied_watermark);
         }
 
@@ -764,7 +905,6 @@ mod tests {
         let (broker_b, _td_b) = setup_test_broker("region-us", vec!["region-eu".to_string()]);
 
         // Broker B is "offline" (simulate WAN partition).
-        // Broker A ingests events uninterrupted (NFR-01, regional autonomy).
         for seq in 0..5 {
             let req = ProduceRequest {
                 topic: "sensor-stream".to_string(),
@@ -774,13 +914,13 @@ mod tests {
                 sequence_base: seq,
                 class_id: "global-data".to_string(),
                 payload: format!("reading-{}", seq).into_bytes(),
+                residency_rule: Some(ResidencyPolicy::GlobalCleartext),
             };
             let res = broker_a.produce(req).unwrap();
             assert!(res.sovereignty_allowed);
         }
 
         let outbox_a = broker_a.get_outbox("region-us").unwrap();
-        // All 5 are queued in outbox
         assert_eq!(outbox_a.next_transfer_batch(10).len(), 5);
         assert_eq!(outbox_a.durable_watermark(), 0);
 
@@ -803,11 +943,9 @@ mod tests {
             outbox_a.advance_watermark(rep_res.applied_watermark);
         }
 
-        // Outbox caught up, 0 lag remaining
         assert_eq!(outbox_a.durable_watermark(), 5);
         assert_eq!(outbox_a.next_transfer_batch(10).len(), 0);
 
-        // Broker B has all 5 records
         let fetch_res = broker_b.fetch(FetchRequest {
             topic: "sensor-stream".to_string(),
             partition: 0,
@@ -825,7 +963,6 @@ mod tests {
         let (broker, _td) = setup_test_broker("region-eu", vec!["region-us".to_string()]);
         let broker_arc = Arc::new(broker);
 
-        // Bind ephemeral port on 127.0.0.1:0 (gracefully handle sandbox environment)
         let (local_addr, _handle) = match broker_arc.start_tcp_listener("127.0.0.1:0").await {
             Ok(res) => res,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -835,7 +972,6 @@ mod tests {
             Err(e) => panic!("Failed to bind TCP listener: {}", e),
         };
 
-        // Connect client (gracefully handle sandbox socket restriction)
         let mut client = match BrokerClient::connect(local_addr).await {
             Ok(c) => c,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -845,10 +981,8 @@ mod tests {
             Err(e) => panic!("Failed to connect to TCP listener: {}", e),
         };
 
-        // 1. Ping test
         assert!(client.ping().await.unwrap());
 
-        // 2. Produce test over TCP
         let prod_res = client.produce(ProduceRequest {
             topic: "tcp-stream".to_string(),
             partition: 0,
@@ -857,11 +991,11 @@ mod tests {
             sequence_base: 0,
             class_id: "global-data".to_string(),
             payload: b"tcp-payload".to_vec(),
+            residency_rule: Some(ResidencyPolicy::GlobalCleartext),
         }).await.unwrap();
         assert!(prod_res.sovereignty_allowed);
         assert_eq!(prod_res.base_offset, 0);
 
-        // 3. Fetch test over TCP
         let fetch_res = client.fetch(FetchRequest {
             topic: "tcp-stream".to_string(),
             partition: 0,

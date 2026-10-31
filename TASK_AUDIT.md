@@ -294,3 +294,16 @@ This ledger records every engineering task, cross-referencing requirements, comp
   4. Built `test_fsync_flush_durability_and_sequential_reads`: wrote 200 records with hardware sync, simulated crash/shutdown by dropping the log, reopened from disk, and validated sequential chunked consumer reads with CRC32 verification.
 * **Verification:** Unit tests verifying persistent segment replay, hardware sync durability, and sequential offset reading (`cargo test -p kamish-log`).
 * **Status:** PASS
+
+### TASK-0019: Ingress and Egress Interceptor Hooks Calling PolicyEngine (`cmd/kamish-broker`)
+* **Timestamp:** 2026-10-31 18:02 UTC
+* **Components:** `cmd/kamish-broker`, `crates/kamish-meta`
+* **Project.md References:** §2.6, §3.A, §3.B, INV-8, FR-01, FR-04
+* **Invariants Checked:** INV-8 (zero unauthorized egress or ingestion outside permitted legal set)
+* **Actions Taken:**
+  1. Integrated the `PolicyEngine` trait contract into `BrokerServer` via `with_policy_engine()` and `set_policy_engine()`.
+  2. Implemented the **Ingress Interceptor Hook**: converts incoming `ProduceRequest` into a canonical `StreamEvent` and calls `policy_engine.validate_ingestion(&stream_event, &self.region_id)`. Rejects non-compliant ingest attempts before disk persistence.
+  3. Implemented the **Egress Interceptor Hook**: checks `policy_engine.validate_replication(&stream_event, &self.region_id, &target_region_id)` before queuing any cross-region replication range into a destination outbox. Prohibits restricted events (such as `StrictLocal`) from escaping the local region.
+  4. Verified with `test_ingress_and_egress_interceptor_hooks`: verified that `StrictLocal` in `EU_WEST` is admitted locally but strictly blocked from entering the `US_EAST` outbox, whereas `RestrictedReplication(vec![UsEast])` is permitted into `US_EAST`.
+* **Verification:** Unit and integration tests (`cargo test -p kamish-broker`).
+* **Status:** PASS
