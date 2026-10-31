@@ -1,27 +1,31 @@
 import React from 'react';
 
-export default function Header({ onNavigate, onOpenSignIn, onOpenContact }) {
+export default function Header({ onNavigate, onOpenContact }) {
   return (
     <header
       style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '2.5rem 3.5rem 1rem',
+        padding: '2rem 3.5rem 0.5rem',
         background: 'transparent',
         position: 'relative',
         zIndex: 50,
+        maxWidth: '1600px',
+        margin: '0 auto',
+        width: '100%',
       }}
     >
       {/* Top Left: Brutalist Logo Box */}
       <div
         className="brutal-logo-box"
         onClick={() => onNavigate('home')}
+        style={{ cursor: 'pointer' }}
       >
         KAMISH
       </div>
 
-      {/* Top Right: 3D Story, Sign in & Contact */}
+      {/* Top Right: 3D Story Link & Contact Pill (Sign in removed) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
         <a
           href="/3d.html"
@@ -35,7 +39,7 @@ export default function Header({ onNavigate, onOpenSignIn, onOpenContact }) {
             fontSize: '0.85rem',
             fontWeight: 700,
             letterSpacing: '0.05em',
-            padding: '6px 16px',
+            padding: '8px 18px',
             borderRadius: '9999px',
             textDecoration: 'none',
             display: 'inline-flex',
@@ -52,51 +56,35 @@ export default function Header({ onNavigate, onOpenSignIn, onOpenContact }) {
             e.currentTarget.style.color = '#ff6b35';
           }}
         >
-          3D Story Website ↗
+          3D Story ↗
         </a>
-
-        <button
-          onClick={onOpenSignIn}
-          style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#ffffff',
-            fontFamily: 'var(--font-main)',
-            fontSize: '1.05rem',
-            fontWeight: 500,
-            cursor: 'pointer',
-            padding: '4px 8px',
-            transition: 'color 0.2s ease',
-          }}
-          onMouseEnter={(e) => (e.target.style.color = '#c084fc')}
-          onMouseLeave={(e) => (e.target.style.color = '#ffffff')}
-        >
-          Sign in
-        </button>
 
         <button
           onClick={onOpenContact}
           style={{
             background: 'rgba(25, 14, 40, 0.75)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+            backdropFilter: 'blur(12px)',
+            border: '1.5px solid rgba(192, 132, 252, 0.35)',
+            boxShadow: '0 4px 18px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
             color: '#ffffff',
-            fontFamily: 'var(--font-main)',
-            fontSize: '1.05rem',
-            fontWeight: 600,
-            padding: '8px 24px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            padding: '10px 28px',
             borderRadius: '9999px',
             cursor: 'pointer',
-            transition: 'all 0.2s ease',
+            transition: 'all 0.25s ease',
           }}
           onMouseEnter={(e) => {
-            e.target.style.borderColor = '#c084fc';
-            e.target.style.boxShadow = '0 6px 20px rgba(168, 85, 247, 0.35)';
+            e.currentTarget.style.borderColor = '#c084fc';
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = '0 6px 24px rgba(168, 85, 247, 0.5)';
           }}
           onMouseLeave={(e) => {
-            e.target.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-            e.target.style.boxShadow = '0 4px 15px rgba(0, 0, 0, 0.4)';
+            e.currentTarget.style.borderColor = 'rgba(192, 132, 252, 0.35)';
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 4px 18px rgba(0, 0, 0, 0.5)';
           }}
         >
           Contact
