@@ -18,20 +18,35 @@ export default function TasksPage({ onSelectTask, onNewTask }) {
           justifyContent: 'space-between',
           alignItems: 'center',
           marginBottom: '2.5rem',
+          flexWrap: 'wrap',
+          gap: '1rem',
         }}
       >
-        <h1
-          style={{
-            fontFamily: 'var(--font-main)',
-            fontSize: '3.5rem',
-            fontWeight: 900,
-            letterSpacing: '0.04em',
-            color: '#ffffff',
-            textTransform: 'uppercase',
-          }}
-        >
-          TASKS
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          <img
+            src="/logo.png"
+            alt="Kamish Dragon Logo"
+            style={{
+              width: '56px',
+              height: '56px',
+              objectFit: 'contain',
+              filter: 'drop-shadow(0 0 12px rgba(192, 132, 252, 0.7))',
+            }}
+          />
+          <h1
+            style={{
+              fontFamily: 'var(--font-main)',
+              fontSize: '3.5rem',
+              fontWeight: 900,
+              letterSpacing: '0.04em',
+              color: '#ffffff',
+              margin: 0,
+              textTransform: 'uppercase',
+            }}
+          >
+            TASKS
+          </h1>
+        </div>
 
         <button
           onClick={onNewTask}

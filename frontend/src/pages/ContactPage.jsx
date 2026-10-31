@@ -19,20 +19,32 @@ export default function ContactPage() {
         padding: '2rem 2rem 120px',
       }}
     >
-      {/* Title matching Page 6 */}
-      <h1
-        style={{
-          fontFamily: 'var(--font-main)',
-          fontSize: '3.5rem',
-          fontWeight: 900,
-          letterSpacing: '0.04em',
-          color: '#ffffff',
-          marginBottom: '2.5rem',
-          textTransform: 'uppercase',
-        }}
-      >
-        CONTACT
-      </h1>
+      {/* Title matching Page 6 with Logo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '2.5rem' }}>
+        <img
+          src="/logo.png"
+          alt="Kamish Dragon Logo"
+          style={{
+            width: '56px',
+            height: '56px',
+            objectFit: 'contain',
+            filter: 'drop-shadow(0 0 12px rgba(192, 132, 252, 0.7))',
+          }}
+        />
+        <h1
+          style={{
+            fontFamily: 'var(--font-main)',
+            fontSize: '3.5rem',
+            fontWeight: 900,
+            letterSpacing: '0.04em',
+            color: '#ffffff',
+            margin: 0,
+            textTransform: 'uppercase',
+          }}
+        >
+          CONTACT
+        </h1>
+      </div>
 
       {/* Form Card matching Page 6 */}
       <div className="brutal-card-offset" style={{ padding: '2.5rem' }}>
