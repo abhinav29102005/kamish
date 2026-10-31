@@ -4,15 +4,22 @@ use kamish_audit::AuditLog;
 use kamish_broker::BrokerServer;
 use kamish_client::{KamishAdminClient, KamishConsumer, KamishProducer};
 use kamish_enforce::Enforcer;
-use kamish_meta::{KamishPolicyEngine, MetadataStore, RegionId, ResidencyPolicy, SyntheticChaosInjector};
-use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
+use kamish_meta::{
+    KamishPolicyEngine, MetadataStore, RegionId, ResidencyPolicy, SyntheticChaosInjector,
+};
+use kamish_policy::{
+    AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
+};
 use rand::rngs::OsRng;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 #[derive(Parser, Debug)]
-#[command(name = "kamish-ctl", about = "Kamish Administrative, Policy, and Demonstration Control Tool")]
+#[command(
+    name = "kamish-ctl",
+    about = "Kamish Administrative, Policy, and Demonstration Control Tool"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -93,7 +100,10 @@ enum Commands {
     },
 }
 
-async fn spawn_ephemeral_broker(region: &str, known_peers: Vec<String>) -> (tempfile::TempDir, String) {
+async fn spawn_ephemeral_broker(
+    region: &str,
+    known_peers: Vec<String>,
+) -> (tempfile::TempDir, String) {
     let temp_dir = tempfile::tempdir().unwrap();
     let signing_key = SigningKey::generate(&mut OsRng);
     let verifying_key = signing_key.verifying_key();
@@ -138,13 +148,21 @@ async fn spawn_ephemeral_broker(region: &str, known_peers: Vec<String>) -> (temp
     let mut trusted = HashSet::new();
     trusted.insert(pubkey_hex);
     let mut cache = PolicyCache::new(trusted);
-    cache.update(signed, chrono::Utc::now().timestamp()).unwrap();
+    cache
+        .update(signed, chrono::Utc::now().timestamp())
+        .unwrap();
 
     let audit = AuditLog::new_in_memory();
     let enforcer = Arc::new(Enforcer::new(region, Arc::new(RwLock::new(cache)), audit));
     let meta = Arc::new(MetadataStore::new());
 
-    let server = Arc::new(BrokerServer::new(region, enforcer, meta, known_peers, temp_dir.path()));
+    let server = Arc::new(BrokerServer::new(
+        region,
+        enforcer,
+        meta,
+        known_peers,
+        temp_dir.path(),
+    ));
     let (local_addr, _handle) = server.start_tcp_listener("127.0.0.1:0").await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(30)).await;
@@ -216,21 +234,18 @@ async fn run_produce_workload(
         let prod_id = base_producer_id + worker_idx as u64;
 
         let handle = tokio::spawn(async move {
-            let producer = KamishProducer::connect(
-                &addr,
-                prod_id,
-                reg,
-                None,
-            )
-            .await?;
+            let producer = KamishProducer::connect(&addr, prod_id, reg, None).await?;
 
             let mut worker_latencies = Vec::with_capacity(per_worker);
             let partition = (worker_idx % 4) as u32;
 
             for seq in 0..per_worker {
-                let payload = format!("{}-w{}-{:08}-payload-bytes", pref, worker_idx, seq).into_bytes();
+                let payload =
+                    format!("{}-w{}-{:08}-payload-bytes", pref, worker_idx, seq).into_bytes();
                 let t0 = Instant::now();
-                producer.send("general", partition, "general", payload, res_rule.clone()).await?;
+                producer
+                    .send("general", partition, "general", payload, res_rule.clone())
+                    .await?;
                 worker_latencies.push(t0.elapsed());
             }
 
@@ -256,10 +271,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Commands::VerifyAudit { log_path } => {
-            println!("\x1b[1;34m[kamish-ctl]\x1b[0m Inspecting cryptographic audit log at: {}", log_path);
+            println!(
+                "\x1b[1;34m[kamish-ctl]\x1b[0m Inspecting cryptographic audit log at: {}",
+                log_path
+            );
             let log = AuditLog::open(&log_path)?;
             let count = log.verify_integrity()?;
-            println!("\x1b[1;32m[kamish-ctl]\x1b[0m  Audit log integrity verified: {} entries unbroken in cryptographic chain.", count);
+            println!(
+                "\x1b[1;32m[kamish-ctl]\x1b[0m  Audit log integrity verified: {} entries unbroken in cryptographic chain.",
+                count
+            );
         }
 
         Commands::Produce {
@@ -292,9 +313,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 addr, region_id, residency
             );
 
-            let producer = KamishProducer::connect(&addr, 1001, region_id.clone(), Some(engine.clone())).await?;
+            let producer =
+                KamishProducer::connect(&addr, 1001, region_id.clone(), Some(engine.clone()))
+                    .await?;
             let ack = producer
-                .send(&topic, partition, &class_id, payload.into_bytes(), residency)
+                .send(
+                    &topic,
+                    partition,
+                    &class_id,
+                    payload.into_bytes(),
+                    residency,
+                )
                 .await?;
 
             println!(
@@ -317,9 +346,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             let mut consumer = KamishConsumer::connect(&addr, offset).await?;
-            let records = consumer.fetch(&topic, partition, &class_id, max_records).await?;
+            let records = consumer
+                .fetch(&topic, partition, &class_id, max_records)
+                .await?;
 
-            println!("\x1b[1;32m[kamish-ctl]\x1b[0m Fetched {} records:", records.len());
+            println!(
+                "\x1b[1;32m[kamish-ctl]\x1b[0m Fetched {} records:",
+                records.len()
+            );
             for record in records {
                 let payload_str = String::from_utf8_lossy(&record.payload);
                 println!(
@@ -340,7 +374,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 addr, source_region
             );
             let admin = KamishAdminClient::connect(&addr).await?;
-            let watermark = admin.get_watermark(&topic, partition, &source_region).await?;
+            let watermark = admin
+                .get_watermark(&topic, partition, &source_region)
+                .await?;
             println!(
                 "\x1b[1;32m[kamish-ctl]\x1b[0m  Durable Replication Watermark for {}:{}: {}",
                 topic, partition, watermark
@@ -348,9 +384,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         Commands::Demo => {
-            println!("\x1b[1;35m========================================================================\x1b[0m");
-            println!("\x1b[1;36m  KAMISH BROKER — DEVELOPER B LIVE DEMO SCENARIOS RUNNER (CLI)\x1b[0m");
-            println!("\x1b[1;35m========================================================================\x1b[0m");
+            println!(
+                "\x1b[1;35m========================================================================\x1b[0m"
+            );
+            println!(
+                "\x1b[1;36m  KAMISH BROKER — DEVELOPER B LIVE DEMO SCENARIOS RUNNER (CLI)\x1b[0m"
+            );
+            println!(
+                "\x1b[1;35m========================================================================\x1b[0m"
+            );
 
             let status = std::process::Command::new("bash")
                 .arg("scripts/run_demo.sh")
@@ -362,36 +404,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        Commands::Benchmark { count, addr, concurrency } => {
-            println!("\x1b[1;35m==============================================================================\x1b[0m");
-            println!("\x1b[1;36m  KAMISH BROKER — SUSTAINED THROUGHPUT & LATENCY BENCHMARK                    \x1b[0m");
-            println!("\x1b[1;36m  Measuring Max Sustained Throughput (msg/s) and p50/p99 Latency             \x1b[0m");
-            println!("\x1b[1;35m==============================================================================\x1b[0m");
+        Commands::Benchmark {
+            count,
+            addr,
+            concurrency,
+        } => {
+            println!(
+                "\x1b[1;35m==============================================================================\x1b[0m"
+            );
+            println!(
+                "\x1b[1;36m  KAMISH BROKER — SUSTAINED THROUGHPUT & LATENCY BENCHMARK                    \x1b[0m"
+            );
+            println!(
+                "\x1b[1;36m  Measuring Max Sustained Throughput (msg/s) and p50/p99 Latency             \x1b[0m"
+            );
+            println!(
+                "\x1b[1;35m==============================================================================\x1b[0m"
+            );
 
             let (_tmp, target_addr) = match addr {
                 Some(a) => (None, a),
                 None => {
-                    println!("\x1b[1;34m[Benchmark]\x1b[0m Initializing isolated broker with active outbox replication...");
-                    let (tmp, a) = spawn_ephemeral_broker("EU_WEST", vec!["US_EAST".to_string()]).await;
+                    println!(
+                        "\x1b[1;34m[Benchmark]\x1b[0m Initializing isolated broker with active outbox replication..."
+                    );
+                    let (tmp, a) =
+                        spawn_ephemeral_broker("EU_WEST", vec!["US_EAST".to_string()]).await;
                     (Some(tmp), a)
                 }
             };
 
             let effective_concurrency = std::cmp::max(1, concurrency);
             println!(">> Target Broker Address  : {}", target_addr);
-            println!(">> Requested Concurrency  : {} worker task(s)", effective_concurrency);
+            println!(
+                ">> Requested Concurrency  : {} worker task(s)",
+                effective_concurrency
+            );
 
             // 1. Warmup
             print!("\x1b[1;33m>> Warming up pipelines (100 events)...\x1b[0m");
-            let warmup_producer = KamishProducer::connect(&target_addr, 9999, RegionId::EuWest, None).await?;
+            let warmup_producer =
+                KamishProducer::connect(&target_addr, 9999, RegionId::EuWest, None).await?;
             for i in 0..100 {
                 let payload = format!("warmup-{}", i).into_bytes();
-                warmup_producer.send("general", 0, "general", payload, ResidencyPolicy::GlobalCleartext).await?;
+                warmup_producer
+                    .send(
+                        "general",
+                        0,
+                        "general",
+                        payload,
+                        ResidencyPolicy::GlobalCleartext,
+                    )
+                    .await?;
             }
             println!(" Done.\n");
 
             // 2. Normal Link Workload
-            println!("\x1b[1;33m>> [Scenario 1] Running Sustained Benchmark on NORMAL LINK ({} records)...\x1b[0m", count);
+            println!(
+                "\x1b[1;33m>> [Scenario 1] Running Sustained Benchmark on NORMAL LINK ({} records)...\x1b[0m",
+                count
+            );
             let normal_res = run_produce_workload(
                 &target_addr,
                 count,
@@ -400,24 +472,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 RegionId::EuWest,
                 ResidencyPolicy::GlobalCleartext,
                 "norm",
-            ).await?;
+            )
+            .await?;
 
             println!("  Total Messages Produced : {}", normal_res.total_messages);
-            println!("  Total Elapsed Time      : {:.3} s", normal_res.elapsed_secs);
-            println!("  Sustained Throughput    : \x1b[1;32m{:.1} msg/s\x1b[0m", normal_res.throughput_msg_per_sec);
+            println!(
+                "  Total Elapsed Time      : {:.3} s",
+                normal_res.elapsed_secs
+            );
+            println!(
+                "  Sustained Throughput    : \x1b[1;32m{:.1} msg/s\x1b[0m",
+                normal_res.throughput_msg_per_sec
+            );
             println!("  Min Latency             : {:.1} µs", normal_res.min_us);
-            println!("  p50 Latency (median)    : \x1b[1;36m{:.1} µs\x1b[0m", normal_res.p50_us);
+            println!(
+                "  p50 Latency (median)    : \x1b[1;36m{:.1} µs\x1b[0m",
+                normal_res.p50_us
+            );
             println!("  p90 Latency             : {:.1} µs", normal_res.p90_us);
-            println!("  p99 Latency (tail)      : \x1b[1;33m{:.1} µs ({:.3} ms)\x1b[0m", normal_res.p99_us, normal_res.p99_us / 1000.0);
-            println!("  Max Latency             : {:.1} µs ({:.3} ms)", normal_res.max_us, normal_res.max_us / 1000.0);
+            println!(
+                "  p99 Latency (tail)      : \x1b[1;33m{:.1} µs ({:.3} ms)\x1b[0m",
+                normal_res.p99_us,
+                normal_res.p99_us / 1000.0
+            );
+            println!(
+                "  Max Latency             : {:.1} µs ({:.3} ms)",
+                normal_res.max_us,
+                normal_res.max_us / 1000.0
+            );
 
             // 3. Degraded Link Workload
-            println!("\n\x1b[1;33m>> [Scenario 2] Injecting 300ms WAN RTT Chaos on Inter-Region Route...\x1b[0m");
+            println!(
+                "\n\x1b[1;33m>> [Scenario 2] Injecting 300ms WAN RTT Chaos on Inter-Region Route...\x1b[0m"
+            );
             let chaos = SyntheticChaosInjector::new();
             chaos.set_delay(300);
 
             let degraded_count = std::cmp::max(effective_concurrency * 50, count / 2);
-            println!("\x1b[1;33m>> Running Ingestion Benchmark under DEGRADED SLOW LINK ({} records)...\x1b[0m", degraded_count);
+            println!(
+                "\x1b[1;33m>> Running Ingestion Benchmark under DEGRADED SLOW LINK ({} records)...\x1b[0m",
+                degraded_count
+            );
             let degraded_res = run_produce_workload(
                 &target_addr,
                 degraded_count,
@@ -426,24 +521,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 RegionId::EuWest,
                 ResidencyPolicy::GlobalCleartext,
                 "degraded",
-            ).await?;
+            )
+            .await?;
 
-            println!("  Total Messages Produced : {}", degraded_res.total_messages);
-            println!("  Total Elapsed Time      : {:.3} s", degraded_res.elapsed_secs);
-            println!("  Sustained Throughput    : \x1b[1;32m{:.1} msg/s\x1b[0m", degraded_res.throughput_msg_per_sec);
+            println!(
+                "  Total Messages Produced : {}",
+                degraded_res.total_messages
+            );
+            println!(
+                "  Total Elapsed Time      : {:.3} s",
+                degraded_res.elapsed_secs
+            );
+            println!(
+                "  Sustained Throughput    : \x1b[1;32m{:.1} msg/s\x1b[0m",
+                degraded_res.throughput_msg_per_sec
+            );
             println!("  Min Latency             : {:.1} µs", degraded_res.min_us);
-            println!("  p50 Latency (median)    : \x1b[1;36m{:.1} µs\x1b[0m", degraded_res.p50_us);
+            println!(
+                "  p50 Latency (median)    : \x1b[1;36m{:.1} µs\x1b[0m",
+                degraded_res.p50_us
+            );
             println!("  p90 Latency             : {:.1} µs", degraded_res.p90_us);
-            println!("  p99 Latency (tail)      : \x1b[1;33m{:.1} µs ({:.3} ms)\x1b[0m", degraded_res.p99_us, degraded_res.p99_us / 1000.0);
-            println!("  Max Latency             : {:.1} µs ({:.3} ms)", degraded_res.max_us, degraded_res.max_us / 1000.0);
+            println!(
+                "  p99 Latency (tail)      : \x1b[1;33m{:.1} µs ({:.3} ms)\x1b[0m",
+                degraded_res.p99_us,
+                degraded_res.p99_us / 1000.0
+            );
+            println!(
+                "  Max Latency             : {:.1} µs ({:.3} ms)",
+                degraded_res.max_us,
+                degraded_res.max_us / 1000.0
+            );
 
             // 4. Comparative Analysis Table
-            println!("\n\x1b[1;35m==============================================================================\x1b[0m");
-            println!("\x1b[1;32m  COMPARATIVE PERFORMANCE MATRIX: NORMAL vs DEGRADED LINK                    \x1b[0m");
-            println!("\x1b[1;35m==============================================================================\x1b[0m");
-            println!("+-----------------------------+-----------------------+-----------------------+");
-            println!("| Metric                      | Normal Link           | Degraded Link (300ms) |");
-            println!("+-----------------------------+-----------------------+-----------------------+");
+            println!(
+                "\n\x1b[1;35m==============================================================================\x1b[0m"
+            );
+            println!(
+                "\x1b[1;32m  COMPARATIVE PERFORMANCE MATRIX: NORMAL vs DEGRADED LINK                    \x1b[0m"
+            );
+            println!(
+                "\x1b[1;35m==============================================================================\x1b[0m"
+            );
+            println!(
+                "+-----------------------------+-----------------------+-----------------------+"
+            );
+            println!(
+                "| Metric                      | Normal Link           | Degraded Link (300ms) |"
+            );
+            println!(
+                "+-----------------------------+-----------------------+-----------------------+"
+            );
             println!(
                 "| Sustained Throughput        | {:>17.1} msg/s | {:>17.1} msg/s |",
                 normal_res.throughput_msg_per_sec, degraded_res.throughput_msg_per_sec
@@ -464,9 +592,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "| Max Latency                 | {:>19.1} µs | {:>19.1} µs |",
                 normal_res.max_us, degraded_res.max_us
             );
-            println!("| Ingestion Decoupling        |              ISOLATED |              ISOLATED |");
-            println!("+-----------------------------+-----------------------+-----------------------+");
-            println!("\x1b[1;32m[PASS] Ingestion latency confirmed sub-millisecond and fully isolated from WAN link degradation!\x1b[0m\n");
+            println!(
+                "| Ingestion Decoupling        |              ISOLATED |              ISOLATED |"
+            );
+            println!(
+                "+-----------------------------+-----------------------+-----------------------+"
+            );
+            println!(
+                "\x1b[1;32m[PASS] Ingestion latency confirmed sub-millisecond and fully isolated from WAN link degradation!\x1b[0m\n"
+            );
         }
     }
 

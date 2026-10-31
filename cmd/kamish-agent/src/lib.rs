@@ -139,20 +139,37 @@ impl ReplicationAgent {
     /// Registers a peer broker node for cross-region replication transfers.
     pub fn register_peer(&self, region: impl Into<String>, broker: Arc<BrokerServer>) {
         let region_str = region.into();
-        self.peer_brokers.write().unwrap().insert(region_str.clone(), broker);
-        self.link_metrics.write().unwrap().entry(region_str).or_default();
+        self.peer_brokers
+            .write()
+            .unwrap()
+            .insert(region_str.clone(), broker);
+        self.link_metrics
+            .write()
+            .unwrap()
+            .entry(region_str)
+            .or_default();
     }
 
     /// Registers a remote peer broker address (e.g. "127.0.0.1:8082") for TCP transfers.
     pub fn register_remote_peer(&self, region: impl Into<String>, addr: impl Into<String>) {
         let region_str = region.into();
-        self.peer_addresses.write().unwrap().insert(region_str.clone(), addr.into());
-        self.link_metrics.write().unwrap().entry(region_str).or_default();
+        self.peer_addresses
+            .write()
+            .unwrap()
+            .insert(region_str.clone(), addr.into());
+        self.link_metrics
+            .write()
+            .unwrap()
+            .entry(region_str)
+            .or_default();
     }
 
     /// Sets simulated link metrics (RTT, packet loss) for slow-link testing (§4.2).
     pub fn set_link_metrics(&self, target_region: &str, metrics: LinkMetrics) {
-        self.link_metrics.write().unwrap().insert(target_region.to_string(), metrics);
+        self.link_metrics
+            .write()
+            .unwrap()
+            .insert(target_region.to_string(), metrics);
     }
 
     /// Enqueues a replication task into the bounded async queue, applying non-blocking backpressure if full.
@@ -209,11 +226,9 @@ impl ReplicationAgent {
             metrics,
         };
 
-        let picked_path = self.router.pick_path(
-            &task.target_region,
-            &task.range.class_id,
-            &[candidate],
-        );
+        let picked_path =
+            self.router
+                .pick_path(&task.target_region, &task.range.class_id, &[candidate]);
 
         if picked_path.is_none() {
             return Err(AgentError::NoLegalRoute {
@@ -492,11 +507,9 @@ impl ReplicationAgent {
                 metrics,
             };
 
-            let picked_path = self.router.pick_path(
-                target_region,
-                &range.class_id,
-                &[direct_candidate],
-            );
+            let picked_path =
+                self.router
+                    .pick_path(target_region, &range.class_id, &[direct_candidate]);
 
             let _path = match picked_path {
                 Some(p) => p,
@@ -560,7 +573,10 @@ impl ReplicationAgent {
     }
 
     /// Performs a replication drain pass connecting over TCP to a remote broker daemon.
-    pub async fn step_replication_tcp(&self, target_region: &str) -> Result<TransferSummary, AgentError> {
+    pub async fn step_replication_tcp(
+        &self,
+        target_region: &str,
+    ) -> Result<TransferSummary, AgentError> {
         let addr = {
             let addrs = self.peer_addresses.read().unwrap();
             addrs
@@ -587,9 +603,9 @@ impl ReplicationAgent {
             .copied()
             .unwrap_or_default();
 
-        let mut client = BrokerClient::connect(&addr)
-            .await
-            .map_err(|e| AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e)))?;
+        let mut client = BrokerClient::connect(&addr).await.map_err(|e| {
+            AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e))
+        })?;
 
         let mut summary = TransferSummary::default();
 
@@ -600,11 +616,9 @@ impl ReplicationAgent {
                 metrics,
             };
 
-            let picked_path = self.router.pick_path(
-                target_region,
-                &range.class_id,
-                &[direct_candidate],
-            );
+            let picked_path =
+                self.router
+                    .pick_path(target_region, &range.class_id, &[direct_candidate]);
 
             if picked_path.is_none() {
                 continue;
@@ -702,11 +716,19 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
     use kamish_broker::ProduceRequest;
-    use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
+    use kamish_policy::{
+        AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
+    };
     use rand::rngs::OsRng;
     use std::collections::HashSet;
 
-    fn setup_agent_environment() -> (ReplicationAgent, Arc<BrokerServer>, Arc<BrokerServer>, tempfile::TempDir, tempfile::TempDir) {
+    fn setup_agent_environment() -> (
+        ReplicationAgent,
+        Arc<BrokerServer>,
+        Arc<BrokerServer>,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
         let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
         let pubkey_hex = hex::encode(verifying_key.to_bytes());
@@ -754,8 +776,16 @@ mod tests {
         let audit_a = AuditLog::new_in_memory();
         let audit_b = AuditLog::new_in_memory();
 
-        let enforcer_a = Arc::new(kamish_enforce::Enforcer::new("region-eu", cache_arc.clone(), audit_a));
-        let enforcer_b = Arc::new(kamish_enforce::Enforcer::new("region-us", cache_arc, audit_b));
+        let enforcer_a = Arc::new(kamish_enforce::Enforcer::new(
+            "region-eu",
+            cache_arc.clone(),
+            audit_a,
+        ));
+        let enforcer_b = Arc::new(kamish_enforce::Enforcer::new(
+            "region-us",
+            cache_arc,
+            audit_b,
+        ));
 
         let meta_a = Arc::new(MetadataStore::new());
         let meta_b = Arc::new(MetadataStore::new());
@@ -763,8 +793,20 @@ mod tests {
         let td_a = tempfile::tempdir().unwrap();
         let td_b = tempfile::tempdir().unwrap();
 
-        let broker_a = Arc::new(BrokerServer::new("region-eu", enforcer_a.clone(), meta_a.clone(), vec!["region-us".to_string()], td_a.path()));
-        let broker_b = Arc::new(BrokerServer::new("region-us", enforcer_b, meta_b, vec!["region-eu".to_string()], td_b.path()));
+        let broker_a = Arc::new(BrokerServer::new(
+            "region-eu",
+            enforcer_a.clone(),
+            meta_a.clone(),
+            vec!["region-us".to_string()],
+            td_a.path(),
+        ));
+        let broker_b = Arc::new(BrokerServer::new(
+            "region-us",
+            enforcer_b,
+            meta_b,
+            vec!["region-eu".to_string()],
+            td_b.path(),
+        ));
 
         let router = RouteSelector::new("region-eu", (*enforcer_a).clone());
         let agent = ReplicationAgent::new("region-eu", broker_a.clone(), meta_a, router);
@@ -808,13 +850,15 @@ mod tests {
         assert_eq!(lag_metric_after.remote_durable_watermark, 4);
 
         // 4. Broker B has all 4 records stored in exact offset order (INV-5)
-        let fetch_res = broker_b.fetch(kamish_broker::FetchRequest {
-            topic: "orders".to_string(),
-            partition: 0,
-            class_id: "global-stream".to_string(),
-            start_offset: 0,
-            max_records: 10,
-        }).unwrap();
+        let fetch_res = broker_b
+            .fetch(kamish_broker::FetchRequest {
+                topic: "orders".to_string(),
+                partition: 0,
+                class_id: "global-stream".to_string(),
+                start_offset: 0,
+                max_records: 10,
+            })
+            .unwrap();
         assert_eq!(fetch_res.records.len(), 4);
         assert_eq!(fetch_res.records[3].payload, b"payload-3");
     }
@@ -824,25 +868,30 @@ mod tests {
         let (agent, broker_a, _broker_b, _td_a, _td_b) = setup_agent_environment();
 
         // Simulate a degraded slow link: 350ms RTT, 5% loss
-        agent.set_link_metrics("region-us", LinkMetrics {
-            rtt_ms: 350.0,
-            loss_rate: 0.05,
-            queue_delay_ms: 50.0,
-            cost_weight: 1.0,
-            congestion_risk: 0.4,
-        });
+        agent.set_link_metrics(
+            "region-us",
+            LinkMetrics {
+                rtt_ms: 350.0,
+                loss_rate: 0.05,
+                queue_delay_ms: 50.0,
+                cost_weight: 1.0,
+                congestion_risk: 0.4,
+            },
+        );
 
         // Ingest into Broker A
-        broker_a.produce(ProduceRequest {
-            topic: "events".to_string(),
-            partition: 0,
-            producer_id: 9001,
-            producer_epoch: 1,
-            sequence_base: 0,
-            class_id: "global-stream".to_string(),
-            payload: b"event-data".to_vec(),
-            residency_rule: None,
-        }).unwrap();
+        broker_a
+            .produce(ProduceRequest {
+                topic: "events".to_string(),
+                partition: 0,
+                producer_id: 9001,
+                producer_epoch: 1,
+                sequence_base: 0,
+                class_id: "global-stream".to_string(),
+                payload: b"event-data".to_vec(),
+                residency_rule: None,
+            })
+            .unwrap();
 
         // Lag check reflects the slow link RTT accurately
         let lag = agent.get_replication_lag("region-us", "events", 0, 1);
@@ -920,16 +969,18 @@ mod tests {
         let agent = Arc::new(agent);
 
         // Ingest into Broker A
-        broker_a.produce(ProduceRequest {
-            topic: "events".to_string(),
-            partition: 0,
-            producer_id: 100,
-            producer_epoch: 1,
-            sequence_base: 0,
-            class_id: "global-stream".to_string(),
-            payload: b"first-event".to_vec(),
-            residency_rule: None,
-        }).unwrap();
+        broker_a
+            .produce(ProduceRequest {
+                topic: "events".to_string(),
+                partition: 0,
+                producer_id: 100,
+                producer_epoch: 1,
+                sequence_base: 0,
+                class_id: "global-stream".to_string(),
+                payload: b"first-event".to_vec(),
+                residency_rule: None,
+            })
+            .unwrap();
 
         // Enqueue from outbox to async bounded queue
         let enqueued = agent.enqueue_pending_outbox_tasks("region-us", 10).unwrap();
@@ -945,13 +996,15 @@ mod tests {
         let outbox = broker_a.get_outbox("region-us").unwrap();
         assert_eq!(outbox.durable_watermark(), 1);
 
-        let fetch = broker_b.fetch(kamish_broker::FetchRequest {
-            topic: "events".to_string(),
-            partition: 0,
-            class_id: "global-stream".to_string(),
-            start_offset: 0,
-            max_records: 5,
-        }).unwrap();
+        let fetch = broker_b
+            .fetch(kamish_broker::FetchRequest {
+                topic: "events".to_string(),
+                partition: 0,
+                class_id: "global-stream".to_string(),
+                start_offset: 0,
+                max_records: 5,
+            })
+            .unwrap();
         assert_eq!(fetch.records.len(), 1);
         assert_eq!(fetch.records[0].payload, b"first-event");
 
@@ -964,16 +1017,18 @@ mod tests {
 
         // 1. Ingest 4 records [0, 1, 2, 3] into Broker A
         for i in 0..4 {
-            broker_a.produce(ProduceRequest {
-                topic: "orders".to_string(),
-                partition: 0,
-                producer_id: 200,
-                producer_epoch: 1,
-                sequence_base: i,
-                class_id: "global-stream".to_string(),
-                payload: format!("order-{}", i).into_bytes(),
-                residency_rule: None,
-            }).unwrap();
+            broker_a
+                .produce(ProduceRequest {
+                    topic: "orders".to_string(),
+                    partition: 0,
+                    producer_id: 200,
+                    producer_epoch: 1,
+                    sequence_base: i,
+                    class_id: "global-stream".to_string(),
+                    payload: format!("order-{}", i).into_bytes(),
+                    residency_rule: None,
+                })
+                .unwrap();
         }
 
         // 2. Broker B manually receives records 0 and 1 (simulating transfer before partition)
@@ -1010,7 +1065,10 @@ mod tests {
         assert_eq!(outbox.durable_watermark(), 0);
 
         // 3. Reconnect! ReplicationAgent runs handshake_and_sync_cursor
-        let synced_watermark = agent.handshake_and_sync_cursor("region-us", "orders", 0).await.unwrap();
+        let synced_watermark = agent
+            .handshake_and_sync_cursor("region-us", "orders", 0)
+            .await
+            .unwrap();
         assert_eq!(synced_watermark, 2);
 
         // Local outbox cursor is now synchronized to 2, and records 0..2 are trimmed!
@@ -1045,13 +1103,15 @@ mod tests {
         assert_eq!(summary.advanced_watermark, 4);
 
         // 6. Broker B has all 4 records with dense continuous monotonic offsets [0, 1, 2, 3] and 0 duplicate writes!
-        let fetched = broker_b.fetch(kamish_broker::FetchRequest {
-            topic: "orders".to_string(),
-            partition: 0,
-            class_id: "global-stream".to_string(),
-            start_offset: 0,
-            max_records: 10,
-        }).unwrap();
+        let fetched = broker_b
+            .fetch(kamish_broker::FetchRequest {
+                topic: "orders".to_string(),
+                partition: 0,
+                class_id: "global-stream".to_string(),
+                start_offset: 0,
+                max_records: 10,
+            })
+            .unwrap();
         assert_eq!(fetched.records.len(), 4);
         for (idx, rec) in fetched.records.iter().enumerate() {
             assert_eq!(rec.base_offset, idx as u64);
@@ -1059,4 +1119,3 @@ mod tests {
         }
     }
 }
-

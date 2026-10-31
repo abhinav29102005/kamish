@@ -7,7 +7,6 @@
 //! - FR-01: Reject operations where data class is not permitted in target region.
 //! - FR-08: Promote a new owner only if policy lists it as eligible.
 
-
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -25,7 +24,9 @@ pub enum PolicyError {
     #[error("Policy is stale: current time {now_sec} exceeds expiry {expiry_sec}")]
     PolicyStale { now_sec: i64, expiry_sec: i64 },
 
-    #[error("Policy version rollback rejected: current cached version is {cached}, received {received}")]
+    #[error(
+        "Policy version rollback rejected: current cached version is {cached}, received {received}"
+    )]
     VersionRollback { cached: u64, received: u64 },
 
     #[error("Class '{0}' not found in policy")]
@@ -127,21 +128,23 @@ impl SignedPolicy {
     pub fn verify_signature(&self) -> Result<(), PolicyError> {
         let pubkey_bytes = hex::decode(&self.policy.issuer_pubkey_hex)
             .map_err(|e| PolicyError::SignatureError(format!("Invalid pubkey hex: {}", e)))?;
-        let pubkey_arr: [u8; 32] = pubkey_bytes.try_into()
+        let pubkey_arr: [u8; 32] = pubkey_bytes
+            .try_into()
             .map_err(|_| PolicyError::SignatureError("Public key must be 32 bytes".into()))?;
         let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
             .map_err(|e| PolicyError::SignatureError(format!("Invalid verifying key: {}", e)))?;
 
         let sig_bytes = hex::decode(&self.signature_hex)
             .map_err(|e| PolicyError::SignatureError(format!("Invalid signature hex: {}", e)))?;
-        let sig_arr: [u8; 64] = sig_bytes.try_into()
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
             .map_err(|_| PolicyError::SignatureError("Signature must be 64 bytes".into()))?;
         let signature = Signature::from_bytes(&sig_arr);
 
         let digest = self.policy.canonical_digest();
-        verifying_key
-            .verify(&digest, &signature)
-            .map_err(|e| PolicyError::SignatureError(format!("Signature verification failed: {}", e)))
+        verifying_key.verify(&digest, &signature).map_err(|e| {
+            PolicyError::SignatureError(format!("Signature verification failed: {}", e))
+        })
     }
 
     /// Checks if the policy is currently within its validity time window.
@@ -171,8 +174,13 @@ impl PolicyCache {
     /// Updates cache with a new policy, enforcing INV-9 (signature valid, issuer trusted, version monotonic).
     pub fn update(&mut self, signed: SignedPolicy, now_sec: i64) -> Result<(), PolicyError> {
         // 1. Verify issuer is trusted
-        if !self.trusted_issuer_pubkeys.contains(&signed.policy.issuer_pubkey_hex) {
-            return Err(PolicyError::SignatureError("Untrusted policy issuer".into()));
+        if !self
+            .trusted_issuer_pubkeys
+            .contains(&signed.policy.issuer_pubkey_hex)
+        {
+            return Err(PolicyError::SignatureError(
+                "Untrusted policy issuer".into(),
+            ));
         }
 
         // 2. Cryptographic signature check (INV-9)

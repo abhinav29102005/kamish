@@ -66,7 +66,11 @@ struct OutboxInner {
 }
 
 impl DestinationOutbox {
-    pub fn new(target_region: impl Into<String>, max_bytes: usize, backpressure: BackpressureRule) -> Self {
+    pub fn new(
+        target_region: impl Into<String>,
+        max_bytes: usize,
+        backpressure: BackpressureRule,
+    ) -> Self {
         Self {
             target_region: target_region.into(),
             max_bytes,

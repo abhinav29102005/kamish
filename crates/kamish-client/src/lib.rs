@@ -6,11 +6,13 @@
 //! - Client-side residency validation hooks with Developer B's `PolicyEngine`
 //! - Real-time replication lag monitoring and administration
 
-use kamish_broker::{BrokerClient, BrokerRequest, BrokerResponse, FetchRequest, ProduceRequest, ProduceResponse};
+use kamish_broker::{
+    BrokerClient, BrokerRequest, BrokerResponse, FetchRequest, ProduceRequest, ProduceResponse,
+};
 use kamish_log::RecordEnvelope;
 use kamish_meta::{PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
 
@@ -122,7 +124,10 @@ pub struct KamishConsumer {
 }
 
 impl KamishConsumer {
-    pub async fn connect<A: ToSocketAddrs>(addr: A, start_offset: u64) -> Result<Self, ClientError> {
+    pub async fn connect<A: ToSocketAddrs>(
+        addr: A,
+        start_offset: u64,
+    ) -> Result<Self, ClientError> {
         let client = BrokerClient::connect(addr)
             .await
             .map_err(|e| ClientError::Network(e.to_string()))?;
@@ -188,7 +193,12 @@ impl KamishAdminClient {
     }
 
     /// Queries the remote durable watermark for a partition.
-    pub async fn get_watermark(&self, topic: &str, partition: u32, source_region: &str) -> Result<u64, ClientError> {
+    pub async fn get_watermark(
+        &self,
+        topic: &str,
+        partition: u32,
+        source_region: &str,
+    ) -> Result<u64, ClientError> {
         let req = BrokerRequest::GetWatermark {
             topic: topic.to_string(),
             partition,
@@ -212,13 +222,15 @@ impl KamishAdminClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
     use kamish_broker::BrokerServer;
     use kamish_enforce::Enforcer;
     use kamish_meta::MetadataStore;
-    use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
+    use kamish_policy::{
+        AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
+    };
     use rand::rngs::OsRng;
-    use ed25519_dalek::SigningKey;
     use std::collections::{HashMap, HashSet};
     use std::sync::RwLock;
 
@@ -266,13 +278,21 @@ mod tests {
         let mut trusted = HashSet::new();
         trusted.insert(pubkey_hex);
         let mut cache = PolicyCache::new(trusted);
-        cache.update(signed, chrono::Utc::now().timestamp()).unwrap();
+        cache
+            .update(signed, chrono::Utc::now().timestamp())
+            .unwrap();
 
         let audit = AuditLog::new_in_memory();
         let enforcer = Arc::new(Enforcer::new(region, Arc::new(RwLock::new(cache)), audit));
         let meta = Arc::new(MetadataStore::new());
 
-        let server = Arc::new(BrokerServer::new(region, enforcer, meta, Vec::new(), temp_dir.path()));
+        let server = Arc::new(BrokerServer::new(
+            region,
+            enforcer,
+            meta,
+            Vec::new(),
+            temp_dir.path(),
+        ));
         let (local_addr, _handle) = server.start_tcp_listener("127.0.0.1:0").await.unwrap();
         let addr = local_addr.to_string();
 
@@ -296,7 +316,11 @@ mod tests {
         .await
         {
             Ok(p) => p,
-            Err(ClientError::Network(e)) if e.contains("os error 10013") || e.contains("forbidden") || e.contains("Permission denied") => {
+            Err(ClientError::Network(e))
+                if e.contains("os error 10013")
+                    || e.contains("forbidden")
+                    || e.contains("Permission denied") =>
+            {
                 eprintln!("Skipping TCP socket test in restricted sandbox: {}", e);
                 return;
             }
@@ -304,7 +328,13 @@ mod tests {
         };
 
         let ack = producer
-            .send("telemetry", 0, "general", b"sample-reading".to_vec(), ResidencyPolicy::GlobalCleartext)
+            .send(
+                "telemetry",
+                0,
+                "general",
+                b"sample-reading".to_vec(),
+                ResidencyPolicy::GlobalCleartext,
+            )
             .await
             .unwrap();
         assert_eq!(ack.base_offset, 0);

@@ -57,7 +57,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let router = RouteSelector::new(&args.local_region, (*enforcer).clone());
-    let agent = Arc::new(ReplicationAgent::new(&args.local_region, broker, meta, router));
+    let agent = Arc::new(ReplicationAgent::new(
+        &args.local_region,
+        broker,
+        meta,
+        router,
+    ));
 
     if let (Some(target), Some(addr)) = (&args.target_region, &args.target_addr) {
         agent.register_remote_peer(target, addr);

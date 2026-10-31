@@ -102,6 +102,7 @@ pub struct AuditEntry {
 
 impl AuditEntry {
     /// Computes the SHA-256 hash over all entry metadata and the preceding hash.
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_hash(
         sequence: u64,
         timestamp_ns: i64,
@@ -247,6 +248,7 @@ impl AuditLog {
     }
 
     /// Appends a new decision to the hash-chained audit log.
+    #[allow(clippy::too_many_arguments)]
     pub fn record(
         &self,
         action: AuditAction,
@@ -296,10 +298,7 @@ impl AuditLog {
 
         // Write to disk if persistence is configured
         if let Some(ref path) = inner.file_path {
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)?;
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
             let serialized = serde_json::to_string(&entry)?;
             writeln!(file, "{}", serialized)?;
             file.flush()?;

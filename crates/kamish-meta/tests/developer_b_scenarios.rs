@@ -33,14 +33,14 @@ fn test_scenario_a_residency_enforcement_demo() {
     );
 
     let ingest_res = policy_engine.validate_ingestion(&sovereign_event, &RegionId::EuWest);
-    assert!(ingest_res.is_ok(), "Local ingestion in home region EU_WEST must succeed");
+    assert!(
+        ingest_res.is_ok(),
+        "Local ingestion in home region EU_WEST must succeed"
+    );
 
     // 2. Replication worker attempts egress transfer from EU_WEST to US_EAST
-    let replication_res = policy_engine.validate_replication(
-        &sovereign_event,
-        &RegionId::EuWest,
-        &RegionId::UsEast,
-    );
+    let replication_res =
+        policy_engine.validate_replication(&sovereign_event, &RegionId::EuWest, &RegionId::UsEast);
 
     // 3. MUST be blocked with ReplicationDenied
     assert!(
@@ -48,16 +48,24 @@ fn test_scenario_a_residency_enforcement_demo() {
         "StrictLocal record MUST NOT be allowed to replicate to US_EAST"
     );
     let violation = replication_res.unwrap_err();
-    assert!(matches!(violation, PolicyViolation::ReplicationDenied { .. }));
+    assert!(matches!(
+        violation,
+        PolicyViolation::ReplicationDenied { .. }
+    ));
 
     // 4. Verify cryptographic hash chain has the rejection event
     let entries = audit_log.entries();
     assert_eq!(entries.len(), 2);
-    assert_eq!(entries[1].action, kamish_audit::AuditAction::ReplicationSender);
+    assert_eq!(
+        entries[1].action,
+        kamish_audit::AuditAction::ReplicationSender
+    );
     assert_eq!(entries[1].outcome, kamish_audit::DecisionOutcome::Deny);
     assert_eq!(entries[1].target_region, "US_EAST");
     assert!(audit_log.verify_integrity().is_ok());
-    println!(" [DEMO SCENARIO A PASSED] Residency enforcement successfully blocked unauthorized egress to US_EAST with zero-payload audit logging.");
+    println!(
+        " [DEMO SCENARIO A PASSED] Residency enforcement successfully blocked unauthorized egress to US_EAST with zero-payload audit logging."
+    );
 }
 
 /// Scenario B (Gate 3 / Demo B Ready):
@@ -74,7 +82,9 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
     // 1. Measure local produce throughput under healthy link
     let start_local = Instant::now();
     for i in 0..100 {
-        let offset = local_log.append(1, "orders", 1, format!("record-{}", i).into_bytes()).unwrap();
+        let offset = local_log
+            .append(1, "orders", 1, format!("record-{}", i).into_bytes())
+            .unwrap();
         metrics.set_local_committed("orders", 0, offset + 1);
         let _ = outbox.enqueue(OutboxRange {
             topic: "orders".to_string(),
@@ -91,7 +101,10 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
 
     // Replicate healthy batch
     metrics.set_remote_acked("orders", 0, RegionId::UsEast, 100);
-    assert_eq!(metrics.get_replication_lag("orders", 0, &RegionId::UsEast), 0);
+    assert_eq!(
+        metrics.get_replication_lag("orders", 0, &RegionId::UsEast),
+        0
+    );
 
     // 2. Inject 300ms WAN link delay
     chaos.set_delay(300);
@@ -100,7 +113,9 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
     // 3. Produce 50 new local records: MUST NOT be degraded by WAN link delay
     let start_degraded = Instant::now();
     for i in 100..150 {
-        let offset = local_log.append(1, "orders", 1, format!("record-{}", i).into_bytes()).unwrap();
+        let offset = local_log
+            .append(1, "orders", 1, format!("record-{}", i).into_bytes())
+            .unwrap();
         metrics.set_local_committed("orders", 0, offset + 1);
         let _ = outbox.enqueue(OutboxRange {
             topic: "orders".to_string(),
@@ -120,13 +135,19 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
 
     // Replication lag should now reflect the queued, un-acked records (150 local - 100 acked = 50 lag)
     let lag = metrics.get_replication_lag("orders", 0, &RegionId::UsEast);
-    assert_eq!(lag, 50, "Replication lag must accurately reflect WAN queue delay");
+    assert_eq!(
+        lag, 50,
+        "Replication lag must accurately reflect WAN queue delay"
+    );
 
     // Replicate one batch through chaos simulation
     let traverse_res = chaos.simulate_link_traversal().await;
     assert!(traverse_res.is_ok());
 
-    println!(" [DEMO SCENARIO B PASSED] Injected 300ms delay increased replication lag to 50 without blocking local produce (local write latency {:?}).", local_duration_degraded);
+    println!(
+        " [DEMO SCENARIO B PASSED] Injected 300ms delay increased replication lag to 50 without blocking local produce (local write latency {:?}).",
+        local_duration_degraded
+    );
 }
 
 /// Scenario C (Gate 4 / Demo C Ready):
@@ -146,20 +167,26 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
 
     // 1. Initial healthy synchronization (offsets 0 to 10)
     for i in 0..10 {
-        let off = local_log_a.append(1, "tx", 1, format!("tx-{}", i).into_bytes()).unwrap();
-        outbox_to_b.enqueue(OutboxRange {
-            topic: "tx".to_string(),
-            partition: 0,
-            epoch: 1,
-            start_offset: off,
-            end_offset: off + 1,
-            class_id: "tx".to_string(),
-            payload: format!("tx-{}", i).into_bytes(),
-            is_sealed: false,
-        }).unwrap();
+        let off = local_log_a
+            .append(1, "tx", 1, format!("tx-{}", i).into_bytes())
+            .unwrap();
+        outbox_to_b
+            .enqueue(OutboxRange {
+                topic: "tx".to_string(),
+                partition: 0,
+                epoch: 1,
+                start_offset: off,
+                end_offset: off + 1,
+                class_id: "tx".to_string(),
+                payload: format!("tx-{}", i).into_bytes(),
+                is_sealed: false,
+            })
+            .unwrap();
 
         // Applied at B
-        remote_log_b.append(1, "tx", 1, format!("tx-{}", i).into_bytes()).unwrap();
+        remote_log_b
+            .append(1, "tx", 1, format!("tx-{}", i).into_bytes())
+            .unwrap();
     }
     outbox_to_b.advance_watermark(10);
     metrics.set_local_committed("tx", 0, 10);
@@ -171,17 +198,21 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
 
     // 3. Region A accepts new writes during Region B's outage (offsets 10 to 25)
     for i in 10..25 {
-        let off = local_log_a.append(1, "tx", 1, format!("tx-{}", i).into_bytes()).unwrap();
-        outbox_to_b.enqueue(OutboxRange {
-            topic: "tx".to_string(),
-            partition: 0,
-            epoch: 1,
-            start_offset: off,
-            end_offset: off + 1,
-            class_id: "tx".to_string(),
-            payload: format!("tx-{}", i).into_bytes(),
-            is_sealed: false,
-        }).unwrap();
+        let off = local_log_a
+            .append(1, "tx", 1, format!("tx-{}", i).into_bytes())
+            .unwrap();
+        outbox_to_b
+            .enqueue(OutboxRange {
+                topic: "tx".to_string(),
+                partition: 0,
+                epoch: 1,
+                start_offset: off,
+                end_offset: off + 1,
+                class_id: "tx".to_string(),
+                payload: format!("tx-{}", i).into_bytes(),
+                is_sealed: false,
+            })
+            .unwrap();
     }
     metrics.set_local_committed("tx", 0, 25);
 
@@ -198,7 +229,9 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
 
     let catchup_batch = outbox_to_b.next_transfer_batch(20);
     for range in catchup_batch {
-        remote_log_b.append(range.epoch, &range.class_id, 1, range.payload).unwrap();
+        remote_log_b
+            .append(range.epoch, &range.class_id, 1, range.payload)
+            .unwrap();
     }
 
     // Advance watermark and trim outbox
@@ -211,5 +244,7 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
     assert_eq!(metrics.get_replication_lag("tx", 0, &RegionId::UsEast), 0);
     assert_eq!(outbox_to_b.queued_bytes(), 0);
 
-    println!(" [DEMO SCENARIO C PASSED] Region B recovered from outage, successfully synchronized 15 buffered records with ZERO data loss.");
+    println!(
+        " [DEMO SCENARIO C PASSED] Region B recovered from outage, successfully synchronized 15 buffered records with ZERO data loss."
+    );
 }

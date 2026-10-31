@@ -385,7 +385,6 @@ impl Enforcer {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
-    use hex;
     use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyDocument, SignedPolicy};
     use rand::rngs::OsRng;
     use std::collections::{HashMap, HashSet};

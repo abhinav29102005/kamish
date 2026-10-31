@@ -21,7 +21,9 @@ pub enum SealError {
     #[error("Decryption failed: corrupted ciphertext or authentication tag")]
     DecryptionFailed,
 
-    #[error("Access denied: key resides in region '{key_region}', but requested from '{request_region}'")]
+    #[error(
+        "Access denied: key resides in region '{key_region}', but requested from '{request_region}'"
+    )]
     CrossBorderKeyAccessDenied {
         key_region: String,
         request_region: String,
@@ -60,7 +62,9 @@ impl RegionalKeyService {
         }
 
         let keys = self.keys.read().unwrap();
-        keys.get(key_id).copied().ok_or_else(|| SealError::KeyNotFound(key_id.to_string()))
+        keys.get(key_id)
+            .copied()
+            .ok_or_else(|| SealError::KeyNotFound(key_id.to_string()))
     }
 
     pub fn home_region(&self) -> &str {
@@ -108,7 +112,7 @@ impl SealEngine {
 
                 // Compute SHA-256 HMAC authentication tag
                 let mut hasher = Sha256::new();
-                hasher.update(&key);
+                hasher.update(key);
                 hasher.update(&ciphertext);
                 let tag_arr: [u8; 32] = hasher.finalize().into();
 
@@ -130,14 +134,14 @@ impl SealEngine {
         requesting_region: &str,
         key_service: &RegionalKeyService,
     ) -> Result<Vec<u8>, SealError> {
-        let envelope: SealedEnvelope = serde_json::from_slice(sealed_bytes)
-            .map_err(|_| SealError::DecryptionFailed)?;
+        let envelope: SealedEnvelope =
+            serde_json::from_slice(sealed_bytes).map_err(|_| SealError::DecryptionFailed)?;
 
         let key = key_service.get_key(&envelope.key_id, requesting_region)?;
 
         // Verify authentication tag
         let mut hasher = Sha256::new();
-        hasher.update(&key);
+        hasher.update(key);
         hasher.update(&envelope.ciphertext);
         let expected_tag: [u8; 32] = hasher.finalize().into();
 
@@ -177,11 +181,18 @@ mod tests {
         .unwrap();
 
         // 2. Sealed data contains NO cleartext substring
-        assert!(!sealed_data.windows(secret_payload.len()).any(|w| w == secret_payload));
+        assert!(
+            !sealed_data
+                .windows(secret_payload.len())
+                .any(|w| w == secret_payload)
+        );
 
         // 3. Remote region-us cannot unseal without key access (§1.6 D2)
         let remote_err = SealEngine::unseal(&sealed_data, "region-us", &kms).unwrap_err();
-        assert!(matches!(remote_err, SealError::CrossBorderKeyAccessDenied { .. }));
+        assert!(matches!(
+            remote_err,
+            SealError::CrossBorderKeyAccessDenied { .. }
+        ));
 
         // 4. Authorized home region can successfully unseal
         let decrypted = SealEngine::unseal(&sealed_data, "region-eu-home", &kms).unwrap();

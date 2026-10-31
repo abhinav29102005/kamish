@@ -35,7 +35,10 @@ pub enum OwnershipError {
     MetaConflict(String),
 
     #[error("Stale writer fenced: request epoch {request_epoch} < partition epoch {current_epoch}")]
-    StaleWriterFenced { request_epoch: u64, current_epoch: u64 },
+    StaleWriterFenced {
+        request_epoch: u64,
+        current_epoch: u64,
+    },
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -86,7 +89,11 @@ impl QuarantineStore {
 
         let q_file = self.dir.join("quarantine.data");
         let serialized = serde_json::to_vec(&*inner)?;
-        let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(q_file)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(q_file)?;
         file.write_all(&serialized)?;
         file.flush()?;
 
@@ -139,11 +146,16 @@ impl PartitionOwnerCoordinator {
     ) -> Result<PartitionOwnership, OwnershipError> {
         let current_ownership = match self.meta_store.get_ownership(topic, partition) {
             Some(o) => o,
-            None => return Err(OwnershipError::MetaConflict("Partition not found in metadata".into())),
+            None => {
+                return Err(OwnershipError::MetaConflict(
+                    "Partition not found in metadata".into(),
+                ));
+            }
         };
 
         let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        let safe_expiry_ns = current_ownership.lease_expiry_ns + (self.max_clock_drift_ms * 1_000_000);
+        let safe_expiry_ns =
+            current_ownership.lease_expiry_ns + (self.max_clock_drift_ms * 1_000_000);
 
         // 1. Lease safety check with clock drift margin (§4.7.2 R6, §3.4.4)
         if now_ns < safe_expiry_ns {
@@ -184,7 +196,12 @@ impl PartitionOwnerCoordinator {
 
     /// Enforces writer fencing (§3.4.2, §3.1.4):
     /// Rejects appends if incoming epoch is lower than current committed partition epoch.
-    pub fn verify_write_epoch(&self, topic: &str, partition: u32, write_epoch: u64) -> Result<(), OwnershipError> {
+    pub fn verify_write_epoch(
+        &self,
+        topic: &str,
+        partition: u32,
+        write_epoch: u64,
+    ) -> Result<(), OwnershipError> {
         if let Some(ownership) = self.meta_store.get_ownership(topic, partition) {
             if write_epoch < ownership.epoch {
                 return Err(OwnershipError::StaleWriterFenced {
@@ -218,7 +235,9 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use hex;
     use kamish_audit::AuditLog;
-    use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
+    use kamish_policy::{
+        AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
+    };
     use rand::rngs::OsRng;
     use std::collections::{HashMap, HashSet};
 
@@ -275,12 +294,14 @@ mod tests {
 
         let meta = MetadataStore::new();
         meta.create_topic("orders", "failover-class", 1);
-        meta.set_ownership("orders", 0, "region-a", 1, now_offset_ms).unwrap();
+        meta.set_ownership("orders", 0, "region-a", 1, now_offset_ms)
+            .unwrap();
 
         let temp_dir = tempfile::tempdir().unwrap();
         let quarantine = QuarantineStore::open(temp_dir.path()).unwrap();
 
-        let coordinator = PartitionOwnerCoordinator::new("region-b", 50, meta, enforcer, quarantine);
+        let coordinator =
+            PartitionOwnerCoordinator::new("region-b", 50, meta, enforcer, quarantine);
         TestFixture {
             _temp_dir: temp_dir,
             coordinator,
@@ -290,26 +311,41 @@ mod tests {
     #[test]
     fn test_promotion_before_lease_expires_fails() {
         let fixture = setup_test_fixture(10_000);
-        let err = fixture.coordinator.try_promote("orders", 0, "failover-class", true, 5000).unwrap_err();
+        let err = fixture
+            .coordinator
+            .try_promote("orders", 0, "failover-class", true, 5000)
+            .unwrap_err();
         assert!(matches!(err, OwnershipError::LeaseNotExpired { .. }));
     }
 
     #[test]
     fn test_promotion_after_lease_expires_succeeds() {
         let fixture = setup_test_fixture(-1000);
-        let new_ownership = fixture.coordinator.try_promote("orders", 0, "failover-class", true, 5000).unwrap();
+        let new_ownership = fixture
+            .coordinator
+            .try_promote("orders", 0, "failover-class", true, 5000)
+            .unwrap();
         assert_eq!(new_ownership.owner_region, "region-b");
         assert_eq!(new_ownership.epoch, 2);
 
-        let fence_err = fixture.coordinator.verify_write_epoch("orders", 0, 1).unwrap_err();
-        assert!(matches!(fence_err, OwnershipError::StaleWriterFenced { .. }));
+        let fence_err = fixture
+            .coordinator
+            .verify_write_epoch("orders", 0, 1)
+            .unwrap_err();
+        assert!(matches!(
+            fence_err,
+            OwnershipError::StaleWriterFenced { .. }
+        ));
     }
 
     #[test]
     fn test_quarantine_superseded_records() {
         let fixture = setup_test_fixture(5000);
         let stale_record = RecordEnvelope::new(1, "failover-class", 1, 99, b"divergent".to_vec());
-        fixture.coordinator.reconcile_divergent_suffix(vec![stale_record]).unwrap();
+        fixture
+            .coordinator
+            .reconcile_divergent_suffix(vec![stale_record])
+            .unwrap();
 
         assert_eq!(fixture.coordinator.quarantine().count(), 1);
     }

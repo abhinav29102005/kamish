@@ -5,23 +5,37 @@
 //! - §3.5.3: Core Invariants Checkers Table (INV-1 through INV-9).
 //! - §4.4: Checkers we write (loss/duplicate, per-partition ordering, canary scanner, epoch auditor).
 
-
 use kamish_log::RecordEnvelope;
 use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CheckerViolation {
-    #[error("INV-1 Violation: Non-dense offset sequence in partition {partition}: expected {expected}, found {found}")]
-    OrderingGap { partition: u32, expected: u64, found: u64 },
+    #[error(
+        "INV-1 Violation: Non-dense offset sequence in partition {partition}: expected {expected}, found {found}"
+    )]
+    OrderingGap {
+        partition: u32,
+        expected: u64,
+        found: u64,
+    },
 
-    #[error("INV-7 Violation: Stale/conflicting epoch write detected for partition {partition}: epoch {epoch}")]
+    #[error(
+        "INV-7 Violation: Stale/conflicting epoch write detected for partition {partition}: epoch {epoch}"
+    )]
     EpochConflict { partition: u32, epoch: u64 },
 
-    #[error("INV-8 Canary Leak Violation: Canary token '{canary_token}' detected in forbidden region '{region}'")]
-    CanaryLeak { canary_token: String, region: String },
+    #[error(
+        "INV-8 Canary Leak Violation: Canary token '{canary_token}' detected in forbidden region '{region}'"
+    )]
+    CanaryLeak {
+        canary_token: String,
+        region: String,
+    },
 
-    #[error("INV-2 Loss Violation: Record missing at expected offset {offset} for partition {partition}")]
+    #[error(
+        "INV-2 Loss Violation: Record missing at expected offset {offset} for partition {partition}"
+    )]
     DataLoss { partition: u32, offset: u64 },
 }
 
@@ -29,9 +43,12 @@ pub enum CheckerViolation {
 pub struct OrderingChecker;
 
 impl OrderingChecker {
-    pub fn verify_partition_records(partition: u32, records: &[RecordEnvelope]) -> Result<(), CheckerViolation> {
-        let mut expected = 0;
-        for record in records {
+    pub fn verify_partition_records(
+        partition: u32,
+        records: &[RecordEnvelope],
+    ) -> Result<(), CheckerViolation> {
+        for (expected, record) in records.iter().enumerate() {
+            let expected = expected as u64;
             if record.base_offset != expected {
                 return Err(CheckerViolation::OrderingGap {
                     partition,
@@ -39,7 +56,6 @@ impl OrderingChecker {
                     found: record.base_offset,
                 });
             }
-            expected += 1;
         }
         Ok(())
     }
@@ -50,7 +66,10 @@ pub struct EpochAuditor;
 
 impl EpochAuditor {
     /// Checks that within a partition, epochs increase monotonically across committed batches.
-    pub fn verify_epoch_monotonicity(partition: u32, records: &[RecordEnvelope]) -> Result<(), CheckerViolation> {
+    pub fn verify_epoch_monotonicity(
+        partition: u32,
+        records: &[RecordEnvelope],
+    ) -> Result<(), CheckerViolation> {
         let mut highest_epoch = 0;
         for record in records {
             if record.epoch < highest_epoch {
@@ -70,6 +89,12 @@ pub struct CanaryScanner {
     canary_tokens: HashMap<String, String>, // token -> allowed legal region
 }
 
+impl Default for CanaryScanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CanaryScanner {
     pub fn new() -> Self {
         Self {
@@ -83,11 +108,18 @@ impl CanaryScanner {
     }
 
     /// Scans payload bytes in a given region. Violates INV-8 if a canary token appears in an unauthorized region.
-    pub fn scan_region_payload(&self, region: &str, raw_bytes: &[u8]) -> Result<(), CheckerViolation> {
+    pub fn scan_region_payload(
+        &self,
+        region: &str,
+        raw_bytes: &[u8],
+    ) -> Result<(), CheckerViolation> {
         for (token, legal_region) in &self.canary_tokens {
             if region != legal_region {
                 // If token bytes appear in raw bytes of unauthorized region -> LEAK!
-                if raw_bytes.windows(token.len()).any(|w| w == token.as_bytes()) {
+                if raw_bytes
+                    .windows(token.len())
+                    .any(|w| w == token.as_bytes())
+                {
                     return Err(CheckerViolation::CanaryLeak {
                         canary_token: token.clone(),
                         region: region.to_string(),
@@ -109,7 +141,14 @@ mod tests {
         let r2 = RecordEnvelope::new(1, "c", 1, 2, b"p".to_vec()); // Gap! Missing 1
 
         let err = OrderingChecker::verify_partition_records(0, &[r0, r2]).unwrap_err();
-        assert!(matches!(err, CheckerViolation::OrderingGap { expected: 1, found: 2, .. }));
+        assert!(matches!(
+            err,
+            CheckerViolation::OrderingGap {
+                expected: 1,
+                found: 2,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -118,10 +157,16 @@ mod tests {
         scanner.register_canary("CANARY_EU_TOP_SECRET", "region-eu");
 
         // Allowed in region-eu
-        assert!(scanner.scan_region_payload("region-eu", b"data with CANARY_EU_TOP_SECRET inside").is_ok());
+        assert!(
+            scanner
+                .scan_region_payload("region-eu", b"data with CANARY_EU_TOP_SECRET inside")
+                .is_ok()
+        );
 
         // Forbidden in region-us -> MUST detect leak!
-        let err = scanner.scan_region_payload("region-us", b"leaked CANARY_EU_TOP_SECRET here").unwrap_err();
+        let err = scanner
+            .scan_region_payload("region-us", b"leaked CANARY_EU_TOP_SECRET here")
+            .unwrap_err();
         assert!(matches!(err, CheckerViolation::CanaryLeak { .. }));
     }
 }

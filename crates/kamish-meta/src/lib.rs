@@ -102,7 +102,9 @@ pub enum PolicyViolation {
         local_region: RegionId,
         reason: String,
     },
-    #[error("Replication from {source_region} to {target_region} prohibited by policy {rule:?} ({reason})")]
+    #[error(
+        "Replication from {source_region} to {target_region} prohibited by policy {rule:?} ({reason})"
+    )]
     ReplicationDenied {
         source_region: RegionId,
         target_region: RegionId,
@@ -114,7 +116,11 @@ pub enum PolicyViolation {
 /// Trait contract maintained by Developer B, consumed by Developer A storage & replication engine (§3.B).
 pub trait PolicyEngine: Send + Sync {
     /// Validates whether an incoming event may be ingested in the local region.
-    fn validate_ingestion(&self, event: &StreamEvent, local_region: &RegionId) -> Result<(), PolicyViolation>;
+    fn validate_ingestion(
+        &self,
+        event: &StreamEvent,
+        local_region: &RegionId,
+    ) -> Result<(), PolicyViolation>;
 
     /// Validates whether an event may be replicated across regions.
     fn validate_replication(
@@ -142,9 +148,15 @@ impl KamishPolicyEngine {
 }
 
 impl PolicyEngine for KamishPolicyEngine {
-    fn validate_ingestion(&self, event: &StreamEvent, local_region: &RegionId) -> Result<(), PolicyViolation> {
+    fn validate_ingestion(
+        &self,
+        event: &StreamEvent,
+        local_region: &RegionId,
+    ) -> Result<(), PolicyViolation> {
         // Enforce that origin region matches local region for StrictLocal
-        if event.residency_rule == ResidencyPolicy::StrictLocal && event.origin_region != *local_region {
+        if event.residency_rule == ResidencyPolicy::StrictLocal
+            && event.origin_region != *local_region
+        {
             let reason = format!(
                 "StrictLocal event origin {} does not match local ingestion region {}",
                 event.origin_region, local_region
@@ -262,7 +274,10 @@ impl PolicyEngine for KamishPolicyEngine {
 
             ResidencyPolicy::SealedCiphertext(allowed_regions) => {
                 if !allowed_regions.contains(target_region) {
-                    let reason = format!("Target region {} not permitted for sealed copy", target_region);
+                    let reason = format!(
+                        "Target region {} not permitted for sealed copy",
+                        target_region
+                    );
                     let _ = self.audit_log.record(
                         AuditAction::ReplicationSender,
                         &event.topic,
@@ -319,12 +334,16 @@ impl ReplicationMetricsTracker {
 
     pub fn set_local_committed(&self, topic: &str, partition: u32, offset: u64) {
         let mut inner = self.inner.write().unwrap();
-        inner.local_committed_offset.insert((topic.to_string(), partition), offset);
+        inner
+            .local_committed_offset
+            .insert((topic.to_string(), partition), offset);
     }
 
     pub fn set_remote_acked(&self, topic: &str, partition: u32, region: RegionId, offset: u64) {
         let mut inner = self.inner.write().unwrap();
-        inner.remote_acked_offset.insert((topic.to_string(), partition, region), offset);
+        inner
+            .remote_acked_offset
+            .insert((topic.to_string(), partition, region), offset);
     }
 
     pub fn set_link_rtt(&self, region: RegionId, rtt_ms: f64) {
@@ -335,8 +354,16 @@ impl ReplicationMetricsTracker {
     /// Exposes formula: ReplicationLag = LocalCommittedOffset - RemoteAckedOffset (§5 B.3).
     pub fn get_replication_lag(&self, topic: &str, partition: u32, region: &RegionId) -> u64 {
         let inner = self.inner.read().unwrap();
-        let local = inner.local_committed_offset.get(&(topic.to_string(), partition)).copied().unwrap_or(0);
-        let remote = inner.remote_acked_offset.get(&(topic.to_string(), partition, region.clone())).copied().unwrap_or(0);
+        let local = inner
+            .local_committed_offset
+            .get(&(topic.to_string(), partition))
+            .copied()
+            .unwrap_or(0);
+        let remote = inner
+            .remote_acked_offset
+            .get(&(topic.to_string(), partition, region.clone()))
+            .copied()
+            .unwrap_or(0);
         local.saturating_sub(remote)
     }
 
@@ -352,6 +379,12 @@ pub struct SyntheticChaosInjector {
     delay_ms: Arc<RwLock<u64>>,
     _loss_rate: Arc<RwLock<f64>>,
     partitioned: Arc<RwLock<bool>>,
+}
+
+impl Default for SyntheticChaosInjector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SyntheticChaosInjector {
@@ -471,7 +504,12 @@ impl MetadataStore {
         Self::default()
     }
 
-    pub fn create_topic(&self, topic_id: impl Into<String>, class_id: impl Into<String>, partition_count: u32) -> TopicMeta {
+    pub fn create_topic(
+        &self,
+        topic_id: impl Into<String>,
+        class_id: impl Into<String>,
+        partition_count: u32,
+    ) -> TopicMeta {
         let topic_id = topic_id.into();
         let class_id = class_id.into();
         let topic = TopicMeta {
@@ -499,6 +537,7 @@ impl MetadataStore {
         let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let lease_expiry_ns = now_ns + (lease_duration_ms * 1_000_000);
 
+        #[allow(clippy::collapsible_if)]
         if let Some(existing) = inner.ownerships.get(&key) {
             if epoch < existing.epoch {
                 return Err(MetaError::StaleEpoch {
@@ -537,7 +576,7 @@ impl MetadataStore {
                 return Err(MetaError::PartitionNotFound {
                     topic: topic.to_string(),
                     partition,
-                })
+                });
             }
         };
 
@@ -564,7 +603,10 @@ impl MetadataStore {
 
     pub fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership> {
         let inner = self.inner.read().unwrap();
-        inner.ownerships.get(&(topic.to_string(), partition)).cloned()
+        inner
+            .ownerships
+            .get(&(topic.to_string(), partition))
+            .cloned()
     }
 
     pub fn update_watermark(&self, topic: &str, partition: u32, region: &str, watermark: u64) {
@@ -575,19 +617,23 @@ impl MetadataStore {
                 r.durable_watermark = watermark;
             }
         } else {
-            inner.replicas.insert(key, ReplicaState {
-                topic: topic.to_string(),
-                partition,
-                region_id: region.to_string(),
-                dest_mode: "CLEARTEXT".to_string(),
-                durable_watermark: watermark,
-            });
+            inner.replicas.insert(
+                key,
+                ReplicaState {
+                    topic: topic.to_string(),
+                    partition,
+                    region_id: region.to_string(),
+                    dest_mode: "CLEARTEXT".to_string(),
+                    durable_watermark: watermark,
+                },
+            );
         }
     }
 
     pub fn get_watermark(&self, topic: &str, partition: u32, region: &str) -> u64 {
         let inner = self.inner.read().unwrap();
-        inner.replicas
+        inner
+            .replicas
             .get(&(topic.to_string(), partition, region.to_string()))
             .map(|r| r.durable_watermark)
             .unwrap_or(0)
@@ -599,9 +645,17 @@ impl MetadataStore {
         inner.outbox_streams.insert(key, meta);
     }
 
-    pub fn get_outbox_stream(&self, topic: &str, partition: u32, dest: &str) -> Option<OutboxStreamMeta> {
+    pub fn get_outbox_stream(
+        &self,
+        topic: &str,
+        partition: u32,
+        dest: &str,
+    ) -> Option<OutboxStreamMeta> {
         let inner = self.inner.read().unwrap();
-        inner.outbox_streams.get(&(topic.to_string(), partition, dest.to_string())).cloned()
+        inner
+            .outbox_streams
+            .get(&(topic.to_string(), partition, dest.to_string()))
+            .cloned()
     }
 }
 
@@ -634,7 +688,10 @@ mod tests {
         let violation = engine
             .validate_replication(&event, &RegionId::EuWest, &RegionId::UsEast)
             .unwrap_err();
-        assert!(matches!(violation, PolicyViolation::ReplicationDenied { .. }));
+        assert!(matches!(
+            violation,
+            PolicyViolation::ReplicationDenied { .. }
+        ));
 
         // 3. Verifies auditable security rejection log entry was recorded
         assert_eq!(audit.count(), 2);
@@ -658,10 +715,16 @@ mod tests {
         );
 
         // Allowed to AP_SOUTH
-        assert!(engine.validate_replication(&event, &RegionId::EuWest, &RegionId::ApSouth).is_ok());
+        assert!(
+            engine
+                .validate_replication(&event, &RegionId::EuWest, &RegionId::ApSouth)
+                .is_ok()
+        );
 
         // Denied to US_EAST
-        let err = engine.validate_replication(&event, &RegionId::EuWest, &RegionId::UsEast).unwrap_err();
+        let err = engine
+            .validate_replication(&event, &RegionId::EuWest, &RegionId::UsEast)
+            .unwrap_err();
         assert!(matches!(err, PolicyViolation::ReplicationDenied { .. }));
     }
 
@@ -672,7 +735,10 @@ mod tests {
         metrics.set_remote_acked("orders", 0, RegionId::UsEast, 850);
 
         // Lag = 1000 - 850 = 150
-        assert_eq!(metrics.get_replication_lag("orders", 0, &RegionId::UsEast), 150);
+        assert_eq!(
+            metrics.get_replication_lag("orders", 0, &RegionId::UsEast),
+            150
+        );
     }
 
     #[tokio::test]

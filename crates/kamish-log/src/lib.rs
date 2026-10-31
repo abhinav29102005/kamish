@@ -61,7 +61,8 @@ impl RecordEnvelope {
         payload: Vec<u8>,
     ) -> Self {
         let class_str = class_id.into();
-        let checksum = Self::compute_checksum(epoch, &class_str, policy_version, base_offset, &payload);
+        let checksum =
+            Self::compute_checksum(epoch, &class_str, policy_version, base_offset, &payload);
         Self {
             magic: RECORD_MAGIC_V1,
             epoch,
@@ -132,22 +133,40 @@ impl PartitionLog {
             file.read_to_end(&mut buf)?;
 
             let mut cursor = std::io::Cursor::new(buf);
-            while let Ok(envelope) = bincode_deserialize_envelope(&mut cursor) {
-                if !envelope.verify_checksum() {
-                    return Err(LogError::ChecksumMismatch {
-                        offset: envelope.base_offset,
-                        computed: 0,
-                        recorded: envelope.checksum,
-                    });
+            let mut valid_file_len = 0u64;
+            loop {
+                let start_pos = cursor.position();
+                match bincode_deserialize_envelope(&mut cursor) {
+                    Ok(envelope) => {
+                        if !envelope.verify_checksum() {
+                            return Err(LogError::ChecksumMismatch {
+                                offset: envelope.base_offset,
+                                computed: 0,
+                                recorded: envelope.checksum,
+                            });
+                        }
+                        if envelope.base_offset != next_offset {
+                            return Err(LogError::NonMonotonicOffset {
+                                expected: next_offset,
+                                received: envelope.base_offset,
+                            });
+                        }
+                        next_offset += 1;
+                        records.push(envelope);
+                        valid_file_len = cursor.position();
+                    }
+                    Err(_) => {
+                        let total_len = cursor.get_ref().len() as u64;
+                        if start_pos < total_len {
+                            // Truncate trailing torn write at segment tail to last verified record
+                            drop(file);
+                            let trunc_file = OpenOptions::new().write(true).open(&log_file)?;
+                            trunc_file.set_len(valid_file_len)?;
+                            trunc_file.sync_all()?;
+                        }
+                        break;
+                    }
                 }
-                if envelope.base_offset != next_offset {
-                    return Err(LogError::NonMonotonicOffset {
-                        expected: next_offset,
-                        received: envelope.base_offset,
-                    });
-                }
-                next_offset += 1;
-                records.push(envelope);
             }
         }
 
@@ -209,7 +228,8 @@ impl PartitionLog {
             *file_guard = Some(file);
         }
 
-        let serialized = serde_json::to_vec(&envelope).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let serialized = serde_json::to_vec(&envelope)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let len_bytes = (serialized.len() as u32).to_be_bytes();
 
         let file = file_guard.as_mut().unwrap();
@@ -239,10 +259,7 @@ impl PartitionLog {
             return Vec::new();
         }
 
-        let count = std::cmp::min(
-            max_records,
-            (inner.high_watermark - start_offset) as usize,
-        );
+        let count = std::cmp::min(max_records, (inner.high_watermark - start_offset) as usize);
 
         inner.records[start_offset as usize..start_offset as usize + count].to_vec()
     }
@@ -268,14 +285,17 @@ impl PartitionLog {
     }
 }
 
-fn bincode_deserialize_envelope(cursor: &mut std::io::Cursor<Vec<u8>>) -> Result<RecordEnvelope, std::io::Error> {
+fn bincode_deserialize_envelope(
+    cursor: &mut std::io::Cursor<Vec<u8>>,
+) -> Result<RecordEnvelope, std::io::Error> {
     let mut len_bytes = [0u8; 4];
     cursor.read_exact(&mut len_bytes)?;
     let len = u32::from_be_bytes(len_bytes) as usize;
 
     let mut buf = vec![0u8; len];
     cursor.read_exact(&mut buf)?;
-    serde_json::from_slice(&buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    serde_json::from_slice(&buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 #[cfg(test)]
@@ -287,10 +307,14 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let log = PartitionLog::open(temp_dir.path(), 1).unwrap();
 
-        let o0 = log.append(1, "EU-class", 1, b"first payload".to_vec()).unwrap();
+        let o0 = log
+            .append(1, "EU-class", 1, b"first payload".to_vec())
+            .unwrap();
         assert_eq!(o0, 0);
 
-        let o1 = log.append(1, "EU-class", 1, b"second payload".to_vec()).unwrap();
+        let o1 = log
+            .append(1, "EU-class", 1, b"second payload".to_vec())
+            .unwrap();
         assert_eq!(o1, 1);
 
         assert_eq!(log.next_offset(), 2);
@@ -314,8 +338,16 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let log = PartitionLog::open(temp_dir.path(), 5).unwrap();
 
-        let err = log.append(4, "EU-class", 1, b"stale write".to_vec()).unwrap_err();
-        assert!(matches!(err, LogError::StaleEpoch { current: 5, requested: 4 }));
+        let err = log
+            .append(4, "EU-class", 1, b"stale write".to_vec())
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            LogError::StaleEpoch {
+                current: 5,
+                requested: 4
+            }
+        ));
     }
 
     #[test]
@@ -349,7 +381,8 @@ mod tests {
             for record in chunk {
                 assert_eq!(record.base_offset, cur_offset);
                 assert!(record.verify_checksum());
-                let expected_payload = format!("durable-event-payload-{:04}", cur_offset).into_bytes();
+                let expected_payload =
+                    format!("durable-event-payload-{:04}", cur_offset).into_bytes();
                 assert_eq!(record.payload, expected_payload);
                 cur_offset += 1;
                 consumed += 1;
@@ -362,6 +395,65 @@ mod tests {
         assert_eq!(slice.len(), 15);
         assert_eq!(slice[0].base_offset, 10);
         assert_eq!(slice[14].base_offset, 24);
+    }
+
+    #[test]
+    fn test_torn_write_tail_truncation_recovery() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().to_path_buf();
+        let data_path = path.join("partition.data");
+
+        // 1. Write 3 valid records
+        {
+            let log = PartitionLog::open(&path, 1).unwrap();
+            log.append(1, "sovereign", 1, b"record-0".to_vec()).unwrap();
+            log.append(1, "sovereign", 1, b"record-1".to_vec()).unwrap();
+            log.append(1, "sovereign", 1, b"record-2".to_vec()).unwrap();
+            assert_eq!(log.high_watermark(), 3);
+        }
+
+        let valid_len = std::fs::metadata(&data_path).unwrap().len();
+
+        // 2. Simulate dirty crash / torn write by appending 15 bytes of truncated corrupt data
+        {
+            let mut file = OpenOptions::new().append(true).open(&data_path).unwrap();
+            // Incomplete header bytes representing a torn write
+            file.write_all(&[0x00, 0x00, 0x01, 0xFF, 0xDE, 0xAD, 0xBE, 0xEF])
+                .unwrap();
+            file.flush().unwrap();
+        }
+        let corrupt_len = std::fs::metadata(&data_path).unwrap().len();
+        assert!(corrupt_len > valid_len);
+
+        // 3. Re-open log: it should detect the torn write at the tail, truncate back to valid_len,
+        // and cleanly recover the 3 valid records.
+        let recovered = PartitionLog::open(&path, 1).unwrap();
+        assert_eq!(recovered.high_watermark(), 3);
+        assert_eq!(recovered.next_offset(), 3);
+
+        let records = recovered.read(0, 10);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].payload, b"record-0");
+        assert_eq!(records[1].payload, b"record-1");
+        assert_eq!(records[2].payload, b"record-2");
+
+        let current_len = std::fs::metadata(&data_path).unwrap().len();
+        assert_eq!(
+            current_len, valid_len,
+            "Tail truncation should restore exact valid length"
+        );
+
+        // 4. Verify that new appends succeed cleanly at offset 3
+        let o3 = recovered
+            .append(1, "sovereign", 1, b"record-3".to_vec())
+            .unwrap();
+        assert_eq!(o3, 3);
+        assert_eq!(recovered.high_watermark(), 4);
+
+        // 5. Subsequent reopen finds all 4 valid records intact
+        let reopened = PartitionLog::open(&path, 1).unwrap();
+        assert_eq!(reopened.high_watermark(), 4);
+        assert_eq!(reopened.read(0, 10).len(), 4);
     }
 }
 
@@ -398,7 +490,12 @@ impl SessionManager {
     /// - If seq == last_seq: returns Ok(Some(last_offset)) as an idempotent duplicate retry (INV-6).
     /// - If seq == last_seq + 1 (or first seq 0): returns Ok(None) to proceed with append.
     /// - Otherwise: returns Err(OutOfOrderSequence).
-    pub fn check_sequence(&self, producer_id: u64, producer_epoch: u64, seq: u32) -> Result<Option<u64>, SessionError> {
+    pub fn check_sequence(
+        &self,
+        producer_id: u64,
+        producer_epoch: u64,
+        seq: u32,
+    ) -> Result<Option<u64>, SessionError> {
         let sessions = self.sessions.read().unwrap();
         if let Some(state) = sessions.get(&producer_id) {
             if producer_epoch < state.producer_epoch {
@@ -433,12 +530,15 @@ impl SessionManager {
     /// Updates session state after successful fsync and append.
     pub fn update(&self, producer_id: u64, producer_epoch: u64, seq: u32, offset: u64) {
         let mut sessions = self.sessions.write().unwrap();
-        sessions.insert(producer_id, ProducerSessionState {
+        sessions.insert(
             producer_id,
-            producer_epoch,
-            last_seq: seq,
-            last_offset: offset,
-        });
+            ProducerSessionState {
+                producer_id,
+                producer_epoch,
+                last_seq: seq,
+                last_offset: offset,
+            },
+        );
     }
 }
 
@@ -466,6 +566,12 @@ mod session_tests {
 
         // 4. Out-of-order seq 3 (skipped seq 2) -> rejected
         let err = sm.check_sequence(101, 1, 3).unwrap_err();
-        assert!(matches!(err, SessionError::OutOfOrderSequence { expected: 2, received: 3 }));
+        assert!(matches!(
+            err,
+            SessionError::OutOfOrderSequence {
+                expected: 2,
+                received: 3
+            }
+        ));
     }
 }

@@ -163,25 +163,42 @@ impl RouteSelector {
         match current {
             Some(curr) => {
                 let curr_cost = curr.compute_cost();
-                let last_switch = inner.last_switch_time_ms.get(dest_region).copied().unwrap_or(0);
+                let last_switch = inner
+                    .last_switch_time_ms
+                    .get(dest_region)
+                    .copied()
+                    .unwrap_or(0);
                 let dwell_satisfied = now_ms - last_switch >= self.min_dwell_ms;
                 let hysteresis_satisfied = best_cost < curr_cost * (1.0 - self.hysteresis_margin);
 
                 // Check if current breaker is open
-                let breaker = inner.breaker_states.get(dest_region).copied().unwrap_or(CircuitBreakerState::Closed);
-                let breaker_allows_switch = breaker != CircuitBreakerState::Closed || (dwell_satisfied && hysteresis_satisfied);
+                let breaker = inner
+                    .breaker_states
+                    .get(dest_region)
+                    .copied()
+                    .unwrap_or(CircuitBreakerState::Closed);
+                let breaker_allows_switch = breaker != CircuitBreakerState::Closed
+                    || (dwell_satisfied && hysteresis_satisfied);
 
                 if breaker_allows_switch && best_candidate != curr {
-                    inner.current_paths.insert(dest_region.to_string(), best_candidate.clone());
-                    inner.last_switch_time_ms.insert(dest_region.to_string(), now_ms);
+                    inner
+                        .current_paths
+                        .insert(dest_region.to_string(), best_candidate.clone());
+                    inner
+                        .last_switch_time_ms
+                        .insert(dest_region.to_string(), now_ms);
                     Some(best_candidate)
                 } else {
                     Some(curr)
                 }
             }
             None => {
-                inner.current_paths.insert(dest_region.to_string(), best_candidate.clone());
-                inner.last_switch_time_ms.insert(dest_region.to_string(), now_ms);
+                inner
+                    .current_paths
+                    .insert(dest_region.to_string(), best_candidate.clone());
+                inner
+                    .last_switch_time_ms
+                    .insert(dest_region.to_string(), now_ms);
                 Some(best_candidate)
             }
         }
@@ -194,7 +211,9 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use hex;
     use kamish_audit::AuditLog;
-    use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
+    use kamish_policy::{
+        AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
+    };
     use rand::rngs::OsRng;
     use std::collections::{HashMap, HashSet};
 

@@ -123,7 +123,11 @@ pub enum BrokerRequest {
     Produce(ProduceRequest),
     Fetch(FetchRequest),
     Replicate(ReplicationRequest),
-    GetWatermark { topic: String, partition: u32, source_region: String },
+    GetWatermark {
+        topic: String,
+        partition: u32,
+        source_region: String,
+    },
     Ping,
 }
 
@@ -146,6 +150,12 @@ const NUM_STRIPES: usize = 32;
 /// Lock-striped concurrent map eliminating cross-partition lock contention.
 pub struct StripedStore<K, V> {
     stripes: [RwLock<HashMap<K, V>>; NUM_STRIPES],
+}
+
+impl<K: Eq + Hash + Clone, V: Clone> Default for StripedStore<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<K: Eq + Hash + Clone, V: Clone> StripedStore<K, V> {
@@ -263,6 +273,7 @@ impl BrokerServer {
         );
 
         // --- INGRESS INTERCEPTOR HOOK: Call PolicyEngine (§3.B) ---
+        #[allow(clippy::collapsible_if)]
         if let Some(ref engine) = self.policy_engine {
             if let Err(violation) = engine.validate_ingestion(&stream_event, &self.region_id) {
                 tracing::warn!(
@@ -303,11 +314,9 @@ impl BrokerServer {
         let session_mgr = self.get_or_create_session(&req.topic, req.partition);
 
         // 3. Idempotent Producer Session Deduplication (INV-6, FR-02)
-        if let Some(cached_offset) = session_mgr.check_sequence(
-            req.producer_id,
-            req.producer_epoch,
-            req.sequence_base,
-        )? {
+        if let Some(cached_offset) =
+            session_mgr.check_sequence(req.producer_id, req.producer_epoch, req.sequence_base)?
+        {
             return Ok(ProduceResponse {
                 base_offset: cached_offset,
                 count: 1,
@@ -339,8 +348,11 @@ impl BrokerServer {
             let target_region_id = parse_region_id(peer);
 
             // --- EGRESS INTERCEPTOR HOOK: Call PolicyEngine (§3.B) ---
+            #[allow(clippy::collapsible_if)]
             if let Some(ref engine) = self.policy_engine {
-                if let Err(violation) = engine.validate_replication(&stream_event, &self.region_id, &target_region_id) {
+                if let Err(violation) =
+                    engine.validate_replication(&stream_event, &self.region_id, &target_region_id)
+                {
                     tracing::warn!(
                         topic = %req.topic,
                         source = %self.region,
@@ -408,7 +420,10 @@ impl BrokerServer {
     }
 
     /// Handles inbound cross-region replication with E5 policy enforcement and exact offset preservation (INV-5).
-    pub fn handle_replication(&self, req: ReplicationRequest) -> Result<ReplicationResponse, BrokerError> {
+    pub fn handle_replication(
+        &self,
+        req: ReplicationRequest,
+    ) -> Result<ReplicationResponse, BrokerError> {
         // E5: Replication Receiver Policy Check
         let enf_req = EnforcementRequest::new(
             AuditAction::ReplicationReceiver,
@@ -447,7 +462,12 @@ impl BrokerServer {
                 req.payload,
             )?;
             let new_watermark = applied_offset + 1;
-            self.meta.update_watermark(&req.topic, req.partition, &req.source_region, new_watermark);
+            self.meta.update_watermark(
+                &req.topic,
+                req.partition,
+                &req.source_region,
+                new_watermark,
+            );
 
             return Ok(ReplicationResponse {
                 accepted: true,
@@ -460,7 +480,10 @@ impl BrokerServer {
         Ok(ReplicationResponse {
             accepted: false,
             applied_watermark: local_next,
-            reason: format!("offset_gap: expected {}, received {}", local_next, req.from_offset),
+            reason: format!(
+                "offset_gap: expected {}, received {}",
+                local_next, req.from_offset
+            ),
         })
     }
 
@@ -495,7 +518,12 @@ impl BrokerServer {
             .clone()
     }
 
-    fn get_or_create_log(&self, topic: &str, partition: u32, epoch: u64) -> Result<PartitionLog, BrokerError> {
+    fn get_or_create_log(
+        &self,
+        topic: &str,
+        partition: u32,
+        epoch: u64,
+    ) -> Result<PartitionLog, BrokerError> {
         let key = (topic.to_string(), partition);
         if let Some(log) = self.logs.get(&key) {
             return Ok(log);
@@ -528,9 +556,15 @@ impl BrokerServer {
                 Ok(res) => BrokerResponse::Replicate(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
-            BrokerRequest::GetWatermark { topic, partition, source_region } => {
+            BrokerRequest::GetWatermark {
+                topic,
+                partition,
+                source_region,
+            } => {
                 let wm = self.get_watermark(&topic, partition, &source_region);
-                BrokerResponse::Watermark { durable_watermark: wm }
+                BrokerResponse::Watermark {
+                    durable_watermark: wm,
+                }
             }
             BrokerRequest::Ping => BrokerResponse::Pong,
         }
@@ -564,7 +598,10 @@ impl BrokerServer {
         Ok((local_addr, handle))
     }
 
-    async fn handle_connection(self: Arc<Self>, stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_connection(
+        self: Arc<Self>,
+        stream: TcpStream,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
 
@@ -590,11 +627,13 @@ impl BrokerServer {
             // on fsync barriers or disk reads. Lightweight state queries (Ping, Watermark)
             // execute immediately in-memory.
             let resp = match req {
-                BrokerRequest::Produce(_) | BrokerRequest::Fetch(_) | BrokerRequest::Replicate(_) => {
+                BrokerRequest::Produce(_)
+                | BrokerRequest::Fetch(_)
+                | BrokerRequest::Replicate(_) => {
                     let server = Arc::clone(&self);
                     tokio::task::spawn_blocking(move || server.dispatch(req))
                         .await
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+                        .map_err(|e| std::io::Error::other(e.to_string()))?
                 }
                 _ => self.dispatch(req),
             };
@@ -622,7 +661,10 @@ impl BrokerClient {
         Ok(Self { lines, writer })
     }
 
-    pub async fn send_request(&mut self, req: BrokerRequest) -> Result<BrokerResponse, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn send_request(
+        &mut self,
+        req: BrokerRequest,
+    ) -> Result<BrokerResponse, Box<dyn std::error::Error + Send + Sync>> {
         let mut payload = serde_json::to_vec(&req)?;
         payload.push(b'\n');
         self.writer.write_all(&payload).await?;
@@ -633,31 +675,56 @@ impl BrokerClient {
                 let resp: BrokerResponse = serde_json::from_str(&line)?;
                 Ok(resp)
             }
-            None => Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "Connection closed by remote broker").into()),
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed by remote broker",
+            )
+            .into()),
         }
     }
 
-    pub async fn produce(&mut self, req: ProduceRequest) -> Result<ProduceResponse, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn produce(
+        &mut self,
+        req: ProduceRequest,
+    ) -> Result<ProduceResponse, Box<dyn std::error::Error + Send + Sync>> {
         match self.send_request(BrokerRequest::Produce(req)).await? {
             BrokerResponse::Produce(p) => Ok(p),
-            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
-            other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+            BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unexpected response: {:?}", other),
+            )
+            .into()),
         }
     }
 
-    pub async fn fetch(&mut self, req: FetchRequest) -> Result<FetchResponse, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn fetch(
+        &mut self,
+        req: FetchRequest,
+    ) -> Result<FetchResponse, Box<dyn std::error::Error + Send + Sync>> {
         match self.send_request(BrokerRequest::Fetch(req)).await? {
             BrokerResponse::Fetch(f) => Ok(f),
-            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
-            other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+            BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unexpected response: {:?}", other),
+            )
+            .into()),
         }
     }
 
-    pub async fn replicate(&mut self, req: ReplicationRequest) -> Result<ReplicationResponse, Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn replicate(
+        &mut self,
+        req: ReplicationRequest,
+    ) -> Result<ReplicationResponse, Box<dyn std::error::Error + Send + Sync>> {
         match self.send_request(BrokerRequest::Replicate(req)).await? {
             BrokerResponse::Replicate(r) => Ok(r),
-            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
-            other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+            BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unexpected response: {:?}", other),
+            )
+            .into()),
         }
     }
 
@@ -676,7 +743,7 @@ impl BrokerClient {
             .await?
         {
             BrokerResponse::Watermark { durable_watermark } => Ok(durable_watermark),
-            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
+            BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
             other => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unexpected response: {:?}", other),
@@ -700,11 +767,16 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use kamish_audit::AuditLog;
     use kamish_meta::KamishPolicyEngine;
-    use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy};
+    use kamish_policy::{
+        AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
+    };
     use rand::rngs::OsRng;
     use std::collections::{HashMap, HashSet};
 
-    fn setup_test_broker(local_region: &str, peers: Vec<String>) -> (BrokerServer, tempfile::TempDir) {
+    fn setup_test_broker(
+        local_region: &str,
+        peers: Vec<String>,
+    ) -> (BrokerServer, tempfile::TempDir) {
         let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
         let pubkey_hex = hex::encode(verifying_key.to_bytes());
@@ -777,7 +849,11 @@ mod tests {
         cache.update(signed, Utc::now().timestamp()).unwrap();
 
         let audit_log = AuditLog::new_in_memory();
-        let enforcer = Arc::new(Enforcer::new(local_region, Arc::new(RwLock::new(cache)), audit_log.clone()));
+        let enforcer = Arc::new(Enforcer::new(
+            local_region,
+            Arc::new(RwLock::new(cache)),
+            audit_log.clone(),
+        ));
         let meta = Arc::new(MetadataStore::new());
         let temp_dir = tempfile::tempdir().unwrap();
 
@@ -822,7 +898,9 @@ mod tests {
             sequence_base: 0,
             class_id: "global-data".to_string(),
             payload: b"financial-data".to_vec(),
-            residency_rule: Some(ResidencyPolicy::RestrictedReplication(vec![RegionId::UsEast])),
+            residency_rule: Some(ResidencyPolicy::RestrictedReplication(vec![
+                RegionId::UsEast,
+            ])),
         };
         let res_restricted = broker_eu.produce(req_restricted).unwrap();
         assert!(res_restricted.sovereignty_allowed);
@@ -1044,13 +1122,15 @@ mod tests {
         assert_eq!(outbox_a.durable_watermark(), 5);
         assert_eq!(outbox_a.next_transfer_batch(10).len(), 0);
 
-        let fetch_res = broker_b.fetch(FetchRequest {
-            topic: "sensor-stream".to_string(),
-            partition: 0,
-            class_id: "global-data".to_string(),
-            start_offset: 0,
-            max_records: 10,
-        }).unwrap();
+        let fetch_res = broker_b
+            .fetch(FetchRequest {
+                topic: "sensor-stream".to_string(),
+                partition: 0,
+                class_id: "global-data".to_string(),
+                start_offset: 0,
+                max_records: 10,
+            })
+            .unwrap();
         assert_eq!(fetch_res.records.len(), 5);
         assert_eq!(fetch_res.records[4].base_offset, 4);
         assert_eq!(fetch_res.records[4].payload, b"reading-4");
@@ -1081,26 +1161,32 @@ mod tests {
 
         assert!(client.ping().await.unwrap());
 
-        let prod_res = client.produce(ProduceRequest {
-            topic: "tcp-stream".to_string(),
-            partition: 0,
-            producer_id: 777,
-            producer_epoch: 1,
-            sequence_base: 0,
-            class_id: "global-data".to_string(),
-            payload: b"tcp-payload".to_vec(),
-            residency_rule: Some(ResidencyPolicy::GlobalCleartext),
-        }).await.unwrap();
+        let prod_res = client
+            .produce(ProduceRequest {
+                topic: "tcp-stream".to_string(),
+                partition: 0,
+                producer_id: 777,
+                producer_epoch: 1,
+                sequence_base: 0,
+                class_id: "global-data".to_string(),
+                payload: b"tcp-payload".to_vec(),
+                residency_rule: Some(ResidencyPolicy::GlobalCleartext),
+            })
+            .await
+            .unwrap();
         assert!(prod_res.sovereignty_allowed);
         assert_eq!(prod_res.base_offset, 0);
 
-        let fetch_res = client.fetch(FetchRequest {
-            topic: "tcp-stream".to_string(),
-            partition: 0,
-            class_id: "global-data".to_string(),
-            start_offset: 0,
-            max_records: 5,
-        }).await.unwrap();
+        let fetch_res = client
+            .fetch(FetchRequest {
+                topic: "tcp-stream".to_string(),
+                partition: 0,
+                class_id: "global-data".to_string(),
+                start_offset: 0,
+                max_records: 5,
+            })
+            .await
+            .unwrap();
         assert_eq!(fetch_res.records.len(), 1);
         assert_eq!(fetch_res.records[0].payload, b"tcp-payload");
     }
@@ -1112,16 +1198,18 @@ mod tests {
 
         // Pre-populate 5 records in partition 0
         for seq in 0..5 {
-            broker_arc.produce(ProduceRequest {
-                topic: "stripe-test".to_string(),
-                partition: 0,
-                producer_id: 1,
-                producer_epoch: 1,
-                sequence_base: seq,
-                class_id: "global-data".to_string(),
-                payload: format!("pre-{}", seq).into_bytes(),
-                residency_rule: Some(ResidencyPolicy::GlobalCleartext),
-            }).unwrap();
+            broker_arc
+                .produce(ProduceRequest {
+                    topic: "stripe-test".to_string(),
+                    partition: 0,
+                    producer_id: 1,
+                    producer_epoch: 1,
+                    sequence_base: seq,
+                    class_id: "global-data".to_string(),
+                    payload: format!("pre-{}", seq).into_bytes(),
+                    residency_rule: Some(ResidencyPolicy::GlobalCleartext),
+                })
+                .unwrap();
         }
 
         // Spawn concurrent writers across 4 different partitions simultaneously
@@ -1151,13 +1239,15 @@ mod tests {
         let reader_broker = Arc::clone(&broker_arc);
         let reader_handle = tokio::spawn(async move {
             for _ in 0..10 {
-                let f = reader_broker.fetch(FetchRequest {
-                    topic: "stripe-test".to_string(),
-                    partition: 0,
-                    class_id: "global-data".to_string(),
-                    start_offset: 0,
-                    max_records: 5,
-                }).unwrap();
+                let f = reader_broker
+                    .fetch(FetchRequest {
+                        topic: "stripe-test".to_string(),
+                        partition: 0,
+                        class_id: "global-data".to_string(),
+                        start_offset: 0,
+                        max_records: 5,
+                    })
+                    .unwrap();
                 assert!(f.records.len() >= 5);
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
@@ -1169,24 +1259,28 @@ mod tests {
         reader_handle.await.unwrap();
 
         // Verify partition 0 has 5 pre + 10 writes = 15 records
-        let f0 = broker_arc.fetch(FetchRequest {
-            topic: "stripe-test".to_string(),
-            partition: 0,
-            class_id: "global-data".to_string(),
-            start_offset: 0,
-            max_records: 20,
-        }).unwrap();
+        let f0 = broker_arc
+            .fetch(FetchRequest {
+                topic: "stripe-test".to_string(),
+                partition: 0,
+                class_id: "global-data".to_string(),
+                start_offset: 0,
+                max_records: 20,
+            })
+            .unwrap();
         assert_eq!(f0.records.len(), 15);
 
         // Verify partitions 1, 2, 3 have 10 records each
         for p in 1..4 {
-            let fp = broker_arc.fetch(FetchRequest {
-                topic: "stripe-test".to_string(),
-                partition: p,
-                class_id: "global-data".to_string(),
-                start_offset: 0,
-                max_records: 20,
-            }).unwrap();
+            let fp = broker_arc
+                .fetch(FetchRequest {
+                    topic: "stripe-test".to_string(),
+                    partition: p,
+                    class_id: "global-data".to_string(),
+                    start_offset: 0,
+                    max_records: 20,
+                })
+                .unwrap();
             assert_eq!(fp.records.len(), 10);
             for (idx, rec) in fp.records.iter().enumerate() {
                 assert_eq!(rec.base_offset, idx as u64);
