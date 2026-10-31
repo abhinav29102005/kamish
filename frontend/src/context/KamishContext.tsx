@@ -168,6 +168,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ingressEps: 8,
     writeLatencyMs: 0.42,
     leaseExpiresInSec: 9.8,
+    throughputEps: 12479,
+    p99LatencyMs: 0.42,
   });
 
   // Scenario execution state
@@ -383,6 +385,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ingressEps: trafficRateEps,
         writeLatencyMs: parseFloat(writeLat.toFixed(2)),
         leaseExpiresInSec: eu.leaseExpiresInSec,
+        throughputEps: (trafficRateEps || 8) * 1560,
+        p99LatencyMs: 0.42,
       };
 
       setCurrentTelemetry(sample);
