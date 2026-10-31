@@ -1,0 +1,10 @@
+
+> @kamish/client@0.1.0-alpha.1 test:package
+> npm run build && node scripts/check-package.mjs
+
+
+> @kamish/client@0.1.0-alpha.1 build
+> tsc -p tsconfig.json
+
+Package verified: kamish-client-0.1.0-alpha.1.tgz; 25 files, 28620 bytes compressed.
+Isolated consumer ESM imports and exported TypeScript declarations passed. Nothing published.

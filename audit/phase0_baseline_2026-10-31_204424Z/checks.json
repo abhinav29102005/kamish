@@ -1,0 +1,240 @@
+{
+  "started_at": "2026-10-31T20:44:24.273194+00:00",
+  "revision": "77bb051bfa77e6be80e8d8e5f4ea3cd4dad9eba2",
+  "initial_status": {
+    "command": "git status --short --branch",
+    "exit_code": 0,
+    "output": "## main...origin/main\n?? Screenshot_20261101_020231.png\n?? worktillnow.md\n"
+  },
+  "environment": [
+    {
+      "command": "rustc --version",
+      "exit_code": 0,
+      "output": "rustc 1.99.1 (58cf8f9c3 2026-10-13) (Fedora 1.99.1-2.fc43)\n"
+    },
+    {
+      "command": "cargo --version",
+      "exit_code": 0,
+      "output": "cargo 1.99.1 (5f94df478 2026-08-27) (Fedora 1.99.1-2.fc43)\n"
+    },
+    {
+      "command": "node --version",
+      "exit_code": 0,
+      "output": "v22.22.0\n"
+    },
+    {
+      "command": "npm --version",
+      "exit_code": 0,
+      "output": "10.9.4\n"
+    },
+    {
+      "command": "uname -a",
+      "exit_code": 0,
+      "output": "Linux desktop-bigboyaks 6.19.12-200.fc43.x86_64 #1 SMP PREEMPT_DYNAMIC Sun Apr 12 15:26:33 UTC 2026 x86_64 GNU/Linux\n"
+    }
+  ],
+  "checks": [
+    {
+      "name": "rust-format",
+      "cwd": ".",
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.164,
+      "output": "results/rust-format.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "observed": null
+    },
+    {
+      "name": "rust-clippy",
+      "cwd": ".",
+      "command": "cargo clippy --workspace --all-targets -- -D warnings",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.264,
+      "output": "results/rust-clippy.txt",
+      "sha256": "299f16a2c523be18fef769975d2df00e0505521db047540feea3a74b94666887",
+      "observed": null
+    },
+    {
+      "name": "rust-tests",
+      "cwd": ".",
+      "command": "cargo test --workspace",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 4.876,
+      "output": "results/rust-tests.txt",
+      "sha256": "37285c2edae3079fcdf708e65f289b32352460444f38974f3f3d41870abbc964",
+      "observed": {
+        "passed": 102,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered_out": 0
+      }
+    },
+    {
+      "name": "research-probes",
+      "cwd": ".",
+      "command": "cargo test --locked --manifest-path early_research/probes/Cargo.toml --target-dir target -- --test-threads=1",
+      "exit_code": 101,
+      "expected_exit_code": 101,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.315,
+      "output": "results/research-probes.txt",
+      "sha256": "c00284caf5b48232c9c820ac99d85b710751a498da132172a8c548a2c7bd4c12",
+      "observed": {
+        "failed_tests": [
+          "audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable",
+          "independent_regions_must_not_both_accept_unregistered_epoch_one_writes"
+        ]
+      }
+    },
+    {
+      "name": "frontend-typecheck",
+      "cwd": "frontend",
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.416,
+      "output": "results/frontend-typecheck.txt",
+      "sha256": "ee37e54e46642ed3fa7f64d21893f6f185ae76d5f074db03d4794ea91a590c83",
+      "observed": null
+    },
+    {
+      "name": "frontend-lint",
+      "cwd": "frontend",
+      "command": "npm run lint",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.315,
+      "output": "results/frontend-lint.txt",
+      "sha256": "a158119ae505ca8b2400122fd9341710f7cf751fe0d558c8cb5049990f44ffce",
+      "observed": null
+    },
+    {
+      "name": "frontend-tests",
+      "cwd": "frontend",
+      "command": "npm test",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.365,
+      "output": "results/frontend-tests.txt",
+      "sha256": "bed5635a98c381a0c955d574dec1f50337626da225517b1787aa5650f0967b80",
+      "observed": {
+        "tests": "4",
+        "pass": "4",
+        "fail": "0",
+        "cancelled": "0",
+        "skipped": "0",
+        "todo": "0"
+      }
+    },
+    {
+      "name": "frontend-build",
+      "cwd": "frontend",
+      "command": "npm run build",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 0.816,
+      "output": "results/frontend-build.txt",
+      "sha256": "6d212ce0bd06e2c1c227b525cd9ef1288f8876cb58d96bfc9d73f0b7fe88d72e",
+      "observed": null
+    },
+    {
+      "name": "sdk-typecheck",
+      "cwd": "packages/kamish-client",
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 1.116,
+      "output": "results/sdk-typecheck.txt",
+      "sha256": "36c485be8aedf83ebdc92a250e79c12aff24a0f3ff559f1b90cb71239b96508c",
+      "observed": null
+    },
+    {
+      "name": "sdk-tests",
+      "cwd": "packages/kamish-client",
+      "command": "npm test",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 1.568,
+      "output": "results/sdk-tests.txt",
+      "sha256": "e75aae75e48a9f22159a9cb8fb5b4f551b3461d979fc44d2654a0daa07ca2b15",
+      "observed": {
+        "tests": "23",
+        "pass": "23",
+        "fail": "0",
+        "cancelled": "0",
+        "skipped": "0",
+        "todo": "0"
+      }
+    },
+    {
+      "name": "sdk-rust-integration",
+      "cwd": "packages/kamish-client",
+      "command": "npm run test:integration",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 1.618,
+      "output": "results/sdk-rust-integration.txt",
+      "sha256": "955943b980efc9cebfece8c031d0da2cae1f50db61068e61f73b8aa2f1f9ee4a",
+      "observed": {
+        "tests": "1",
+        "pass": "1",
+        "fail": "0",
+        "cancelled": "0",
+        "skipped": "0",
+        "todo": "0"
+      }
+    },
+    {
+      "name": "sdk-package-consumer",
+      "cwd": "packages/kamish-client",
+      "command": "npm run test:package",
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "matches_expected": true,
+      "timed_out": false,
+      "duration_seconds": 3.371,
+      "output": "results/sdk-package-consumer.txt",
+      "sha256": "cb2646a5d9e07679e8d538423cd31171e4be43890724c0a4d1eac3630ad9afd3",
+      "observed": null
+    }
+  ],
+  "inputs": {
+    "Cargo.lock": "ea1ed0cb1eaa15a3e111f20d7ef2686fc9be02a1331a0455dc42322897da9353",
+    "early_research/probes/Cargo.lock": "9b1a58c9578eb3f52f4fea9c3740087b0b02bca1cd74b77699fb26b9b8b0899f",
+    "frontend/package-lock.json": "093fbb138187a8cb97c022f084c0b6afe261dd24a7a03c9c7f2c9e5d3bbd9f02",
+    "packages/kamish-client/package-lock.json": "3cb239c08c680414e9ecba9a6d463187f192b1eb56284af68ae3e9fde45bc8c8",
+    "worktillnow.md": "96128ccffb7e3641380b1834a66d139848659ee9b3cedc135f1c3d7b69a9dfb4"
+  },
+  "finished_at": "2026-10-31T20:44:39.695411+00:00",
+  "baseline_matches": true,
+  "final_status": {
+    "command": "git status --short --branch",
+    "exit_code": 0,
+    "output": "## main...origin/main\n?? Screenshot_20261101_020231.png\n?? audit/phase0_baseline_2026-10-31_204424Z/\n?? worktillnow.md\n"
+  }
+}

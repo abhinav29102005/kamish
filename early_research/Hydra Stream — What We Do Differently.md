@@ -7,6 +7,14 @@
 the [implementation review](LOOPHOLES_REVIEW.md) records remaining integration
 gaps and counterexamples.
 
+**Phase 0 update, 1 November 2026:** The candidate contribution is one signed
+class policy applied consistently across admission, storage, replication, replay,
+recovery and ownership change, with scope-specific evidence. Pulsar already
+enforces allowed clusters server-side and ciphertext storage is prior art.
+[Contract choices](../docs/CONTRACT.md) await approval; this document describes
+proposals, not a completed distributed implementation. Sealing/relay/derive are
+outside the currently authorized phases.
+
 ## How to read this document
 
 This lists only the parts of Hydra Stream we are proposing as different from existing systems. Everything else (log storage, in-region replication, producer idempotence, and so on) is in the companion baseline document and is deliberately **not** claimed as new.
@@ -20,10 +28,10 @@ Two cautions apply to every item below:
 
 | # | Difference | Tier | What it replaces or adds | How we prove it |
 | --- | --- | --- | --- | --- |
-| 1 | Broker-side residency enforcement at every persistence and send point | P0 | Producer-supplied or gateway-only checks | Canary scan across fault scenarios, including mis-set producer lists |
-| 2 | Three destination modes: deny, sealed-only, cleartext | P1 | Binary allow or deny replication | Sealed-copy canary test and key-escrow drill |
+| 1 | Same signed class policy across persistence and lifecycle boundaries | P0 | Integration to compare with existing server-side restrictions | Full-path canary/history tests, including incorrect producer lists |
+| 2 | Per-destination mode plus explicit key/recovery policy | P1 | Proposed policy integration over existing ciphertext storage | Secure sealed-copy/restore tests; runtime disabled and outside current work |
 | 3 | Transit as an explicit policy dimension | P1 | Routing that ignores relay regions | Route test through a permitted ciphertext-only relay; deny test for others |
-| 4 | Per-class survival and degradation rules | P0 | One survival setting for the whole system | Failure matrix, class by class |
+| 4 | Per-class survival and degradation rules | P0 | Unified contract spanning existing topic-level replication/failover controls | Failure matrix, class by class |
 | 5 | Fencing built into the broker, gated by policy eligibility | P0 | Operator-run promotion and client reconfiguration | Stale-epoch writer test; partition and clock-skew tests |
 | 6 | Evidence package: canaries, decision log, stated limits | P0 / P1 | Configuration screenshots and assertions | Reproducible run script and raw logs |
 | 7 | Derive mode with offset lineage | P2 | Transformed topics with no offset relationship | Lineage lookup test |
@@ -32,7 +40,10 @@ Two cautions apply to every item below:
 
 **What exists.** Pulsar 5.0.x documents tenant/namespace `allowed-clusters` restrictions enforced independently of a producer's message-level replication list; producers cannot override those restrictions. It also supports topic-level replication targets. Kafka MirrorMaker 2 supports administrator-defined topic-filtered replication flows. The proposed difference must therefore be demonstrated across the full persistence, read, replay, backup and ownership lifecycle, rather than framed as the first server-side replication restriction. See sources S1 and S4 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
-**What we do.** One enforcement library, linked into the ingress, broker, replication sender and receiver, backup or tiered export, consumer fetch, telemetry export and admin tools. A record’s class and the signed policy version are stamped into its envelope at ingress. No component can write to disk or send bytes across a region boundary without calling the same decision function.
+**Proposed integration.** One enforcement library across ingress, broker, sender,
+receiver, fetch, replay, recovery, ownership, backup and telemetry. A source record
+retains its class and policy version. Only selected paths currently exist; the
+full integration must be demonstrated rather than inferred from action enums.
 
 **Why it matters.** A gateway check does nothing about a replication worker, a backup job, a retry topic or a replay tool. Server-side checks also remove reliance on every producer getting its list right.
 
@@ -48,7 +59,10 @@ Two cautions apply to every item below:
 
 **What exists.** Selective replication and client-side end-to-end encryption already exist, including in Pulsar. The proposed addition is a unified class policy selecting deny, ciphertext-only or cleartext for each destination, with explicit key and recovery-location constraints. Ciphertext storage alone is not novel. See S4–S5 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
-**What we do.** Each class has a mode per destination region. A sealed copy is ciphertext only, with keys that stay in the class’s key-residency region. EU regulator guidance lists strong encryption with exporter-held keys as an effective supplementary measure for storage-only transfers such as backup, which is the legal idea behind this mode.
+**Proposed integration.** A class selects destination modes and explicit key/
+recovery constraints. Runtime sealed transfer currently rejects. Applying any
+regulator guidance to a dataset/jurisdiction needs a separate assessment; the
+dated source review verified document identity, not those application conditions.
 
 **Why it matters.** It gives a class off-region durability without cleartext leaving its region, where the applicable regime allows it.
 
@@ -65,7 +79,9 @@ Two cautions apply to every item below:
 
 **What exists.** Dossier-style policy models list storage, processing, replication and backup regions. Multipath transport specifications leave path scheduling to the application, and academic wide-area stream processing work uses relay operators for path diversity without policy constraints.
 
-**What we do.** Policy has a transit-allowed list. A relay hop is permitted only if listed and only for ciphertext; the relay sees routing headers, not payload. The route selector first builds the permitted graph, then chooses within it.
+**Proposed integration.** An explicit transit list constrains ciphertext relay
+hops before route scoring. Current planner checks do not implement relay
+networking or establish encrypted representation. Relay remains outside current work.
 
 **Why it matters.** Rerouting around a slow link through a third region is also a data movement. Treating it as free would break the residency promise at exactly the moment the system is under stress.
 
@@ -77,7 +93,11 @@ Two cautions apply to every item below:
 
 **What exists.** Existing systems expose controls below whole-cluster granularity: Pulsar has topic replication policies, Confluent Cluster Linking manages mirror topics, and Redpanda Shadowing supports individual-topic failover. The proposed difference is the integrated class-specific contract spanning residency, acknowledgment, ownership and backpressure, not granularity alone. See S4, S6 and S7 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
-**What we do.** Each class declares its legal set, ownership mode (movable or pinned), acknowledgment mode, failover candidates and backpressure behavior. A class with no legal alternate region degrades by policy; other classes keep running. Pinned classes need no metadata quorum and keep accepting local writes if the control plane is lost.
+**Proposed integration.** Each class declares permitted regions, ownership,
+acknowledgment, failover and backpressure behavior. Distinct class budgets and
+failure evidence must demonstrate isolation. Pinned continuity is a design
+requirement, not current behavior; the strict-authority option in the pending
+Phase 0 contract would leave NFR-01 unresolved.
 
 **Why it matters.** It makes the trade-off between sovereignty and survivability explicit per class, rather than hiding it behind a single cluster-wide setting, and it is our concrete reading of “survives a regional outage without freezing.”
 
@@ -87,17 +107,21 @@ Two cautions apply to every item below:
 
 - A single-region class cannot survive loss of its region; we say so rather than hide it.
 - `local-quorum` classes can lose acknowledged-but-unreplicated records on region loss (bounded by replication lag).
-- `legal-set-sync(k)` classes avoid that for acknowledged records but pay latency and can block writes when k replicas are unreachable.
+- Synchronous regional durability requires explicit distinct-region counting,
+  surviving-copy assumptions and verified promotion history; the meaning of K
+  and its blocking behavior await Phase 0 approval.
 
 ## 5. Fencing built into the broker, gated by policy eligibility (P0)
 
 **What exists.** The reviewed Cluster Linking documentation exposes promote/failover plus restore/reverse operations. Redpanda explicitly directs operators to reconfigure clients before resuming writes to avoid split brain. Pulsar replicated subscriptions synchronize the baseline mark-delete cursor, not every individual acknowledgment, so failover can redeliver messages. This targeted review supports testing integrated policy-gated fencing against those documented workflows; it does not establish that every existing product lacks automated failover. See S4, S6 and S7 in the [source review](SOURCES_AND_PRIOR_ART.md).
 
-**What we do.**
+**Proposed integration; not implemented as a distributed protocol.**
 
 - Per-partition `(owner_region, epoch)` held in a small payload-free metadata quorum.
 - Time-limited ownership leases; replicas reject appends carrying a lower epoch; an owner that cannot renew its lease stops acknowledging writes and fences itself.
-- Promotion requires that policy lists the candidate as eligible, that it holds a replica, that the old lease has expired and that a quorum commits the new epoch.
+- Promotion requires current policy eligibility, a verified committed replica
+  frontier, exclusion of the prior owner and a quorum-committed grant. A caller's
+  `holds_replica` boolean is insufficient.
 - A recovered old owner’s superseded log suffix goes to a local quarantine segment, never replicated and never silently deleted.
 
 **Why it matters.** Safety no longer depends on an operator reaching every client in time, and the legal question (may this region take over this class?) is answered by the same policy as everything else.
@@ -115,7 +139,7 @@ Two cautions apply to every item below:
 
 **What exists.** Residency tooling typically offers configuration, audit logging and compliance snapshots. The tooling we reviewed also notes that audit logs can themselves become regulated data.
 
-**What we do.**
+**Proposed evidence package.**
 
 - P0: a canary scanner and invariant checkers (loss, duplicate, order, stale epoch), a one-command reproducible test run, raw logs published with results.
 - P1: a region-local, hash-chained decision log that records decisions and policy versions but never payload.
@@ -125,13 +149,17 @@ Two cautions apply to every item below:
 
 **Proof.** The run script itself, with seeds and configuration committed.
 
-**Honest limits.** Hash-chaining makes tampering detectable, not impossible. The scan covers observed locations only. We do not claim cryptographic proof of physical location.
+**Honest limits.** An internal chain detects covered edits but cannot detect a
+removed valid suffix without an independent anchor. Periodic anchors cover only
+their committed prefix; later entries remain unwitnessed. Scans cover observed
+locations only and do not prove physical location.
 
 ## 7. Derive mode with offset lineage (P2)
 
 **What exists.** Offset-preserving mirroring (Cluster Linking, Redpanda Shadowing) works only for exact copies; transformed or sanitized topics are a new log with no formal link back to source offsets.
 
-**What we do.** A derive mode that writes a transformed copy as a new log and records a source-to-derived offset map, so consumers and auditors can trace lineage.
+**Proposed, outside current work.** A transformed log with an explicit source-to-
+derived offset map; this is not an implemented API.
 
 **Honest limits.** Cut first if time is short. If cut, it is removed from all pitch material, not mentioned as a feature.
 
@@ -144,7 +172,11 @@ Two cautions apply to every item below:
 
 ## Draft novelty statement (adjust to what survives the cut line)
 
-*Hydra Stream is a prototype broker that enforces a signed, versioned residency policy at every point where payload is stored or sent, allows ciphertext-only replicas where policy permits, treats relay hops as policy-controlled data movement, and fences regional failover with epochs gated by the same policy. We evaluate it against Kafka with MirrorMaker 2 and Pulsar geo-replication in an emulated three-region testbed, and report both the cases where it helps and the cases where it cannot.*
+*Kamish investigates one recoverable signed class-policy contract across
+admission, storage, replication, replay, recovery and ownership change. Selected
+local paths have tests; the complete lifecycle and equivalently configured,
+version-pinned Kafka/MirrorMaker 2 and Pulsar comparisons remain to be built and
+measured. Results must identify the mechanism, fault model and observed scope.*
 
 ## Claims review checklist before submission
 

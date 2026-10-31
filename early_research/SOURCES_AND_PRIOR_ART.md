@@ -42,7 +42,21 @@ The earlier Confluent `mirror-topics.html` URLs redirected to the documentation 
 5. **Offset preservation, quorum protocols, TLS, hysteresis, and async mirroring remain baseline engineering.** This agrees with the strongest parts of the original dossier.
 6. **Signed policies, canaries, and hash chains alone do not establish legal compliance or physical location.** Establish technical scope and dataset-specific policy authority separately.
 
-## 4. Further literature work
+## 4. Current research statement — 1 November 2026
+
+The proposed contribution is **one signed class policy applied consistently
+across admission, storage, replication, replay, recovery and ownership change**,
+tested with scope-specific evidence against correctly configured baselines.
+Pulsar's server-enforced allowed clusters [S4] and existing ciphertext storage
+[S5] must be enabled/accounted for in those comparisons. Neither mechanism alone
+is a Kamish novelty claim.
+
+This wording uses the dated source review above; no fresh source retrieval or
+comparative deployment was performed for Phase 0. The
+[contract proposal](../docs/CONTRACT.md) awaits approval. It does not establish
+end-to-end lifecycle behavior, secure sealing or baseline superiority.
+
+## 5. Further literature work
 
 - Read the full Raft paper and application-level fencing/lease analyses; model policy epoch, owner epoch, durable frontier, and crash transitions together.
 - Evaluate OpenRaft/raft-rs versus an external consensus service for Rust integration. Review exact versions, storage adapters, snapshots, membership change, maintenance and licenses before choosing.

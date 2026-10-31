@@ -1,0 +1,4 @@
+PASS: 9 Markdown files checked (local links, anchors, fences, whitespace).
+PASS: all 12 raw baseline output hashes match checks.json.
+PASS: report probe transcript equals the complete raw output.
+PASS: no tracked application, test, SDK, frontend, or historical result.txt changes.

@@ -9,12 +9,23 @@ Research update: **31 October 2026**. Implementation reviewed at commit
 the subsequent fixes, safe containment, format migrations and remaining work.
 The research reports below retain their original revision-specific findings.
 
+**Phase 0 update, 1 November 2026:** [Contract proposal](../docs/CONTRACT.md) and
+[ADR-0015](../decisions.md#adr-0015-phase-0-contract-and-approval-gates) await
+approval. The [fresh baseline](../audit/phase0_baseline_2026-10-31_204424Z/REPORT.md)
+at `77bb051` has 102 workspace tests passing, original probes 11 passing, and
+extended probes four passing / two failing. No distributed work item is closed.
+
 1. [Loopholes and design review](LOOPHOLES_REVIEW.md): implementation counterexamples, unresolved semantics, and corrections to the original research.
 2. [Configuration and experiment roadmap](CONFIGURATION_ROADMAP.md): settings available today, proposed settings, architecture choices, and prioritized experiments.
 3. [Sources and prior-art comparison](SOURCES_AND_PRIOR_ART.md): dated primary sources and a five-system comparison.
 4. [Probe results and reproduction](PROBE_RESULTS.md): 61 application tests pass; the independent research harness exposes 10 counterexamples in 11 checks.
 
-**Main conclusion:** the strongest research direction is a single, recoverable policy contract governing replication, recovery, and ownership. The current implementation has useful components, but its end-to-end guarantees lag behind both the design and some audit claims. Performance tuning should follow correctness work.
+**Main conclusion:** the defensible hypothesis is one recoverable signed class
+policy applied consistently across admission, storage, replication, replay,
+recovery and ownership change, with scope-specific evidence. Pulsar already
+enforces allowed clusters server-side, and ciphertext storage is existing prior
+art. Current local tests do not establish the full hypothesis or a comparative
+advantage; performance comparisons must follow the missing correctness work.
 
 ## Original research documents reviewed
 

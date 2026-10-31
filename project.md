@@ -18,6 +18,13 @@ diagrams: "Mermaid (renders natively on GitHub, GitLab, VS Code, Obsidian)"
 
 **Document status:** Draft v0.1 · 31 Oct 2026 · Prototype scope, not a compliance product.
 
+**Implementation/contract update, 1 Nov 2026:** Architecture diagrams and sketches
+below are design intent. [worktillnow.md](worktillnow.md) records implementation
+scope. [docs/CONTRACT.md](docs/CONTRACT.md) proposes explicit modes, ACK durability,
+watermark identity, audit witnessing and revocation semantics; it awaits approval.
+Requirement and invariant numbers remain unchanged. In particular, the proposed
+initial strict authority mode would leave NFR-01 pending, not satisfy it.
+
 ---
 
 ## How This Document Is Organised
@@ -172,23 +179,41 @@ Tiers: **P0** committed · **P1** committed if time allows · **P2** cut first, 
 
 ## 1.6 What Is Different (Novelty)
 
-Only the following are proposed as different. Everything in [section 1.5](#15-build-reuse-and-tiers) is standard engineering and is **not** claimed as new.
+The research hypothesis is **one signed class policy applied consistently across
+admission, storage, replication, replay, recovery and ownership change**, evaluated
+with scope-specific evidence. It is not a claim that any one of those mechanisms
+is new or that the complete lifecycle is already implemented.
 
-| # | Difference | Tier | Proof |
+Pulsar enforces tenant/namespace allowed-cluster restrictions server-side;
+producers cannot override them. Ciphertext-only storage through client encryption
+is also existing prior art. Topic-level replication/failover, fencing, hash chains
+and canaries are established techniques. See S1–S7 in the
+[dated source review](early_research/SOURCES_AND_PRIOR_ART.md). Compare against
+those real controls, not an artificially unrestricted producer-list baseline.
+
+The D identifiers below retain their original design references. They identify
+parts of the proposed integrated contract, not independently established novelty.
+Everything in [section 1.5](#15-build-reuse-and-tiers) remains standard engineering.
+
+| # | Proposed integration | Tier | Evidence required / current boundary |
 | --- | --- | --- | --- |
-| D1 | Broker-side residency enforcement at every persistence and send point | P0 | Canary scan across fault scenarios, including mis-set producer lists |
-| D2 | Three destination modes: deny, sealed-only, cleartext | P1 | Sealed-copy canary test and key-escrow drill |
-| D3 | Transit as an explicit policy dimension | P1 | Permitted ciphertext-only relay test and denied-relay test |
-| D4 | Per-class survival and degradation rules | P0 | Failure matrix, class by class |
-| D5 | Fencing built into the broker, gated by policy eligibility | P0 | Stale-epoch writer test, partition and clock-skew tests |
-| D6 | Evidence package: canaries, decision log, stated limits | P0 / P1 | Reproducible run script and raw logs |
-| D7 | Derive mode with offset lineage | P2 | Lineage lookup test |
+| D1 | Same signed policy at persistence, movement and lifecycle boundaries | P0 | Full-path canary/history tests with positive controls; current checks cover selected local paths |
+| D2 | Per-destination mode plus key/restore policy | P1 | Secure ciphertext/restore evidence; sealed runtime remains disabled and outside current work |
+| D3 | Explicit transit policy | P1 | Actual permitted/denied relay evidence; relay implementation outside current work |
+| D4 | Class-specific durability, ownership and degradation contract | P0 | Independent failure histories per class; not established by enum variants |
+| D5 | Authoritative owner fencing gated by the same policy | P0 | Quorum/restart/partition tests; independent-owner probe currently fails |
+| D6 | Reproducible lifecycle evidence with stated scope | P0 / P1 | Real-byte canary/history checks and independent audit anchors; completeness probe currently fails |
+| D7 | Derived stream lineage | P2 | Outside current work; not an implemented capability |
 
 **Explicitly not new:** offset-preserving mirror replication, producer idempotence, per-partition ordering, majority-fsync replication, Raft metadata, TLS 1.3, standard congestion control, and hysteresis or circuit-breaker route stability (we only apply them inside the policy-permitted graph).
 
-**Draft novelty statement** *(adjust to what survives the cut line):*
+**Research statement, pending implementation and comparative evidence:**
 
-> Hydra Stream is a prototype broker that enforces a signed, versioned residency policy at every point where payload is stored or sent, allows ciphertext-only replicas where policy permits, treats relay hops as policy-controlled data movement, and fences regional failover with epochs gated by the same policy. We evaluate it against Kafka with MirrorMaker 2 and Pulsar geo-replication in an emulated three-region testbed, and report both the cases where it helps and the cases where it cannot.
+> Kamish investigates whether one recoverable signed class-policy contract across
+> admission, storage, replication, replay, recovery and ownership change improves
+> the measured behavior of a broker under specified failures. Current results
+> establish selected local mechanisms. Comparison with equivalently configured,
+> version-pinned Kafka/MirrorMaker 2 and Pulsar remains future experimental work.
 
 **Comparison basis.** Statements about other systems come from public documentation and vendor material reviewed in a targeted, not exhaustive, review. Word them as "in the documentation we reviewed", never "nobody does this", and re-check before submission.
 
@@ -1589,18 +1614,32 @@ gantt
 
 ## 4.9 Demo Script
 
-Five minutes, one network impairment and one regional outage.
+Proposed five-minute presentation sequence; timings are a storyboard, not measured
+execution durations. Every step must display its scope. The current frontend is
+local simulation and is not a source of broker evidence.
 
-| Time | Action | What the audience sees |
+| Time | Scope and action | Evidence and limitation |
 | --- | --- | --- |
-| 0:00 | Show three regions, policy classes, and canary dashboard | Class `EU-restricted` limited to Regions A and B, class `open` allowed everywhere |
-| 0:45 | Start load, show healthy replication lag | Lag near baseline, zero canary hits in Region C for the restricted class |
-| 1:30 | Degrade the A to B link with `tc` | Outbox depth rises, route selector reports the permitted alternate or "no legal alternate" |
-| 2:15 | Show a mis-set producer replication list | Broker refuses, audit shows `send.deny` |
-| 3:00 | Partition and kill Region A | Lease expires, eligible Region B is promoted with a higher epoch |
-| 3:45 | Heal Region A | A self-fences, superseded suffix goes to quarantine, A catches up as follower |
-| 4:30 | Run the checkers and canary scanner | Loss, duplicate, order and stale-epoch results with scope and limitations |
-| 5:00 | Show the run script and raw logs | Anyone can re-run it |
+| 0:00 | **SIMULATED:** show the browser's logical regions and class examples | Browser state only; no connected broker, actual regional metrics or live canary dashboard |
+| 0:45 | **LOCAL IMPLEMENTATION:** show `tests::test_multi_broker_replication_and_watermark_catchup` | In-process broker/log replication test in `cmd/kamish-broker/src/lib.rs`, included in the baseline; not independent regional quorum durability |
+| 1:30 | **SIMULATED:** run the slow-link scenario in `scripts/run_demo.sh` | Tokio timer-based traversal from `developer_b_scenarios.rs`; no `tc/netem` is applied. The CLI benchmark's separate delay object is not wired to its workload |
+| 2:15 | **LOCAL IMPLEMENTATION:** show `tests::test_broker_outbox_replication_filter` and the original policy probes | Selected configured local broker paths reject disallowed targets; this is not a scan of all storage/export locations |
+| 3:00 | **LOCAL COUNTEREXAMPLE:** display the actual independent-owner probe failure | Both independent unregistered regions can ACK epoch one. Do not narrate a working regional promotion |
+| 3:45 | **SIMULATED DESIGN ILLUSTRATION:** explain the proposed owner/reconciliation sequence | Label it unimplemented. No actual common-prefix truncation/quarantine/follower-rejoin claim |
+| 4:30 | **EXECUTED BASELINE EVIDENCE:** show full probe output, including both failures | Original probes: 11 pass; extended: 4 pass / 2 fail at the recorded revision. Full history/canary evidence is future work |
+| 5:00 | **EXECUTED BASELINE EVIDENCE:** show commands, revision and raw outputs | [Phase 0 baseline report](audit/phase0_baseline_2026-10-31_204424Z/REPORT.md). A configuration-driven distributed scenario runner is not yet implemented |
+
+To rerun the two selected local broker tests from the repository root:
+
+```bash
+cargo test -p kamish-broker --lib tests::test_multi_broker_replication_and_watermark_catchup -- --exact --nocapture
+cargo test -p kamish-broker --lib tests::test_broker_outbox_replication_filter -- --exact --nocapture
+```
+
+The baseline ran them as part of `cargo test --workspace`; these focused commands
+are reproduction instructions. Actual transport impairment, calibration, leader
+kill and history-checker demonstration require the later implementation/evidence
+phases and a new run record before this storyboard can be upgraded.
 
 ## 4.10 Open Questions and Assumptions
 

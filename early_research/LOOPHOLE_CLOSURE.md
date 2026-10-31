@@ -1,5 +1,11 @@
 # Loophole closure ledger — implementation stages 1–2
 
+**Phase 0 proposal, 1 November 2026:** [Contract](../docs/CONTRACT.md) and
+[fresh baseline](../audit/phase0_baseline_2026-10-31_204424Z/REPORT.md) are available.
+At `77bb051`, workspace 102 pass; original probes 11 pass; extended probes four
+pass / two fail. Contract/fixture/witness choices await approval; no new closure
+is claimed. Historical stage results below retain their original scope.
+
 **Subsequent fixes:** [Application resolution report](../audit/application_resolution_2026-11-01/REPORT.md)
 tracks replication ACK/range/stream-contract fixes, CLI corrections and truthful
 frontend simulation. Consensus ownership and trusted audit completeness remain open.

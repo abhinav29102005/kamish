@@ -12,6 +12,7 @@ All engineering decisions in this repository are recorded here and continuously 
 | **ADR-0002** | 2026-10-31 | Cargo Workspace & Module Architecture | Accepted | §3.6 (Repository & Module Layout) |
 | **ADR-0003** | 2026-10-31 | Task Audit Ledger & Continuous Spec Checking | Accepted | §1.4.1 (FR-10, FR-13), §3.5.3 (Invariants), §4.11 |
 | **ADR-0004** | 2026-10-31 | Hash-Chained Audit Log Design (`hydra-audit`) | Accepted | §1.4.1 (FR-13), §2.6, §2.7.5, §3.4.1, §4.7.1 |
+| **ADR-0015** | 2026-11-01 | Phase 0 contract and approval gates | **Proposed — awaiting approval** | §1.3–1.4, §2.4–2.6, §3.5.3; W01–W08/W11/W12/W28 |
 
 ---
 
@@ -309,4 +310,68 @@ The user provided a high-fidelity 3D dragon asset in `/model` (`978bcbdc4563d241
    - Interactive mouse parallax tracking and drag-to-orbit with smooth damping.
    - Respiration/hover sinusoidal animation simulating living breath and wing flex.
    - Volumetric dual-layer flame breath system (particle core + swirling ember sparks) bursting forth upon activating "FLAME ON 🔥".
-   - Dual-form color palette toggle: Shadow Monarch Form (violet/obsidian void) vs Apex Crimson Dragon Form (volcanic red/gold).
+    - Dual-form color palette toggle: Shadow Monarch Form (violet/obsidian void) vs Apex Crimson Dragon Form (volcanic red/gold).
+
+---
+
+## ADR-0015: Phase 0 contract and approval gates
+
+**Date:** 1 November 2026. **Status:** Proposed; no implementation authorization.
+
+### Context and evidence
+
+The [Phase 0 contract](docs/CONTRACT.md) defines candidate behavior for the next
+phases. Baseline at `77bb051` matches the expected 102 workspace tests and the
+11 original / four extended passing probes, with the same two extended failures.
+See the [new baseline report](audit/phase0_baseline_2026-10-31_204424Z/REPORT.md).
+
+Earlier ADRs record design intent and sometimes describe mechanisms more broadly
+than their implementation. In particular, ADR-0006/0008 do not establish a durable
+distributed authority, and ADR-0004 does not establish audit completeness.
+Use `project.md` requirement numbering and revision-specific evidence.
+
+### Choices requiring maintainer approval
+
+| Choice | Options and consequences | Recommendation |
+| --- | --- | --- |
+| D1 — deployment/authority | Explicit isolated single-node mode plus multi-region authority; multi-region unknown ownership denies. Strict quorum-authorized commit adds metadata to each write; cached leases/pinned grants need separately approved timing, revocation and restart semantics | Explicit modes; strict quorum-authorized completion for initial multi-region operation, leaving NFR-01 pending rather than silently changing its meaning |
+| D2 — audit coverage | Periodic checkpoints cover only the committed prefix, with explicit awaited finalization for closed runs; synchronous checkpointing at each required boundary provides tighter tail coverage at WAN/availability cost | Periodic plus explicit finalization; report unwitnessed tails. Approve count/time cadence and witness-outage budget before implementation |
+| D3 — ACK durability | Option 1: three payload replicas per region, ACK on two. Option 2: option 1 plus synchronous copies in K distinct regions, K including source. One-node-per-region emulation is a different contract and does not meet INV-2 | Option 1 first. If selecting option 2, specify K (2 or 3), resource budget and acceptance of blocking when too few permitted regions are reachable |
+| D4 — watermark identity | Bare maximum offset versus verified contiguous prefix bound to cluster/stream generation, source/receiver incarnation and full source envelope | Full identity-bound prefix; preserve source policy version/checksum/context and record receiver policy decisions separately |
+| D5 — audit witness | Editable colocated sidecar; separately persisted metadata quorum; external independent witness service | Payload-free three-voter metadata quorum with registered log/signer identity, retained signed checkpoint history and independent verifier trust configuration. Same-host limits remain explicit |
+| D6 — revocation/disposition | Grandfather old copies/operations; re-evaluate subsequent operations and require separately authorized purge/move/hold instructions | Intersect original admission with active policy/roles, deny revoked use/egress, report disposition pending. Never infer purge or a retention exception; W28 remains open |
+| D7 — existing test integration | Leave audit fixture without a witness (cannot establish periodic anchored coverage); explicitly configure real witness/finalization in setup while retaining the test name and tamper assertion | Approve explicit fixture integration plus positive controls. Keep both probes in `early_research/probes`; do not weaken assertions or make unconditional rejection count as authority |
+| D8 — regional promotion | Promote a possibly lagging mirror after source loss; require proof of the last potentially acknowledged frontier | Block automatic promotion without full frontier proof. Any recovery accepting missing records needs separate authorization/history and client semantics |
+
+### Why D7 is necessary
+
+The current audit probe uses `AuditLog::open(path)` without any external witness
+configuration, writes two entries, drops the writer and removes one. A periodic
+checkpoint is not guaranteed to run before that deletion. A proper test must
+establish the independent trusted checkpoint before testing tampering; neither
+an untrusted sidecar nor silently refusing all reopens implements that behavior.
+
+Likewise, local-success fixtures must explicitly select local mode or establish
+registered distributed ownership. The independent-region probe must remain a
+negative multi-region case, accompanied by positive registered-owner tests.
+
+### Pending implementation choices
+
+- Maintained Rust Raft library or external service, persistence adapter, license,
+  maintenance evidence and exact dependency/image pins: evaluate before adoption.
+- Audit signing-key provisioning, authorized metadata placement, checkpoint cadence
+  and outage backlog/age budget: not chosen by inventing defaults.
+- Cached leases/pinned grants, if chosen: clock/pause/restart and revocation rules
+  require a separate safety argument; a monotonic epoch alone is insufficient.
+- Phase 2 direct mTLS versus frozen Node SDK API: current SDK has no TLS options.
+  Approve a reviewed adapter/tunnel or future API change explicitly. Do not label
+  the present plaintext client-broker path as authenticated transport.
+- Phase 2 single-writer deployment: embedded agent versus defined IPC remains a
+  separate choice. Sealed mode remains disabled.
+
+### Decision and next step
+
+**Awaiting maintainer approval of D1–D8 and acknowledgement of the pending choices.**
+No W item or FR/NFR/INV implementation status changes in Phase 0. In particular,
+INV-7 and trusted audit completeness still have failing probes, INV-2/INV-3 await
+payload quorum/recovery, and NFR-01 must not be marked satisfied by strict option A.
