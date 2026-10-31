@@ -21,8 +21,40 @@ export default function Header({ onNavigate, onOpenSignIn, onOpenContact }) {
         KAMISH
       </div>
 
-      {/* Top Right: Sign in & Contact */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '2rem' }}>
+      {/* Top Right: 3D Story, Sign in & Contact */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+        <a
+          href="/3d.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            background: 'rgba(255, 107, 53, 0.15)',
+            border: '1px solid rgba(255, 107, 53, 0.5)',
+            color: '#ff6b35',
+            fontFamily: 'var(--font-mono, monospace)',
+            fontSize: '0.85rem',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            padding: '6px 16px',
+            borderRadius: '9999px',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = '#ff6b35';
+            e.currentTarget.style.color = '#000000';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(255, 107, 53, 0.15)';
+            e.currentTarget.style.color = '#ff6b35';
+          }}
+        >
+          3D Story Website ↗
+        </a>
+
         <button
           onClick={onOpenSignIn}
           style={{

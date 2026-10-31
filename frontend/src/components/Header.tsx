@@ -170,6 +170,17 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab, showHud
             <Zap className="w-3.5 h-3.5" />
             <span>Chaos Lab</span>
           </button>
+
+          <a
+            href="/3d.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono transition-colors bg-[#ff6b35]/15 text-[#ff6b35] border border-[#ff6b35]/40 hover:bg-[#ff6b35] hover:text-black font-bold"
+            title="Open 3D Scroll-Driven Story Website"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>3D Story Website ↗</span>
+          </a>
         </div>
 
         {/* Minimalist Action Controls */}

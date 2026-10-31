@@ -337,6 +337,7 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
     });
 
     // 9. High-Precision Pointer & Orbit Controls
+    // 9. High-Precision Window-Wide Pointer & Orbit Controls
     const canvas = renderer.domElement;
     canvas.style.touchAction = 'none';
 
@@ -344,9 +345,16 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
       isDraggingRef.current = true;
       targetRotationRef.current = null; // Clear auto-focus when user manually drags
       previousPositionRef.current = { x: e.clientX, y: e.clientY };
-      try {
-        canvas.setPointerCapture(e.pointerId);
-      } catch {}
+    };
+
+    const onGlobalPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('button, a, input, select, textarea, [role="button"], .pointer-events-auto')) {
+        if (target !== canvas && !target?.closest('.cursor-grab')) return;
+      }
+      isDraggingRef.current = true;
+      targetRotationRef.current = null;
+      previousPositionRef.current = { x: e.clientX, y: e.clientY };
     };
 
     const onPointerMove = (e: PointerEvent) => {
@@ -354,20 +362,17 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
       const deltaX = e.clientX - previousPositionRef.current.x;
       const deltaY = e.clientY - previousPositionRef.current.y;
 
-      globeGroupRef.current.rotation.y += deltaX * 0.008;
+      globeGroupRef.current.rotation.y += deltaX * 0.007;
       globeGroupRef.current.rotation.x = Math.max(
         -1.3,
-        Math.min(1.3, globeGroupRef.current.rotation.x + deltaY * 0.008)
+        Math.min(1.3, globeGroupRef.current.rotation.x + deltaY * 0.007)
       );
 
       previousPositionRef.current = { x: e.clientX, y: e.clientY };
     };
 
-    const onPointerUp = (e: PointerEvent) => {
+    const onPointerUp = () => {
       isDraggingRef.current = false;
-      try {
-        canvas.releasePointerCapture(e.pointerId);
-      } catch {}
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -380,10 +385,10 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('pointerdown', onGlobalPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     canvas.addEventListener('wheel', onWheel, { passive: false });
 
     // Initial globe orientation to highlight EU_WEST and US_EAST
@@ -452,10 +457,10 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
     return () => {
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
       canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerup', onPointerUp);
-      canvas.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointerdown', onGlobalPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       canvas.removeEventListener('wheel', onWheel);
       window.removeEventListener('resize', handleResize);
       renderer.dispose();
