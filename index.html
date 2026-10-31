@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KAMISH — Sovereignty-Aware Multi-Region Event Streaming Broker</title>
+  <meta name="description" content="Kamish: A sovereignty-aware, WAN-adaptive multi-region event streaming broker. Data stays where the law says it can. BIOS Hackathon 2026.">
+
+  <!-- Google Fonts: Cinzel (Sharp Display) & Inter (Clean Sans) & JetBrains Mono (Technical) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- CDN Dependencies: Three.js r128, GSAP 3.12.5, ScrollTrigger -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+
+  <style>
+    /* ==========================================================================
+       CONFIG & THEME VARIABLES
+       ========================================================================== */
+    :root {
+      --bg-dark: #07050a;
+      --card-bg: rgba(13, 10, 20, 0.78);
+      --card-border: rgba(255, 107, 53, 0.22);
+      --card-border-hover: rgba(255, 107, 53, 0.55);
+      
+      --color-ember: #ff6b35;
+      --color-crimson: #d90429;
+      --color-gold: #ffb703;
+      --color-ice: #00f5d4;
+      --color-white: #f8f9fa;
+      --color-muted: #94a3b8;
+
+      --font-display: 'Cinzel', serif, -apple-system;
+      --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    /* ==========================================================================
+       BASE RESETS & SCROLL SETUP
+       ========================================================================== */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      background-color: var(--bg-dark);
+      color: var(--color-white);
+      font-family: var(--font-body);
+      scroll-behavior: smooth;
+      overflow-x: hidden;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      overflow-x: hidden;
+      min-height: 100vh;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    ::selection {
+      background: var(--color-ember);
+      color: #000;
+    }
+
+    /* Fixed full-screen Three.js WebGL canvas */
+    #webgl {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 1;
+      pointer-events: none;
+      display: block;
+    }
+
+    /* Scrollable content layer */
+    #content {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      pointer-events: auto;
+    }
+
+    /* Fixed Navigation Ticker & Header */
+    header.site-header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 50;
+      padding: 1.25rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(7, 5, 10, 0.7);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: var(--color-white);
+    }
+
+    .brand-mark {
+      width: 1.75rem;
+      height: 1.75rem;
+      border: 1px solid var(--color-ember);
+      background: rgba(255, 107, 53, 0.12);
+      transform: rotate(45deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .brand-mark span {
+      transform: rotate(-45deg);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--color-ember);
+      font-weight: 700;
+    }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      font-weight: 900;
+      letter-spacing: 0.2em;
+    }
+
+    .header-links {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+    }
+
+    .header-links a {
+      color: var(--color-muted);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .header-links a:hover {
+      color: var(--color-white);
+    }
+
+    .btn-github {
+      padding: 0.4rem 0.9rem;
+      border: 1px solid rgba(255, 107, 53, 0.4);
+      background: rgba(255, 107, 53, 0.08);
+      color: var(--color-ember);
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-github:hover {
+      background: var(--color-ember);
+      color: #000;
+    }
+
+    /* Side Progress Navigation Dots */
+    .nav-dots {
+      position: fixed;
+      right: 1.5rem;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .nav-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+
+    .nav-dot.active {
+      background: var(--color-ember);
+      border-color: var(--color-ember);
+      transform: scale(1.4);
+    }
+
+    .nav-dot:hover {
+      border-color: var(--color-gold);
+    }
+
+    /* ==========================================================================
+       SECTIONS & SCROLL STORY
+       ========================================================================== */
+    section.story-section {
+      min-height: 100vh;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      padding: 6rem 2rem 4rem 2rem;
+      position: relative;
+    }
+
+    .container {
+      max-width: 1180px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    /* Glassmorphic story card */
+    .story-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(14px);
+      border-radius: 8px;
+      padding: 2.25rem 2.5rem;
+      max-width: 580px;
+      position: relative;
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.6);
+      transition: border-color 0.3s ease;
+    }
+
+    .story-card:hover {
+      border-color: var(--card-border-hover);
+    }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--color-ember);
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .eyebrow::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: var(--color-ember);
+      transform: rotate(45deg);
+    }
+
+    h1.hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(3rem, 8vw, 5.5rem);
+      font-weight: 900;
+      letter-spacing: 0.15em;
+      line-height: 1;
+      margin-bottom: 1rem;
+      color: var(--color-white);
+      text-shadow: 0 0 35px rgba(255, 107, 53, 0.3);
+    }
+
+    h2.section-title {
+      font-family: var(--font-display);
+      font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1.15;
+      margin-bottom: 0.85rem;
+      color: var(--color-white);
+    }
+
+    p.tagline {
+      font-size: clamp(1.1rem, 2vw, 1.4rem);
+      font-weight: 400;
+      color: var(--color-ice);
+      margin-bottom: 1.25rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.02em;
+    }
+
+    p.body-lead {
+      font-size: 1.05rem;
+      color: #cbd5e1;
+      line-height: 1.6;
+      margin-bottom: 1rem;
+    }
+
+    p.body-sub {
+      font-size: 0.88rem;
+      color: var(--color-muted);
+      line-height: 1.5;
+    }
+
+    /* Scope disclaimer tag */
+    .scope-tag {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      padding: 0.25rem 0.6rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      color: #94a3b8;
+      margin-top: 1rem;
+    }
+
+    /* Three Problem Cards Grid */
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+      margin-top: 1.5rem;
+      max-width: 900px;
+    }
+
+    .mini-card {
+      background: rgba(13, 10, 20, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 1.5rem;
+      transition: all 0.3s ease;
+    }
+
+    .mini-card:hover {
+      border-color: var(--color-ember);
+      transform: translateY(-4px);
+    }
+
+    .mini-card-tag {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--color-ember);
+      letter-spacing: 0.1em;
+      margin-bottom: 0.5rem;
+    }
+
+    .mini-card-title {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--color-white);
+      margin-bottom: 0.5rem;
+    }
+
+    .mini-card-desc {
+      font-size: 0.85rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+
+    /* Live HUD Meters */
+    .hud-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .badge-deny {
+      background: rgba(217, 4, 41, 0.2);
+      color: #ff4d6d;
+      border: 1px solid rgba(217, 4, 41, 0.45);
+    }
+
+    .badge-reroute {
+      background: rgba(0, 245, 212, 0.15);
+      color: var(--color-ice);
+      border: 1px solid rgba(0, 245, 212, 0.35);
+    }
+
+    .badge-epoch {
+      background: rgba(255, 183, 3, 0.15);
+      color: var(--color-gold);
+      border: 1px solid rgba(255, 183, 3, 0.4);
+    }
+
+    /* Dynamic Floating send.deny HUD Badge */
+    .hud-deny-callout {
+      position: fixed;
+      display: none;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #ff0055;
+      background: #0d0a14;
+      border: 1px solid #ff0055;
+      padding: 0.35rem 0.75rem;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 100;
+      box-shadow: 0 0 24px rgba(255, 0, 85, 0.8);
+      transform: translate(-50%, -50%);
+      transition: opacity 0.25s ease;
+      white-space: nowrap;
+    }
+
+    /* Evidence Dashboard Grid */
+    .evidence-dashboard {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin: 1.25rem 0;
+    }
+
+    .metric-box {
+      background: rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 1.1rem;
+      text-align: center;
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: var(--color-ice);
+      line-height: 1.1;
+    }
+
+    .metric-label {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 0.3rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Roadmap Timeline */
+    .roadmap-track {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 1rem;
+      margin-top: 1.5rem;
+      width: 100%;
+    }
+
+    .stage-item {
+      background: rgba(13, 10, 20, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 6px;
+      padding: 1.2rem;
+      position: relative;
+      transition: border-color 0.25s ease;
+    }
+
+    .stage-item:hover {
+      border-color: var(--color-ember);
+    }
+
+    .stage-num {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--color-ember);
+      margin-bottom: 0.4rem;
+    }
+
+    .stage-title {
+      font-family: var(--font-display);
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--color-white);
+      margin-bottom: 0.3rem;
+    }
+
+    .stage-desc {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+
+    /* Footer */
+    footer.site-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(7, 5, 10, 0.95);
+      padding: 3rem 2rem 4rem 2rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #64748b;
+    }
+
+    .footer-content {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .footer-note {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin-top: 0.5rem;
+    }
+
+    /* Scroll Prompt Indicator */
+    .scroll-hint {
+      position: absolute;
+      bottom: 2.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.2em;
+      color: var(--color-ember);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      opacity: 0.8;
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    .scroll-arrow {
+      width: 1px;
+      height: 20px;
+      background: var(--color-ember);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; transform: translate(-50%, 0); }
+      50% { opacity: 1; transform: translate(-50%, 6px); }
+    }
+
+    /* Alignment utility classes */
+    .align-right { margin-left: auto; }
+    .align-center { margin: 0 auto; text-align: center; }
+
+    /* ==========================================================================
+       RESPONSIVE & REDUCED MOTION
+       ========================================================================== */
+    @media (max-width: 768px) {
+      header.site-header { padding: 1rem 1.25rem; }
+      section.story-section { padding: 5rem 1.25rem 3rem 1.25rem; }
+      .story-card { padding: 1.5rem; }
+      .nav-dots { display: none; }
+      .evidence-dashboard { grid-template-columns: 1fr; }
+      .roadmap-track { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .scroll-hint { animation: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==========================================================================
+       WEBGL CANVAS LAYER & HUD CALLOUTS
+       ========================================================================== -->
+  <canvas id="webgl"></canvas>
+  <div id="denyCallout" class="hud-deny-callout">send.deny</div>
+
+  <!-- ==========================================================================
+       FIXED HEADER
+       ========================================================================== -->
+  <header class="site-header">
+    <a href="#hero" class="brand">
+      <div class="brand-mark"><span>K</span></div>
+      <div class="brand-title">KAMISH</div>
+    </a>
+    <div class="header-links">
+      <span style="color: #64748b;">BIOS HACKATHON 2026</span>
+      <a href="https://github.com/abhinav29102005/kamish" target="_blank" rel="noopener noreferrer" class="btn-github">
+        GitHub ↗
+      </a>
+    </div>
+  </header>
+
+  <!-- ==========================================================================
+       SIDE NAVIGATION PROGRESS TRACKER
+       ========================================================================== -->
+  <nav class="nav-dots" id="navDots" aria-label="Section Navigation">
+    <button class="nav-dot active" data-index="0" title="Hero"></button>
+    <button class="nav-dot" data-index="1" title="The Problem"></button>
+    <button class="nav-dot" data-index="2" title="Residency Enforcement"></button>
+    <button class="nav-dot" data-index="3" title="Adaptive Routing"></button>
+    <button class="nav-dot" data-index="4" title="Failover & Epochs"></button>
+    <button class="nav-dot" data-index="5" title="Evidence"></button>
+    <button class="nav-dot" data-index="6" title="Roadmap"></button>
+    <button class="nav-dot" data-index="7" title="Footer"></button>
+  </nav>
+
+  <!-- ==========================================================================
+       SCROLL STORY CONTENT LAYER
+       ========================================================================== -->
+  <div id="content">
+
+    <!-- 1. HERO SECTION -->
+    <section class="story-section" id="hero">
+      <div class="container">
+        <div class="story-card">
+          <div class="eyebrow">BIOS Hackathon 2026 · Multi-Region Event Streaming</div>
+          <h1 class="hero-title">KAMISH</h1>
+          <p class="tagline">"Data stays where the law says it can."</p>
+          <p class="body-lead">
+            An apex guardian event streaming broker designed for strict multi-region data sovereignty, WAN jitter adaptation, and zero-loss failover.
+          </p>
+          <div class="scope-tag">In the tested scenarios · Apache Kafka Protocol Compatible</div>
+        </div>
+      </div>
+      <div class="scroll-hint">
+        <span>SCROLL DOWN</span>
+        <div class="scroll-arrow"></div>
+      </div>
+    </section>
+
+    <!-- 2. THE PROBLEM SECTION -->
+    <section class="story-section" id="problem">
+      <div class="container">
+        <div class="story-card align-right">
+          <div class="eyebrow">The Multi-Region Challenge</div>
+          <h2 class="section-title">Three Unforgiving Hazards</h2>
+          <p class="body-lead">
+            Traditional event brokers assume unified network fidelity and boundary-free replication. In modern sovereign infrastructure, all three fail simultaneously.
+          </p>
+          
+          <div class="problem-grid">
+            <div class="mini-card">
+              <div class="mini-card-tag">HAZARD 01</div>
+              <div class="mini-card-title">Residency</div>
+              <div class="mini-card-desc">Accidental cross-border packet egress triggers irreversible sovereign compliance breaches.</div>
+            </div>
+            <div class="mini-card">
+              <div class="mini-card-tag">HAZARD 02</div>
+              <div class="mini-card-title">Adaptivity</div>
+              <div class="mini-card-desc">Transatlantic cables degrade with 300ms+ jitter, backing up outbox queues and stalling local producers.</div>
+            </div>
+            <div class="mini-card">
+              <div class="mini-card-tag">HAZARD 03</div>
+              <div class="mini-card-title">Survivability</div>
+              <div class="mini-card-desc">Sudden regional blackout produces split-brain ghost commits unless strict monotonic leases fence old leaders.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. RESIDENCY ENFORCEMENT SECTION -->
+    <section class="story-section" id="residency">
+      <div class="container">
+        <div class="story-card">
+          <div class="eyebrow">Zero-Egress Guard · Gate 2</div>
+          <span class="hud-badge badge-deny">SEND.DENY ENFORCEMENT</span>
+          <h2 class="section-title">Residency Enforcement</h2>
+          <p class="body-lead">
+            One decision function guards every point where data is stored or sent.
+          </p>
+          <p class="body-sub">
+            Crimson packets sent toward Region C hit a scale-like barrier at its boundary, flash, and burn out with a <code style="color: #ff0055; font-family: var(--font-mono); font-weight: 700;">send.deny</code> label. Ice-blue packets pass through unimpeded.
+          </p>
+          <div class="scope-tag">In the tested scenarios · Zero egress violations</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. ADAPTIVE ROUTING SECTION -->
+    <section class="story-section" id="adaptivity">
+      <div class="container">
+        <div class="story-card align-right">
+          <div class="eyebrow">WAN Dynamics · Gate 3</div>
+          <span class="hud-badge badge-reroute">DYNAMIC REROUTE ACTIVE</span>
+          <h2 class="section-title">Adaptive Routing</h2>
+          <p class="body-lead">
+            "Policy is a hard filter, never a score."
+          </p>
+          <p class="body-sub">
+            The A–B link degrades (turns red, packets slow and jitter). Ice-blue traffic reroutes via Region C. Crimson traffic holds at Region A because there is no legal alternate.
+          </p>
+          <div class="scope-tag">In the tested scenarios · Zero leaks during link degradation</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. FAILOVER SECTION -->
+    <section class="story-section" id="failover">
+      <div class="container">
+        <div class="story-card">
+          <div class="eyebrow">Survivability · Gate 4</div>
+          <span class="hud-badge badge-epoch">EPOCH LEASE: <strong id="epochNum" style="color: #ffb703; font-size: 1.05rem; margin-left: 0.25rem;">7</strong></span>
+          <h2 class="section-title">Failover</h2>
+          <p class="body-lead">
+            Region A goes dark. Region B is promoted: its platform brightens and an epoch counter changes 7 &rarr; 8.
+          </p>
+          <p class="body-sub">
+            When A returns, a stale epoch-7 packet is rejected and diverted into a small quarantine box.
+          </p>
+          <div class="scope-tag">In the tested scenarios · Zero split-brain commits</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. EVIDENCE SECTION -->
+    <section class="story-section" id="evidence">
+      <div class="container">
+        <div class="story-card align-center" style="max-width: 680px;">
+          <div class="eyebrow" style="justify-content: center;">Audit Ledger Verification</div>
+          <h2 class="section-title">Evidence</h2>
+          <p class="body-lead">
+            Verified across simulated multi-region chaos partitions.
+          </p>
+
+          <div class="evidence-dashboard">
+            <div class="metric-box">
+              <div class="metric-value">0</div>
+              <div class="metric-label">Leaks in Region C</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-value">0</div>
+              <div class="metric-label">Loss</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-value">0</div>
+              <div class="metric-label">Stale-Epoch Commits</div>
+            </div>
+          </div>
+
+          <div class="scope-tag">In the tested scenarios</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. ROADMAP SECTION -->
+    <section class="story-section" id="roadmap">
+      <div class="container">
+        <div class="story-card" style="max-width: 100%;">
+          <div class="eyebrow">Future Iterations</div>
+          <h2 class="section-title">Engine Roadmap</h2>
+          <p class="body-lead">
+            From BIOS hackathon prototype to hardened multi-cloud sovereign mesh.
+          </p>
+
+          <div class="roadmap-track">
+            <div class="stage-item">
+              <div class="stage-num">PHASE 01</div>
+              <div class="stage-title">Core Append Log</div>
+              <div class="stage-desc">Memory-mapped dense offset segment logs with fsync quorum.</div>
+            </div>
+            <div class="stage-item">
+              <div class="stage-num">PHASE 02</div>
+              <div class="stage-title">Enforcer Gating</div>
+              <div class="stage-desc">Policy engine verifying residency rules at all E1–E10 inspection points.</div>
+            </div>
+            <div class="stage-item">
+              <div class="stage-num">PHASE 03</div>
+              <div class="stage-title">Adaptive WAN</div>
+              <div class="stage-desc">Dynamic path selection based on sub-second link RTT metrics.</div>
+            </div>
+            <div class="stage-item">
+              <div class="stage-num">PHASE 04</div>
+              <div class="stage-title">Epoch Leases</div>
+              <div class="stage-desc">Monotonic CAS lease fencing preventing split-brain commits.</div>
+            </div>
+            <div class="stage-item">
+              <div class="stage-num">PHASE 05</div>
+              <div class="stage-title">Client SDK & Prometheus</div>
+              <div class="stage-desc">Native Rust producer/consumer client with Prometheus scrape targets.</div>
+            </div>
+            <div class="stage-item">
+              <div class="stage-num">PHASE 06</div>
+              <div class="stage-title">Hardware HSM</div>
+              <div class="stage-desc">Enclave sealing with envelope encryption for sealed ciphertext.</div>
+            </div>
+          </div>
+
+          <div class="scope-tag">Stages 1–5 functional in current codebase</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8. FOOTER SECTION -->
+    <footer class="site-footer" id="footer">
+      <div class="footer-content">
+        <div>
+          <div style="font-family: var(--font-display); font-size: 1.1rem; color: var(--color-white); letter-spacing: 0.1em; margin-bottom: 0.25rem;">
+            KAMISH BROKER
+          </div>
+          <div>BIOS Hackathon 2026 · Team Project</div>
+          <div class="footer-note">Name inspired by Solo Leveling. Not affiliated.</div>
+        </div>
+
+        <div style="text-align: right;">
+          <a href="https://github.com/abhinav29102005/kamish" target="_blank" rel="noopener noreferrer" style="color: var(--color-ember); text-decoration: none; font-size: 0.85rem;">
+            github.com/abhinav29102005/kamish ↗
+          </a>
+          <div style="margin-top: 0.5rem; color: #475569; font-size: 0.7rem;">
+            Apache-2.0 / MIT License · Tested on Rust 1.80+
+          </div>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ==========================================================================
+       THREE.JS & GSAP SCROLL-DRIVEN ENGINE
+       ========================================================================== -->
+  <script>
+    /* ==========================================================================
+       1. TWEAKABLE CONFIGURATION CONSTANTS
+       ========================================================================== */
+    const CONFIG = {
+      colors: {
+        bg: 0x07050a,
+        obsidian: 0x0c0914,
+        obsidianEdge: 0x241d33,
+        ember: 0xff6b35,
+        crimson: 0xd90429,
+        gold: 0xffb703,
+        ice: 0x00f5d4,
+        white: 0xf8f9fa,
+        barrierRed: 0xff0055,
+        quarantineAmber: 0xffa200
+      },
+      particles: {
+        emberCount: window.innerWidth < 768 ? 60 : 160,
+        packetSpeed: 0.008,
+      },
+      camera: {
+        fov: 45,
+        near: 0.1,
+        far: 1000
+      }
+    };
+
+    const isMobile = window.innerWidth < 768;
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Register GSAP ScrollTrigger
+    gsap.registerPlugin(ScrollTrigger);
+
+    /* ==========================================================================
+       2. THREE.JS SCENE SETUP
+       ========================================================================== */
+    const canvas = document.getElementById('webgl');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(CONFIG.colors.bg);
+    scene.fog = new THREE.FogExp2(CONFIG.colors.bg, 0.015);
+
+    const camera = new THREE.PerspectiveCamera(
+      CONFIG.camera.fov,
+      window.innerWidth / window.innerHeight,
+      CONFIG.camera.near,
+      CONFIG.camera.far
+    );
+    camera.position.set(0, 16, 32);
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas: canvas,
+      antialias: !isMobile,
+      powerPreference: 'high-performance'
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+
+    /* ==========================================================================
+       3. LIGHTING
+       ========================================================================== */
+    const ambientLight = new THREE.AmbientLight(0x1a1528, 1.6);
+    scene.add(ambientLight);
+
+    const dirLight1 = new THREE.DirectionalLight(CONFIG.colors.ember, 2.2);
+    dirLight1.position.set(15, 25, 20);
+    scene.add(dirLight1);
+
+    const dirLight2 = new THREE.DirectionalLight(CONFIG.colors.ice, 1.2);
+    dirLight2.position.set(-20, -10, -15);
+    scene.add(dirLight2);
+
+    /* ==========================================================================
+       4. AMBIENT EMBER & ASH PARTICLES (DRIFTING UPWARDS)
+       ========================================================================== */
+    const emberCount = CONFIG.particles.emberCount;
+    const emberGeo = new THREE.BufferGeometry();
+    const emberPos = new Float32Array(emberCount * 3);
+    const emberVels = [];
+
+    for (let i = 0; i < emberCount; i++) {
+      emberPos[i * 3] = (Math.random() - 0.5) * 60;
+      emberPos[i * 3 + 1] = Math.random() * 40 - 10;
+      emberPos[i * 3 + 2] = (Math.random() - 0.5) * 60;
+      emberVels.push({
+        y: 0.02 + Math.random() * 0.04,
+        x: (Math.random() - 0.5) * 0.01,
+        z: (Math.random() - 0.5) * 0.01
+      });
+    }
+
+    emberGeo.setAttribute('position', new THREE.BufferAttribute(emberPos, 3));
+    const emberMat = new THREE.PointsMaterial({
+      color: CONFIG.colors.ember,
+      size: isMobile ? 0.35 : 0.5,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending
+    });
+    const emberParticles = new THREE.Points(emberGeo, emberMat);
+    scene.add(emberParticles);
+
+    /* ==========================================================================
+       5. ABSTRACT GEOMETRIC DRAGON-WING SILHOUETTE (IN BACKGROUND)
+       ========================================================================== */
+    const wingGroup = new THREE.Group();
+    const wingMaterial = new THREE.LineBasicMaterial({
+      color: CONFIG.colors.crimson,
+      transparent: true,
+      opacity: 0.35
+    });
+
+    // Create symmetrical geometric sharp polygon ribs
+    const ribCoords = [
+      [-24, 18, -40], [-14, 14, -38], [-4, 6, -35], [0, 4, -35],
+      [4, 6, -35], [14, 14, -38], [24, 18, -40],
+      [-22, 10, -40], [-12, 6, -38], [-3, 1, -35],
+      [3, 1, -35], [12, 6, -38], [22, 10, -40]
+    ];
+
+    const wingGeometry = new THREE.BufferGeometry();
+    const wingPoints = [];
+    // Cross-connecting triangles for technical sharp silhouette
+    for (let i = 0; i < ribCoords.length - 2; i += 2) {
+      wingPoints.push(
+        new THREE.Vector3(...ribCoords[i]),
+        new THREE.Vector3(...ribCoords[i + 1]),
+        new THREE.Vector3(...ribCoords[i + 2])
+      );
+    }
+    wingGeometry.setFromPoints(wingPoints);
+    const wingWireframe = new THREE.LineSegments(wingGeometry, wingMaterial);
+    wingGroup.add(wingWireframe);
+    scene.add(wingGroup);
+
+    /* ==========================================================================
+       6. THREE OBSIDIAN HEXAGONAL PLATFORMS (REGIONS A, B, C)
+       ========================================================================== */
+    function createHexPlatform(name, colorAccent, pos) {
+      const group = new THREE.Group();
+      group.position.set(pos.x, pos.y, pos.z);
+
+      // Base beveled hexagon cylinder
+      const hexGeo = new THREE.CylinderGeometry(4.2, 4.4, 0.9, 6);
+      const hexMat = new THREE.MeshStandardMaterial({
+        color: CONFIG.colors.obsidian,
+        roughness: 0.25,
+        metalness: 0.85
+      });
+      const platform = new THREE.Mesh(hexGeo, hexMat);
+      group.add(platform);
+
+      // Glowing hex perimeter wireframe edge
+      const edgesGeo = new THREE.EdgesGeometry(hexGeo);
+      const edgeMat = new THREE.LineBasicMaterial({
+        color: colorAccent,
+        transparent: true,
+        opacity: 0.85
+      });
+      const edges = new THREE.LineSegments(edgesGeo, edgeMat);
+      group.add(edges);
+
+      // Concentric inner dragon-scale hex pattern
+      const innerHexGeo = new THREE.CylinderGeometry(2.5, 2.5, 0.95, 6);
+      const innerEdgesGeo = new THREE.EdgesGeometry(innerHexGeo);
+      const innerEdgeMat = new THREE.LineBasicMaterial({
+        color: colorAccent,
+        transparent: true,
+        opacity: 0.4
+      });
+      const innerEdges = new THREE.LineSegments(innerEdgesGeo, innerEdgeMat);
+      group.add(innerEdges);
+
+      // Center glowing beacon core
+      const beaconGeo = new THREE.CylinderGeometry(0.6, 0.6, 1.4, 16);
+      const beaconMat = new THREE.MeshBasicMaterial({
+        color: colorAccent,
+        transparent: true,
+        opacity: 0.9
+      });
+      const beacon = new THREE.Mesh(beaconGeo, beaconMat);
+      beacon.position.y = 0.5;
+      group.add(beacon);
+
+      // Floating Point Light
+      const pointLight = new THREE.PointLight(colorAccent, 1.4, 14);
+      pointLight.position.y = 1.8;
+      group.add(pointLight);
+
+      return { group, platform, edges, beacon, pointLight, baseColor: colorAccent };
+    }
+
+    const platformA = createHexPlatform('Region A (EU)', CONFIG.colors.ember, { x: -11, y: 0, z: -2 });
+    const platformB = createHexPlatform('Region B (EU)', CONFIG.colors.ice, { x: 0, y: 2, z: 9 });
+    const platformC = createHexPlatform('Region C (US)', CONFIG.colors.crimson, { x: 12, y: -1, z: -3 });
+
+    scene.add(platformA.group);
+    scene.add(platformB.group);
+    scene.add(platformC.group);
+
+    /* ==========================================================================
+       7. RESIDENCY SCALE BARRIER (AROUND REGION C)
+       ========================================================================== */
+    const barrierGeo = new THREE.SphereGeometry(5.2, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6);
+    const barrierMat = new THREE.MeshBasicMaterial({
+      color: CONFIG.colors.barrierRed,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.0 // Initially invisible, active in Section 3
+    });
+    const barrierC = new THREE.Mesh(barrierGeo, barrierMat);
+    barrierC.position.copy(platformC.group.position);
+    barrierC.position.y += 0.5;
+    scene.add(barrierC);
+
+    /* ==========================================================================
+       8. QUARANTINE BOX (REGION A FOR STALE EPOCH RECORD)
+       ========================================================================== */
+    const quarantineGeo = new THREE.BoxGeometry(2.2, 2.2, 2.2);
+    const quarantineEdgesGeo = new THREE.EdgesGeometry(quarantineGeo);
+    const quarantineMat = new THREE.LineBasicMaterial({
+      color: CONFIG.colors.quarantineAmber,
+      transparent: true,
+      opacity: 0.0
+    });
+    const quarantineBox = new THREE.LineSegments(quarantineEdgesGeo, quarantineMat);
+    quarantineBox.position.set(-16, 4, -4);
+    scene.add(quarantineBox);
+
+    /* ==========================================================================
+       9. VEINED INTER-REGION COMMUNICATION LINKS
+       ========================================================================== */
+    function createElevatedCurve(v1, v2, elev) {
+      const mid = new THREE.Vector3().addVectors(v1, v2).multiplyScalar(0.5);
+      const dist = v1.distanceTo(v2);
+      mid.y += dist * elev;
+      return new THREE.QuadraticBezierCurve3(v1, mid, v2);
+    }
+
+    const posA = new THREE.Vector3(-11, 0.8, -2);
+    const posB = new THREE.Vector3(0, 2.8, 9);
+    const posC = new THREE.Vector3(12, -0.2, -3);
+
+    const curveAB = createElevatedCurve(posA, posB, 0.22);
+    const curveAC = createElevatedCurve(posA, posC, 0.18);
+    const curveCB = createElevatedCurve(posC, posB, 0.22);
+
+    function createLinkLine(curve, color) {
+      const pts = curve.getPoints(50);
+      const geo = new THREE.BufferGeometry().setFromPoints(pts);
+      const mat = new THREE.LineBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.6
+      });
+      const line = new THREE.Line(geo, mat);
+      scene.add(line);
+      return { line, mat, curve };
+    }
+
+    const linkAB = createLinkLine(curveAB, CONFIG.colors.ember);
+    const linkAC = createLinkLine(curveAC, CONFIG.colors.crimson);
+    const linkCB = createLinkLine(curveCB, CONFIG.colors.ice);
+
+    /* ==========================================================================
+       10. PACKET TRAFFIC SYSTEM (ICE-BLUE OPEN & CRIMSON RESTRICTED)
+       ========================================================================== */
+    const packetGeo = new THREE.SphereGeometry(0.35, 8, 8);
+    const icePacketMat = new THREE.MeshBasicMaterial({ color: CONFIG.colors.ice });
+    const crimsonPacketMat = new THREE.MeshBasicMaterial({ color: CONFIG.colors.crimson });
+
+    const packets = [
+      // Packets on Link A-B (Normal flow)
+      { mesh: new THREE.Mesh(packetGeo, icePacketMat), curve: curveAB, t: 0.1, speed: 0.007, type: 'ice', active: true },
+      { mesh: new THREE.Mesh(packetGeo, crimsonPacketMat), curve: curveAB, t: 0.6, speed: 0.006, type: 'crimson', active: true },
+      
+      // Packets on Link A-C (Residency testing)
+      { mesh: new THREE.Mesh(packetGeo, icePacketMat), curve: curveAC, t: 0.3, speed: 0.0065, type: 'ice', active: true },
+      { mesh: new THREE.Mesh(packetGeo, crimsonPacketMat), curve: curveAC, t: 0.0, speed: 0.006, type: 'crimson', active: true },
+
+      // Packets on Link C-B (Relay path)
+      { mesh: new THREE.Mesh(packetGeo, icePacketMat), curve: curveCB, t: 0.45, speed: 0.007, type: 'ice', active: true }
+    ];
+
+    packets.forEach(p => scene.add(p.mesh));
+
+    // Stale epoch-7 packet diverted to quarantine box
+    const curveStaleToQuarantine = createElevatedCurve(
+      new THREE.Vector3(-11, 1.0, -2), // Platform A
+      new THREE.Vector3(-16, 4.0, -4), // Quarantine Box
+      0.32
+    );
+    const stalePacketGeo = new THREE.SphereGeometry(0.38, 8, 8);
+    const stalePacketMat = new THREE.MeshBasicMaterial({ color: CONFIG.colors.quarantineAmber });
+    const stalePacketMesh = new THREE.Mesh(stalePacketGeo, stalePacketMat);
+    stalePacketMesh.visible = false;
+    scene.add(stalePacketMesh);
+    let stalePacketT = 0.0;
+
+    /* ==========================================================================
+       11. DYNAMIC SCENE STATE & SCROLL STORY CONTROLLER
+       ========================================================================== */
+    const sceneState = {
+      targetCamPos: new THREE.Vector3(0, 16, 32),
+      targetLookAt: new THREE.Vector3(0, 0, 1),
+      barrierOpacity: 0.0,
+      linkABColor: CONFIG.colors.ember,
+      linkABJitter: 0.0,
+      regionAPower: 1.0,
+      regionBPower: 1.0,
+      quarantineOpacity: 0.0,
+      sectionIndex: 0
+    };
+
+    // ScrollTrigger scenes setup
+    const sections = document.querySelectorAll('section.story-section');
+    const navDots = document.querySelectorAll('.nav-dot');
+
+    function updateNavDots(activeIdx) {
+      navDots.forEach((dot, idx) => {
+        if (idx === activeIdx) dot.classList.add('active');
+        else dot.classList.remove('active');
+      });
+    }
+
+    // Nav dots click-to-scroll handler
+    navDots.forEach((dot) => {
+      dot.addEventListener('click', () => {
+        const idx = parseInt(dot.getAttribute('data-index'));
+        if (sections[idx]) {
+          sections[idx].scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+    });
+
+    // SECTION 1: HERO
+    ScrollTrigger.create({
+      trigger: '#hero',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 0;
+        updateNavDots(0);
+        gsap.to(sceneState.targetCamPos, { x: 0, y: 16, z: 32, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 0, z: 1, duration: 2 });
+        gsap.to(sceneState, { barrierOpacity: 0.0, linkABJitter: 0.0, regionAPower: 1.0, quarantineOpacity: 0.0, duration: 1 });
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 0;
+        updateNavDots(0);
+        gsap.to(sceneState.targetCamPos, { x: 0, y: 16, z: 32, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 0, z: 1, duration: 2 });
+      }
+    });
+
+    // SECTION 2: THE PROBLEM (Push camera toward platforms sequentially)
+    ScrollTrigger.create({
+      trigger: '#problem',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 1;
+        updateNavDots(1);
+        gsap.to(sceneState.targetCamPos, { x: -8, y: 9, z: 22, duration: 2.2 });
+        gsap.to(sceneState.targetLookAt, { x: 1, y: 1, z: 2, duration: 2.2 });
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 1;
+        updateNavDots(1);
+        gsap.to(sceneState.targetCamPos, { x: -8, y: 9, z: 22, duration: 2.2 });
+        gsap.to(sceneState.targetLookAt, { x: 1, y: 1, z: 2, duration: 2.2 });
+        gsap.to(sceneState, { barrierOpacity: 0.0, duration: 1 });
+      }
+    });
+
+    // SECTION 3: RESIDENCY ENFORCEMENT (Focus on Region C perimeter barrier)
+    ScrollTrigger.create({
+      trigger: '#residency',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 2;
+        updateNavDots(2);
+        // Push camera right up to Region C barrier boundary
+        gsap.to(sceneState.targetCamPos, { x: 12, y: 5, z: 14, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 12, y: 0, z: -3, duration: 2 });
+        gsap.to(sceneState, { barrierOpacity: 0.85, duration: 1 });
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 2;
+        updateNavDots(2);
+        gsap.to(sceneState.targetCamPos, { x: 12, y: 5, z: 14, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 12, y: 0, z: -3, duration: 2 });
+        gsap.to(sceneState, { barrierOpacity: 0.85, linkABJitter: 0.0, duration: 1 });
+      }
+    });
+
+    // SECTION 4: ADAPTIVE ROUTING (Link A-B degrades, ice traffic reroutes via C)
+    ScrollTrigger.create({
+      trigger: '#adaptivity',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 3;
+        updateNavDots(3);
+        gsap.to(sceneState.targetCamPos, { x: -3, y: 14, z: 24, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 2, z: 4, duration: 2 });
+        gsap.to(sceneState, { barrierOpacity: 0.4, linkABJitter: 0.6, duration: 1.2 });
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 3;
+        updateNavDots(3);
+        gsap.to(sceneState.targetCamPos, { x: -3, y: 14, z: 24, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 2, z: 4, duration: 2 });
+        gsap.to(sceneState, { linkABJitter: 0.6, regionAPower: 1.0, quarantineOpacity: 0.0, duration: 1 });
+      }
+    });
+
+    // SECTION 5: FAILOVER (Region A goes dark, B promoted with Epoch 8, quarantine box appears)
+    ScrollTrigger.create({
+      trigger: '#failover',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 4;
+        updateNavDots(4);
+        gsap.to(sceneState.targetCamPos, { x: -6, y: 8, z: 18, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: -4, y: 1, z: 4, duration: 2 });
+        gsap.to(sceneState, { regionAPower: 0.1, regionBPower: 2.4, quarantineOpacity: 0.9, duration: 1.5 });
+        const epochEl = document.getElementById('epochNum');
+        if (epochEl) {
+          epochEl.textContent = '8';
+          epochEl.style.color = '#00f5d4';
+        }
+        stalePacketT = 0.0;
+        stalePacketMesh.visible = true;
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 4;
+        updateNavDots(4);
+        gsap.to(sceneState.targetCamPos, { x: -6, y: 8, z: 18, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: -4, y: 1, z: 4, duration: 2 });
+        gsap.to(sceneState, { regionAPower: 0.1, regionBPower: 2.4, quarantineOpacity: 0.9, duration: 1.5 });
+        const epochEl = document.getElementById('epochNum');
+        if (epochEl) {
+          epochEl.textContent = '8';
+          epochEl.style.color = '#00f5d4';
+        }
+        stalePacketMesh.visible = true;
+      },
+      onLeaveBack: () => {
+        const epochEl = document.getElementById('epochNum');
+        if (epochEl) {
+          epochEl.textContent = '7';
+          epochEl.style.color = '#ffb703';
+        }
+        gsap.to(sceneState, { regionBPower: 1.0, duration: 1 });
+        stalePacketMesh.visible = false;
+      }
+    });
+
+    // SECTION 6: EVIDENCE (Panoramic wide telemetry view)
+    ScrollTrigger.create({
+      trigger: '#evidence',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 5;
+        updateNavDots(5);
+        gsap.to(sceneState.targetCamPos, { x: 0, y: 20, z: 30, duration: 2.2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 0, z: 0, duration: 2.2 });
+        gsap.to(sceneState, { regionAPower: 1.0, regionBPower: 1.0, quarantineOpacity: 0.2, barrierOpacity: 0.3, duration: 1 });
+        stalePacketMesh.visible = false;
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 5;
+        updateNavDots(5);
+        gsap.to(sceneState.targetCamPos, { x: 0, y: 20, z: 30, duration: 2.2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 0, z: 0, duration: 2.2 });
+      }
+    });
+
+    // SECTION 7: ROADMAP
+    ScrollTrigger.create({
+      trigger: '#roadmap',
+      start: 'top center',
+      end: 'bottom center',
+      onEnter: () => {
+        sceneState.sectionIndex = 6;
+        updateNavDots(6);
+        gsap.to(sceneState.targetCamPos, { x: 10, y: 12, z: 26, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 1, z: 0, duration: 2 });
+      },
+      onEnterBack: () => {
+        sceneState.sectionIndex = 6;
+        updateNavDots(6);
+        gsap.to(sceneState.targetCamPos, { x: 10, y: 12, z: 26, duration: 2 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 1, z: 0, duration: 2 });
+      }
+    });
+
+    // SECTION 8: FOOTER
+    ScrollTrigger.create({
+      trigger: '#footer',
+      start: 'top bottom',
+      onEnter: () => {
+        sceneState.sectionIndex = 7;
+        updateNavDots(7);
+        gsap.to(sceneState.targetCamPos, { x: 0, y: 24, z: 36, duration: 2.5 });
+        gsap.to(sceneState.targetLookAt, { x: 0, y: 0, z: 0, duration: 2.5 });
+      }
+    });
+
+    /* ==========================================================================
+       12. ANIMATION & RENDER LOOP (60 FPS)
+       ========================================================================== */
+    const clock = new THREE.Clock();
+    let currentLookAt = new THREE.Vector3(0, 0, 1);
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const elapsedTime = clock.getElapsedTime();
+      const delta = clock.getDelta();
+
+      // 1. Drifting Embers animation
+      const posAttr = emberGeo.attributes.position;
+      for (let i = 0; i < emberCount; i++) {
+        let y = posAttr.getY(i) + emberVels[i].y;
+        let x = posAttr.getX(i) + emberVels[i].x;
+        let z = posAttr.getZ(i) + emberVels[i].z;
+
+        // Wrap around top boundary
+        if (y > 30) y = -10;
+        posAttr.setY(i, y);
+        posAttr.setX(i, x);
+        posAttr.setZ(i, z);
+      }
+      posAttr.needsUpdate = true;
+
+      // 2. Abstract dragon-wing subtle breathing
+      if (!prefersReducedMotion) {
+        wingGroup.rotation.y = Math.sin(elapsedTime * 0.4) * 0.05;
+        wingGroup.position.y = Math.sin(elapsedTime * 0.6) * 0.8;
+      }
+
+      // 3. Platform pulsing & powers
+      const pulseA = (0.9 + Math.sin(elapsedTime * 2.5) * 0.2) * sceneState.regionAPower;
+      platformA.beacon.scale.set(pulseA, pulseA, pulseA);
+      platformA.pointLight.intensity = 1.4 * sceneState.regionAPower;
+      platformA.edges.material.opacity = 0.85 * sceneState.regionAPower;
+
+      const pulseB = (0.9 + Math.sin(elapsedTime * 3.0) * 0.25) * Math.min(sceneState.regionBPower, 1.4);
+      platformB.beacon.scale.set(pulseB, pulseB, pulseB);
+      platformB.pointLight.intensity = 1.4 * sceneState.regionBPower;
+      platformB.edges.material.opacity = Math.min(1.0, 0.85 * sceneState.regionBPower);
+
+      const pulseC = 0.9 + Math.sin(elapsedTime * 2.0) * 0.2;
+      platformC.beacon.scale.set(pulseC, pulseC, pulseC);
+
+      // 4. Barrier & Quarantine updates
+      barrierMat.opacity = sceneState.barrierOpacity;
+      if (sceneState.barrierOpacity > 0.1) {
+        barrierC.rotation.y += 0.015;
+      }
+
+      quarantineMat.opacity = sceneState.quarantineOpacity;
+      if (sceneState.quarantineOpacity > 0.1) {
+        quarantineBox.rotation.x += 0.01;
+        quarantineBox.rotation.y += 0.015;
+      }
+
+      // 5. Link A-B Jitter & Health
+      if (sceneState.linkABJitter > 0.1) {
+        // Degraded link: turns crimson red and flickers
+        linkAB.mat.color.setHex(CONFIG.colors.barrierRed);
+        linkAB.mat.opacity = 0.4 + Math.sin(elapsedTime * 15) * 0.3;
+      } else {
+        linkAB.mat.color.setHex(CONFIG.colors.ember);
+        linkAB.mat.opacity = 0.6;
+      }
+
+      // 6. Packet Traffic along links
+      packets.forEach((p, idx) => {
+        p.t += p.speed;
+        if (p.t > 1.0) p.t = 0.0;
+
+        // In Section 3: Crimson packet hitting C's barrier triggers burnout & send.deny label
+        if (sceneState.sectionIndex === 2 && p.curve === curveAC && p.type === 'crimson') {
+          if (p.t > 0.70) {
+            // Hit barrier! Flash and burn out
+            p.mesh.scale.set(1.8, 1.8, 1.8);
+            p.mesh.material.color.setHex(0xffffff); // Flash white/red
+            
+            // Show dynamic floating send.deny HUD callout
+            const denyCallout = document.getElementById('denyCallout');
+            if (denyCallout) {
+              const pt3d = p.mesh.position.clone();
+              pt3d.project(camera);
+              const x = (pt3d.x * 0.5 + 0.5) * window.innerWidth;
+              const y = (-pt3d.y * 0.5 + 0.5) * window.innerHeight;
+              denyCallout.style.left = `${x}px`;
+              denyCallout.style.top = `${y}px`;
+              denyCallout.style.display = 'block';
+              denyCallout.style.opacity = '1';
+              setTimeout(() => {
+                if (denyCallout) denyCallout.style.opacity = '0';
+              }, 450);
+            }
+
+            setTimeout(() => {
+              p.mesh.scale.set(1, 1, 1);
+              p.mesh.material.color.setHex(CONFIG.colors.crimson);
+            }, 120);
+            p.t = 0.0; // Denied: reset packet to start
+          }
+        }
+
+        // In Section 4: Adaptive Routing (Ice traffic reroutes C->B; Crimson holds)
+        if (sceneState.sectionIndex === 3) {
+          if (p.curve === curveAB && p.type === 'crimson') {
+            // Sovereign traffic holds due to degraded link
+            p.mesh.position.copy(posA);
+            p.mesh.position.y += 0.8 + Math.sin(elapsedTime * 5) * 0.08;
+            return;
+          }
+        }
+
+        // Get position on curve
+        const pt = p.curve.getPoint(p.t);
+
+        // Add jitter if link A-B is degraded
+        if (p.curve === curveAB && sceneState.linkABJitter > 0.1) {
+          pt.x += (Math.random() - 0.5) * 0.4;
+          pt.y += (Math.random() - 0.5) * 0.4;
+        }
+
+        p.mesh.position.copy(pt);
+      });
+
+      // Stale packet animation in Failover section
+      if (sceneState.sectionIndex === 4 && stalePacketMesh.visible) {
+        stalePacketT += 0.007;
+        if (stalePacketT > 1.0) stalePacketT = 1.0;
+        const sPt = curveStaleToQuarantine.getPoint(stalePacketT);
+        stalePacketMesh.position.copy(sPt);
+        if (stalePacketT > 0.35 && stalePacketT < 0.55) {
+          stalePacketMat.color.setHex(0xffffff); // CAS fence rejection flash
+        } else {
+          stalePacketMat.color.setHex(CONFIG.colors.quarantineAmber);
+        }
+      }
+
+      // 7. Smooth Camera Lerp & LookAt
+      if (!prefersReducedMotion) {
+        // Slow idle orbit if in Hero section
+        let camOffset = new THREE.Vector3();
+        if (sceneState.sectionIndex === 0) {
+          camOffset.x = Math.sin(elapsedTime * 0.25) * 2.5;
+          camOffset.y = Math.cos(elapsedTime * 0.2) * 1.2;
+        }
+
+        camera.position.lerp(
+          new THREE.Vector3().addVectors(sceneState.targetCamPos, camOffset),
+          0.05
+        );
+        currentLookAt.lerp(sceneState.targetLookAt, 0.05);
+        camera.lookAt(currentLookAt);
+      } else {
+        camera.position.copy(sceneState.targetCamPos);
+        camera.lookAt(sceneState.targetLookAt);
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    /* ==========================================================================
+       13. RESIZE HANDLER
+       ========================================================================== */
+    window.addEventListener('resize', () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, width < 768 ? 1.5 : 2));
+    });
+
+  </script>
+</body>
+</html>
