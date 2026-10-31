@@ -6,10 +6,14 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+kamish-audit = { path = "../kamish-audit" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
+kamish-log = { path = "../kamish-log" }
+kamish-outbox = { path = "../kamish-outbox" }
 tempfile = "3.17"

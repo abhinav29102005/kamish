@@ -220,3 +220,50 @@ This ledger records every engineering task, cross-referencing requirements, comp
   4. Implemented real-time replication lag telemetry measuring $\text{LocalHighWatermark} - \text{RemoteDurableWatermark}$ and active link RTT/loss metrics.
 * **Verification:** Unit tests verifying end-to-end cross-region replication draining, lag monitoring, and slow-link metrics tracking (`cargo test -p kamish-agent`).
 * **Status:** PASS
+
+### TASK-0015: Developer B Policy Engine & Canonical Event Contract
+* **Timestamp:** 2026-10-31 17:39 UTC
+* **Component:** `crates/kamish-meta`
+* **Project.md References:** §1.4.1 (FR-01, FR-04), §2.4, Developer B Spec §3.A, §3.B
+* **Invariants Checked:** INV-8 (no unauthorized replication), INV-9 (valid policy rules)
+* **Actions Taken:**
+  1. Implemented strongly-typed `RegionId` (`US_EAST`, `EU_WEST`, `AP_SOUTH`) and `ResidencyPolicy` (`StrictLocal`, `RestrictedReplication`, `GlobalCleartext`, `SealedCiphertext`).
+  2. Implemented canonical `StreamEvent` data structure.
+  3. Defined `PolicyEngine` trait contract and implemented `KamishPolicyEngine`.
+  4. Connected policy violations directly to `AuditLog` generating tamper-evident rejection records.
+* **Verification:** Unit tests verifying `StrictLocal` egress rejection and `RestrictedReplication` allowed/denied lists.
+* **Status:** PASS
+
+### TASK-0016: Replication Lag Observability & Synthetic Chaos Injector
+* **Timestamp:** 2026-10-31 17:39 UTC
+* **Component:** `crates/kamish-meta`
+* **Project.md References:** §4.4 (Metrics), §4.1 (Emulation), Developer B Spec §5 B.3, B.4
+* **Invariants Checked:** NFR-03 (bounded lag observation), NFR-04 (smoothed link RTT)
+* **Actions Taken:**
+  1. Implemented `ReplicationMetricsTracker` exposing exact formula: $\text{ReplicationLag} = \text{LocalCommittedOffset} - \text{RemoteAckedOffset}$.
+  2. Implemented `SyntheticChaosInjector` providing non-blocking asynchronous latency injection (e.g. 300ms WAN delay) and network partition severing using Tokio timers.
+* **Verification:** Unit tests verifying lag calculation and async chaos traversal.
+* **Status:** PASS
+
+### TASK-0017: Multi-Region End-to-End Demonstration Suite (Scenarios A, B, C)
+* **Timestamp:** 2026-10-31 17:40 UTC
+* **Component:** `crates/kamish-meta/tests/developer_b_scenarios.rs`
+* **Project.md References:** §4.2 (Scenarios S1, S3, S6, S12), §4.9 (Demo Script), Developer B Spec §4 Gates 2–4
+* **Invariants Checked:** INV-1, INV-2, INV-5, INV-6, INV-8
+* **Actions Taken:**
+  1. Implemented Scenario A (Gate 2 / Demo A): Ingestion of `StrictLocal` sovereign event in `EU_WEST`, blocked egress replication to `US_EAST`, and verified audit rejection record.
+  2. Implemented Scenario B (Gate 3 / Demo B): Injected 300ms WAN latency, verified replication lag rises to 50 while local producer write latency remains fast and unblocked (<1ms).
+  3. Implemented Scenario C (Gate 4 / Demo C): Simulated `US_EAST` regional outage, buffered 15 records in `EU_WEST` durable outbox, healed partition, and verified complete synchronization from watermark with 0 data loss.
+* **Verification:** All 3 scenarios passed cleanly in `cargo test -p kamish-meta --test developer_b_scenarios`.
+* **Status:** PASS
+
+### TASK-0018: 1-Click Live Demonstration Script
+* **Timestamp:** 2026-10-31 17:40 UTC
+* **Component:** `scripts/run_demo.sh`
+* **Project.md References:** §4.9, Developer B Spec §4 Gate 5
+* **Invariants Checked:** INV-1 through INV-9
+* **Actions Taken:**
+  1. Created executable bash script `scripts/run_demo.sh` with rich ANSI terminal styling.
+  2. Orchestrates full check: workspace compilation, invariant test suite (23 tests), and live execution of Scenarios A, B, and C.
+* **Verification:** Script executes end-to-end with 100% success output.
+* **Status:** PASS
