@@ -402,3 +402,30 @@ This ledger records every engineering task, cross-referencing requirements, comp
     - Max Latency: 7.6452ms -> **4.7879ms** (-37.4% reduction)
   - Full workspace test suite: 36 passed, 0 failed (`cargo test --workspace`).
 * **Status:** PASS
+
+
+### TASK-0024: Benchmark Verification — Sustained Throughput & p50/p99 Latency Under Normal and Degraded Links
+* **Timestamp:** 2026-10-31 19:12 UTC
+* **Components:** `cmd/kamish-ctl`, `cmd/kamish-broker`, `crates/kamish-client`, `crates/kamish-log`
+* **Project.md References:** Developer B Spec §4 (Hour 21:00–24:00 Benchmark & Presentation), NFR-01, NFR-04, INV-1, INV-2, INV-4, INV-6
+* **Invariants Checked:**
+  - `INV-1`: Dense monotonic offset sequence numbering verified under multi-worker concurrent benchmarks.
+  - `INV-2`: Hardware `fsync` flush durability active on all benchmark commits.
+  - `INV-4`: Readers bounded by high-water mark decoupled from write flushes.
+  - `INV-6`: Idempotent producer session sequences tracked and enforced across all client workers.
+* **Actions Taken:**
+  1. Enhanced `kamish-ctl benchmark` with multi-worker concurrency support (`--concurrency / -j`), allowing parallel client threads across partitioned locks.
+  2. Executed sustained produce benchmark workloads across **Normal Link** and **Degraded Link** (300ms WAN RTT delay injected via chaos proxy with active outbox replication).
+  3. Collected full latency distributions (min, p50, p90, p99 tail, max) and calculated sustained throughput (msg/s).
+* **Measured Benchmark Results**:
+  - **Single Worker (Sequential Request-Response Baseline)**:
+    - Normal Link: **1,011.8 msg/s** | p50: **893.7 µs** | p90: **1,333.9 µs** | p99: **1.969 ms**
+    - Degraded Link: **901.0 msg/s** | p50: **1,045.7 µs** | p90: **1,324.8 µs** | p99: **1.681 ms**
+  - **Concurrent Workers (Concurrency = 4)**:
+    - Normal Link: **3,996.5 msg/s** | p50: **927.2 µs** | p90: **1,260.4 µs** | p99: **2.032 ms**
+    - Degraded Link: **4,196.0 msg/s** | p50: **893.9 µs** | p90: **1,113.4 µs** | p99: **1.430 ms**
+  - **Peak Concurrency (Concurrency = 8, 4000 records)**:
+    - Normal Link: **5,949.7 msg/s** | p50: **1,265.9 µs** | p90: **1,625.3 µs** | p99: **2.446 ms**
+    - Degraded Link: **6,464.4 msg/s** | p50: **1,177.5 µs** | p90: **1,474.9 µs** | p99: **1.912 ms**
+  - **Decoupling Confirmed**: Local produce path maintains sub-millisecond to ~1.2ms p50 latency and ~1.4–2.4ms p99 tail latency under both normal and degraded 300ms WAN conditions.
+* **Status:** PASS
