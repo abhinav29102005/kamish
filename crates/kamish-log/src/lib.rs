@@ -106,6 +106,7 @@ impl RecordEnvelope {
 #[derive(Clone)]
 pub struct PartitionLog {
     inner: Arc<RwLock<PartitionLogInner>>,
+    writer_lock: Arc<std::sync::Mutex<Option<File>>>,
 }
 
 struct PartitionLogInner {
@@ -114,7 +115,6 @@ struct PartitionLogInner {
     next_offset: u64,
     high_watermark: u64,
     records: Vec<RecordEnvelope>,
-    active_file: Option<File>,
 }
 
 impl PartitionLog {
@@ -160,13 +160,18 @@ impl PartitionLog {
                 next_offset,
                 high_watermark,
                 records,
-                active_file: None,
             })),
+            writer_lock: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
     /// Appends a payload batch, enforcing INV-1 (monotonic dense offsets), epoch fencing (§3.4.2),
     /// and fsync flush durability to underlying disk hardware (§3.1.1, INV-2).
+    ///
+    /// Decoupled concurrency architecture:
+    /// Disk file I/O and hardware `sync_all` are serialized under `writer_lock` without holding
+    /// `inner.write()`. This guarantees concurrent readers fetching records are NEVER blocked by
+    /// ongoing fsync operations.
     pub fn append(
         &self,
         epoch: u64,
@@ -174,46 +179,55 @@ impl PartitionLog {
         policy_version: u64,
         payload: Vec<u8>,
     ) -> Result<u64, LogError> {
-        let mut inner = self.inner.write().unwrap();
+        // 1. Serialize writers to guarantee continuous monotonic sequence numbering (INV-1)
+        let mut file_guard = self.writer_lock.lock().unwrap();
 
-        // Epoch fencing check
-        if epoch < inner.current_epoch {
-            return Err(LogError::StaleEpoch {
-                current: inner.current_epoch,
-                requested: epoch,
-            });
-        }
-        if epoch > inner.current_epoch {
-            inner.current_epoch = epoch;
-        }
+        // 2. Validate epoch and reserve next offset under brief write lock
+        let (offset, dir) = {
+            let mut inner = self.inner.write().unwrap();
+            if epoch < inner.current_epoch {
+                return Err(LogError::StaleEpoch {
+                    current: inner.current_epoch,
+                    requested: epoch,
+                });
+            }
+            if epoch > inner.current_epoch {
+                inner.current_epoch = epoch;
+            }
+            (inner.next_offset, inner.dir.clone())
+        };
 
-        let offset = inner.next_offset;
         let envelope = RecordEnvelope::new(epoch, class_id, policy_version, offset, payload);
 
-        // Open or reuse persistent segment file
-        if inner.active_file.is_none() {
-            let log_path = inner.dir.join("partition.data");
+        // 3. Open or reuse persistent segment file
+        if file_guard.is_none() {
+            let log_path = dir.join("partition.data");
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(log_path)?;
-            inner.active_file = Some(file);
+            *file_guard = Some(file);
         }
 
         let serialized = serde_json::to_vec(&envelope).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let len_bytes = (serialized.len() as u32).to_be_bytes();
 
-        let file = inner.active_file.as_mut().unwrap();
+        let file = file_guard.as_mut().unwrap();
         file.write_all(&len_bytes)?;
         file.write_all(&serialized)?;
         file.flush()?;
 
-        // Genuine fsync flush to hardware storage controller before acknowledging append (INV-2)
+        // Genuine fsync flush to hardware storage controller before acknowledging append (INV-2).
+        // Readers can read concurrently during this fsync with zero lock contention!
         file.sync_all()?;
 
-        inner.records.push(envelope);
-        inner.next_offset += 1;
-        inner.high_watermark += 1;
+        // 4. Once crash-durable on disk, publish record to in-memory committed log and advance HWM (INV-4)
+        {
+            let mut inner = self.inner.write().unwrap();
+            inner.records.push(envelope);
+            inner.next_offset += 1;
+            inner.high_watermark += 1;
+        }
 
         Ok(offset)
     }

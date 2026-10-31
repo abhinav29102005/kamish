@@ -139,6 +139,47 @@ pub enum BrokerResponse {
     Error(String),
 }
 
+use std::hash::{Hash, Hasher};
+
+const NUM_STRIPES: usize = 32;
+
+/// Lock-striped concurrent map eliminating cross-partition lock contention.
+pub struct StripedStore<K, V> {
+    stripes: [RwLock<HashMap<K, V>>; NUM_STRIPES],
+}
+
+impl<K: Eq + Hash + Clone, V: Clone> StripedStore<K, V> {
+    pub fn new() -> Self {
+        Self {
+            stripes: std::array::from_fn(|_| RwLock::new(HashMap::new())),
+        }
+    }
+
+    fn get_stripe_index(&self, key: &K) -> usize {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        (hasher.finish() as usize) % NUM_STRIPES
+    }
+
+    pub fn get(&self, key: &K) -> Option<V> {
+        let idx = self.get_stripe_index(key);
+        let guard = self.stripes[idx].read().unwrap();
+        guard.get(key).cloned()
+    }
+
+    pub fn get_or_insert_with<F: FnOnce() -> V>(&self, key: K, default_fn: F) -> V {
+        let idx = self.get_stripe_index(&key);
+        {
+            let guard = self.stripes[idx].read().unwrap();
+            if let Some(v) = guard.get(&key) {
+                return v.clone();
+            }
+        }
+        let mut guard = self.stripes[idx].write().unwrap();
+        guard.entry(key).or_insert_with(default_fn).clone()
+    }
+}
+
 /// Regional Broker Server holding partition logs, metadata, outboxes, and enforcer.
 #[derive(Clone)]
 pub struct BrokerServer {
@@ -149,8 +190,8 @@ pub struct BrokerServer {
     pub policy_engine: Option<Arc<dyn PolicyEngine>>,
     pub known_peers: Vec<String>,
     data_dir: PathBuf,
-    logs: Arc<RwLock<HashMap<(String, u32), PartitionLog>>>,
-    sessions: Arc<RwLock<HashMap<(String, u32), SessionManager>>>,
+    logs: Arc<StripedStore<(String, u32), PartitionLog>>,
+    sessions: Arc<StripedStore<(String, u32), SessionManager>>,
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
 }
 
@@ -183,8 +224,8 @@ impl BrokerServer {
             policy_engine: None,
             known_peers,
             data_dir: data_dir_buf,
-            logs: Arc::new(RwLock::new(HashMap::new())),
-            sessions: Arc::new(RwLock::new(HashMap::new())),
+            logs: Arc::new(StripedStore::new()),
+            sessions: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
         }
     }
@@ -428,8 +469,7 @@ impl BrokerServer {
         let meta_wm = self.meta.get_watermark(topic, partition, source_region);
         let log_wm = {
             let key = (topic.to_string(), partition);
-            let logs = self.logs.read().unwrap();
-            logs.get(&key).map(|l| l.next_offset()).unwrap_or(0)
+            self.logs.get(&key).map(|l| l.next_offset()).unwrap_or(0)
         };
         std::cmp::max(meta_wm, log_wm)
     }
@@ -440,6 +480,12 @@ impl BrokerServer {
     }
 
     fn get_or_create_outbox(&self, target_region: &str) -> DestinationOutbox {
+        {
+            let outboxes = self.outboxes.read().unwrap();
+            if let Some(ob) = outboxes.get(target_region) {
+                return ob.clone();
+            }
+        }
         let mut outboxes = self.outboxes.write().unwrap();
         outboxes
             .entry(target_region.to_string())
@@ -451,35 +497,20 @@ impl BrokerServer {
 
     fn get_or_create_log(&self, topic: &str, partition: u32, epoch: u64) -> Result<PartitionLog, BrokerError> {
         let key = (topic.to_string(), partition);
-        {
-            let logs = self.logs.read().unwrap();
-            if let Some(log) = logs.get(&key) {
-                return Ok(log.clone());
-            }
+        if let Some(log) = self.logs.get(&key) {
+            return Ok(log);
         }
 
-        let mut logs = self.logs.write().unwrap();
-        if let Some(log) = logs.get(&key) {
-            return Ok(log.clone());
-        }
-
+        // Open outside of holding any map locks, eliminating contention across partitions
         let part_dir = self.data_dir.join(format!("{}-{}", topic, partition));
         let log = PartitionLog::open(part_dir, epoch)?;
-        logs.insert(key, log.clone());
+        let log = self.logs.get_or_insert_with(key, || log);
         Ok(log)
     }
 
     fn get_or_create_session(&self, topic: &str, partition: u32) -> SessionManager {
         let key = (topic.to_string(), partition);
-        {
-            let sessions = self.sessions.read().unwrap();
-            if let Some(s) = sessions.get(&key) {
-                return s.clone();
-            }
-        }
-
-        let mut sessions = self.sessions.write().unwrap();
-        sessions.entry(key).or_insert_with(SessionManager::new).clone()
+        self.sessions.get_or_insert_with(key, SessionManager::new)
     }
 
     /// Dispatches a high-level request to the appropriate internal engine handler.
@@ -533,7 +564,7 @@ impl BrokerServer {
         Ok((local_addr, handle))
     }
 
-    async fn handle_connection(&self, stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn handle_connection(self: Arc<Self>, stream: TcpStream) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
 
@@ -553,7 +584,21 @@ impl BrokerServer {
                 }
             };
 
-            let resp = self.dispatch(req);
+            // Non-blocking Tokio worker thread dispatch:
+            // Offload disk I/O requests (Produce, Fetch, Replicate) to Tokio's dedicated
+            // blocking threadpool via spawn_blocking, preventing worker threads from blocking
+            // on fsync barriers or disk reads. Lightweight state queries (Ping, Watermark)
+            // execute immediately in-memory.
+            let resp = match req {
+                BrokerRequest::Produce(_) | BrokerRequest::Fetch(_) | BrokerRequest::Replicate(_) => {
+                    let server = Arc::clone(&self);
+                    tokio::task::spawn_blocking(move || server.dispatch(req))
+                        .await
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?
+                }
+                _ => self.dispatch(req),
+            };
+
             let mut serialized = serde_json::to_vec(&resp)?;
             serialized.push(b'\n');
             writer.write_all(&serialized).await?;
@@ -1058,5 +1103,94 @@ mod tests {
         }).await.unwrap();
         assert_eq!(fetch_res.records.len(), 1);
         assert_eq!(fetch_res.records[0].payload, b"tcp-payload");
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_multi_partition_lock_striping_and_reader_decoupling() {
+        let (broker, _td) = setup_test_broker("region-eu", vec!["region-us".to_string()]);
+        let broker_arc = Arc::new(broker);
+
+        // Pre-populate 5 records in partition 0
+        for seq in 0..5 {
+            broker_arc.produce(ProduceRequest {
+                topic: "stripe-test".to_string(),
+                partition: 0,
+                producer_id: 1,
+                producer_epoch: 1,
+                sequence_base: seq,
+                class_id: "global-data".to_string(),
+                payload: format!("pre-{}", seq).into_bytes(),
+                residency_rule: Some(ResidencyPolicy::GlobalCleartext),
+            }).unwrap();
+        }
+
+        // Spawn concurrent writers across 4 different partitions simultaneously
+        let mut handles = Vec::new();
+        for p in 0..4 {
+            let b = Arc::clone(&broker_arc);
+            let h = tokio::task::spawn_blocking(move || {
+                for seq in 0..10 {
+                    let req = ProduceRequest {
+                        topic: "stripe-test".to_string(),
+                        partition: p,
+                        producer_id: 10 + p as u64,
+                        producer_epoch: 1,
+                        sequence_base: seq,
+                        class_id: "global-data".to_string(),
+                        payload: format!("payload-p{}-seq{}", p, seq).into_bytes(),
+                        residency_rule: Some(ResidencyPolicy::GlobalCleartext),
+                    };
+                    let res = b.produce(req).unwrap();
+                    assert!(res.sovereignty_allowed);
+                }
+            });
+            handles.push(h);
+        }
+
+        // Concurrently, readers fetch from partition 0 while writes are ongoing
+        let reader_broker = Arc::clone(&broker_arc);
+        let reader_handle = tokio::spawn(async move {
+            for _ in 0..10 {
+                let f = reader_broker.fetch(FetchRequest {
+                    topic: "stripe-test".to_string(),
+                    partition: 0,
+                    class_id: "global-data".to_string(),
+                    start_offset: 0,
+                    max_records: 5,
+                }).unwrap();
+                assert!(f.records.len() >= 5);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        });
+
+        for h in handles {
+            h.await.unwrap();
+        }
+        reader_handle.await.unwrap();
+
+        // Verify partition 0 has 5 pre + 10 writes = 15 records
+        let f0 = broker_arc.fetch(FetchRequest {
+            topic: "stripe-test".to_string(),
+            partition: 0,
+            class_id: "global-data".to_string(),
+            start_offset: 0,
+            max_records: 20,
+        }).unwrap();
+        assert_eq!(f0.records.len(), 15);
+
+        // Verify partitions 1, 2, 3 have 10 records each
+        for p in 1..4 {
+            let fp = broker_arc.fetch(FetchRequest {
+                topic: "stripe-test".to_string(),
+                partition: p,
+                class_id: "global-data".to_string(),
+                start_offset: 0,
+                max_records: 20,
+            }).unwrap();
+            assert_eq!(fp.records.len(), 10);
+            for (idx, rec) in fp.records.iter().enumerate() {
+                assert_eq!(rec.base_offset, idx as u64);
+            }
+        }
     }
 }

@@ -296,7 +296,9 @@ impl ReplicationAgent {
         };
 
         if let Some(peer) = in_mem_peer {
-            let res = peer.handle_replication(rep_req)?;
+            let res = tokio::task::spawn_blocking(move || peer.handle_replication(rep_req))
+                .await
+                .map_err(|e| AgentError::TransferFailed(e.to_string()))??;
             if res.accepted {
                 if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
                     outbox.advance_watermark(res.applied_watermark);
