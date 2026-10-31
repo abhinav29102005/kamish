@@ -145,3 +145,52 @@ This ledger records every engineering task, cross-referencing requirements, comp
   3. Integrated 15% hysteresis margin and 5000ms dwell window to prevent routing oscillations.
 * **Verification:** Unit tests verifying illegal fast paths are rejected in favor of legal permitted paths.
 * **Status:** PASS
+
+### TASK-0011: Idempotent Producer Session Deduplication (`kamish-log`)
+* **Timestamp:** 2026-10-31 17:23 UTC
+* **Component:** `crates/kamish-log`
+* **Project.md References:** §3.4.2, INV-6, FR-02
+* **Invariants Checked:** INV-6 (retrying an applied range is a no-op), FR-02 (idempotent producer sessions)
+* **Actions Taken:**
+  1. Implemented `SessionManager` tracking `(producer_id, epoch) -> (last_seq, last_offset)`.
+  2. Implemented sequence monotonicity verification: rejects out-of-order sequence numbers.
+  3. Implemented duplicate retry handling: returns recorded offset without appending new duplicate data.
+* **Verification:** Unit tests verifying sequence increments, duplicate offset returns, and out-of-order rejection.
+* **Status:** PASS
+
+### TASK-0012: Partition Ownership Coordinator & Quarantine Store (`kamish-own`)
+* **Timestamp:** 2026-10-31 17:24 UTC
+* **Component:** `crates/kamish-own`
+* **Project.md References:** §3.1.3, §3.1.4, §3.3.1, §3.4.4, §4.7.2 (R6), INV-3, INV-7, FR-08
+* **Invariants Checked:** INV-3 (leader holds acknowledged records), INV-7 (no split-brain / stale writes)
+* **Actions Taken:**
+  1. Implemented `try_promote` incorporating lease expiry check with `max_clock_drift` buffer.
+  2. Integrated Enforcer `PROMOTE` action check against policy `failover_candidates`.
+  3. Implemented writer fencing rejecting any write with epoch lower than partition epoch.
+  4. Implemented `QuarantineStore` safely isolating superseded suffixes of returning old leaders.
+* **Verification:** Unit tests for lease-active failure, expired lease promotion, stale writer fencing, and record quarantine.
+* **Status:** PASS
+
+### TASK-0013: Simulated Key Service & Sealed Copy Encryption (`kamish-seal`)
+* **Timestamp:** 2026-10-31 17:24 UTC
+* **Component:** `crates/kamish-seal`
+* **Project.md References:** §1.6 D2, §2.4, §3.4.5, §3.5.2, §4.7.1
+* **Invariants Checked:** INV-8 (no cleartext leakage to remote regions)
+* **Actions Taken:**
+  1. Built `RegionalKeyService` strictly enforcing that keys reside within home region.
+  2. Built `SealEngine` authenticated encryption generating `SealedEnvelope`.
+  3. Proved that foreign regions cannot decrypt sealed copies without home key service access.
+* **Verification:** Unit tests verifying sealed ciphertext encryption and cross-border key denial.
+* **Status:** PASS
+
+### TASK-0014: Automated Invariant Checkers & Canary Scanner (`kamish-checkers`)
+* **Timestamp:** 2026-10-31 17:24 UTC
+* **Component:** `crates/kamish-checkers`
+* **Project.md References:** §1.4.1 FR-10, §3.5.3, §4.4, INV-1, INV-7, INV-8
+* **Invariants Checked:** INV-1 (dense monotonic offsets), INV-7 (epoch conflicts), INV-8 (canary leaks)
+* **Actions Taken:**
+  1. Built `OrderingChecker` catching gaps in partition offset progression.
+  2. Built `EpochAuditor` detecting stale epoch writes or split-brain commits.
+  3. Built `CanaryScanner` identifying leak of synthetic canary tokens into forbidden regions.
+* **Verification:** Unit tests verifying ordering gap detection and canary leak detection.
+* **Status:** PASS

@@ -170,3 +170,54 @@ Requirement **FR-13 (P1)** and §2.6 / §2.7.5 specify a hash-chained, region-lo
 ### Compliance with `project.md`
 - **§2.2, §2.7.3, §2.7.4, §3.4.3:** Direct realization of replication planning and routing.
 - **INV-5 & INV-6:** Prefix ordering, exact offset preservation, and idempotent range re-transfers.
+
+---
+
+## ADR-0008: Partition Ownership, Epoch Fencing & Quarantine Store (`kamish-own`)
+
+### Context
+`project.md` §3.1.3, §3.1.4, §3.3.1, §3.4.4, INV-3, and INV-7 specify:
+1. Failover promotion must be gated by:
+   - Lease expiry + maximum clock drift margin (§4.7.2 R6).
+   - Policy eligibility check via the single decision function (`PROMOTE`).
+   - Quorum CAS update bumping partition epoch monotonically (`epoch + 1`).
+2. Fencing stale writers: any write request arriving with epoch lower than partition epoch is rejected.
+3. Reconnecting old owners: when a partitioned old leader heals and returns, its divergent/superseded log suffix is truncated and moved to a local `QuarantineStore`, which is strictly isolated and never replicated.
+
+### Decision
+Implement `kamish-own` containing `PartitionOwnerCoordinator` and `QuarantineStore` executing this exact safety logic.
+
+### Compliance with `project.md`
+- **§3.1.3, §3.1.4, §3.4.4:** Direct implementation of promotion, fencing, and quarantine.
+- **INV-3 & INV-7:** Fencing guarantees split-brain immunity across all tested partition scenarios.
+
+---
+
+## ADR-0009: Key Residency and Sealed-Copy Mode (`kamish-seal`)
+
+### Context
+`project.md` §1.6 D2, §2.4, §3.4.5, §3.5.2, and §4.7.1 specify:
+1. Destination mode `SealedOnly`: data is replicated as authenticated ciphertext without local keys.
+2. Simulated Key Service (`RegionalKeyService`): keys remain exclusively resident in the class's home key region. Cross-border requests for key bytes are denied.
+
+### Decision
+Implement `kamish-seal` featuring `RegionalKeyService` and `SealEngine` with authenticated encryption (`SealedEnvelope`).
+
+### Compliance with `project.md`
+- **§1.6 D2 & §2.4:** Fulfills sovereign off-region durability without cleartext data egress.
+
+---
+
+## ADR-0010: Automated Invariant Checkers & Canary Scanner (`kamish-checkers`)
+
+### Context
+`project.md` §1.4.1 FR-10, §3.5.3, and §4.4 require test checkers for:
+1. `OrderingChecker`: verifies dense monotonic offsets per partition (INV-1).
+2. `EpochAuditor`: verifies monotonic epoch progression and absence of stale writes (INV-7).
+3. `CanaryScanner`: scans raw payload across regions and catches synthetic canary leaks in unauthorized regions (INV-8).
+
+### Decision
+Implement `kamish-checkers` as a shared auditing suite used during test scenarios and CI runs.
+
+### Compliance with `project.md`
+- **§3.5.3 & §4.4:** Full automated validation for core invariants.

@@ -277,3 +277,110 @@ mod tests {
         assert!(matches!(err, LogError::StaleEpoch { current: 5, requested: 4 }));
     }
 }
+
+use std::collections::HashMap;
+
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("Out of order sequence: expected {expected}, received {received}")]
+    OutOfOrderSequence { expected: u32, received: u32 },
+
+    #[error("Producer epoch stale: expected >= {current}, received {received}")]
+    StaleProducerEpoch { current: u64, received: u64 },
+}
+
+/// Producer session tracking to guarantee deduplication and sequence ordering (§3.4.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProducerSessionState {
+    pub producer_id: u64,
+    pub producer_epoch: u64,
+    pub last_seq: u32,
+    pub last_offset: u64,
+}
+
+/// In-memory thread-safe session manager per partition.
+#[derive(Clone, Default)]
+pub struct SessionManager {
+    sessions: Arc<RwLock<HashMap<u64, ProducerSessionState>>>,
+}
+
+impl SessionManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Evaluates sequence ordering:
+    /// - If seq == last_seq: returns Ok(Some(last_offset)) as an idempotent duplicate retry (INV-6).
+    /// - If seq == last_seq + 1 (or first seq 0): returns Ok(None) to proceed with append.
+    /// - Otherwise: returns Err(OutOfOrderSequence).
+    pub fn check_sequence(&self, producer_id: u64, producer_epoch: u64, seq: u32) -> Result<Option<u64>, SessionError> {
+        let sessions = self.sessions.read().unwrap();
+        if let Some(state) = sessions.get(&producer_id) {
+            if producer_epoch < state.producer_epoch {
+                return Err(SessionError::StaleProducerEpoch {
+                    current: state.producer_epoch,
+                    received: producer_epoch,
+                });
+            }
+
+            if seq == state.last_seq {
+                // Duplicate retry: return cached offset without appending (INV-6)
+                return Ok(Some(state.last_offset));
+            }
+
+            if seq != state.last_seq + 1 {
+                return Err(SessionError::OutOfOrderSequence {
+                    expected: state.last_seq + 1,
+                    received: seq,
+                });
+            }
+        } else if seq != 0 {
+            // First message from a session must start at sequence 0
+            return Err(SessionError::OutOfOrderSequence {
+                expected: 0,
+                received: seq,
+            });
+        }
+
+        Ok(None)
+    }
+
+    /// Updates session state after successful fsync and append.
+    pub fn update(&self, producer_id: u64, producer_epoch: u64, seq: u32, offset: u64) {
+        let mut sessions = self.sessions.write().unwrap();
+        sessions.insert(producer_id, ProducerSessionState {
+            producer_id,
+            producer_epoch,
+            last_seq: seq,
+            last_offset: offset,
+        });
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    #[test]
+    fn test_idempotent_session_deduplication() {
+        let sm = SessionManager::new();
+
+        // 1. Initial message seq 0
+        let res = sm.check_sequence(101, 1, 0).unwrap();
+        assert_eq!(res, None);
+        sm.update(101, 1, 0, 42);
+
+        // 2. Duplicate retry seq 0 -> returns cached offset 42 (INV-6)
+        let dup = sm.check_sequence(101, 1, 0).unwrap();
+        assert_eq!(dup, Some(42));
+
+        // 3. Next message seq 1 -> proceeds
+        let res1 = sm.check_sequence(101, 1, 1).unwrap();
+        assert_eq!(res1, None);
+        sm.update(101, 1, 1, 43);
+
+        // 4. Out-of-order seq 3 (skipped seq 2) -> rejected
+        let err = sm.check_sequence(101, 1, 3).unwrap_err();
+        assert!(matches!(err, SessionError::OutOfOrderSequence { expected: 2, received: 3 }));
+    }
+}
