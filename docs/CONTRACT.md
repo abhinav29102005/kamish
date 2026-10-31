@@ -144,6 +144,28 @@ requirement is the target. Pinned-class continuation is bounded by valid leases;
 indefinite continuation after lease expiry is not authorized by the amendment
 and must not be inferred from the original pinned-class wording.
 
+### 2.3.1 Local Monotonic Lease Clock Rules (Phase 1 Requirement)
+
+Lease validity is computed strictly from a **local monotonic clock** measured from
+when the grant was received, never from etcd, wall-clock (`SystemTime`), or remote
+timestamps:
+1. **Clock Source**: The broker measures elapsed time using a monotonic clock source
+   (`std::time::Instant` / `MonotonicClock` trait). It is strictly immune to NTP
+   clock steps, leap seconds, and backward time adjustments.
+2. **Safety Allowances**:
+   $$\text{effective\_duration} = \text{grant\_duration} - (\text{max\_clock\_drift} + \text{transit\_delay\_allowance})$$
+   The safety allowance (clock drift buffer + estimated network transit) is
+   deducted at the instant of grant receipt. If total allowance exceeds granted
+   duration, the lease is rejected immediately.
+3. **Client / Thread Pause Safety**: If the writer thread or process experiences
+   a pause (GC, hypervisor deschedule, or process suspension), the local monotonic
+   clock continues advancing. Upon resumption, elapsed monotonic time is inspected;
+   if it exceeds `effective_duration`, the lease is observed as expired and
+   subsequent writes fail closed without emitting successful ACKs.
+4. **Reboot Invalidation**: Monotonic timestamps are process-local and cannot be
+   restored across a host or broker restart. Upon restart, all cached leases are
+   treated as expired until explicitly renewed or re-granted by the metadata quorum.
+
 ## 3. Acknowledgment contract (W03/W04/W17/W18)
 
 ### 3.1 Common conditions

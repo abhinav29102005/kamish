@@ -443,3 +443,42 @@ digests and transitive dependency review remain adoption work.
 **Decision request:** maintainer selects the candidate before implementation.
 Separately resolve ADR-0015's lease parameters, audit cap and revocation boundary.
 The order remains W01/W02/W05, then W08; payload quorum comes after Phase 1.
+
+---
+
+## ADR-0017: Trait scope review — consensus authority vs local replication state
+
+**Status:** Decided. **Date:** 1 November 2026.
+
+### Context
+
+During the Phase 1 implementation of `MetadataAuthority`, methods governing partition
+replication watermarks (`update_watermark`, `get_watermark`) and outbox stream metadata
+(`record_outbox_stream`, `get_outbox_stream`) were initially co-located on the trait.
+
+Co-locating these methods created ambiguity: replication progress occurs continuously
+on the steady-state data transfer path. If replication watermark updates were routed
+through the metadata consensus quorum, replication would suffer severe WAN throughput
+degradation and latency amplification, directly violating NFR-01 and the decoupled
+outbox architecture.
+
+### Decision
+
+Strictly separate consensus-backed authoritative operations from node-local replication tracking:
+
+1. **`MetadataAuthority` (Consensus-Backed Only):**
+   - **`compare_and_swap_epoch`**: Authoritative epoch advancement during election/failover.
+   - **`grant_lease`, `renew_lease`, `revoke_lease`**: Time-limited write authority with barrier bounds.
+   - **`get_policy_floor`, `advance_policy_floor`**: Durable cluster-wide policy version floor.
+   - **`issue_source_identity`**: Authoritative cluster ID and monotonic source generation.
+   - **`commit_audit_checkpoint`, `read_audit_checkpoint`**: Signed witness checkpoint ledger.
+   - **`deployment_mode`**: Single-node compatibility vs multi-region enforcement.
+   - **`get_ownership`, `set_ownership`**: Authoritative partition ownership catalog.
+
+2. **`LocalReplicationTracker` (Node-Local State Only):**
+   - **`update_watermark`, `get_watermark`**: Local tracking of peer replication progress.
+   - **`record_outbox_stream`, `get_outbox_stream`**: Local outbox queue bookkeeping.
+   - **Non-consensus**: These operations MUST NOT go through the metadata quorum. They execute against local in-memory or persisted broker/agent storage without network consensus overhead.
+
+`MetadataStore` implements both traits for single-node compatibility. Distributed broker/agent implementations consume `MetadataAuthority` for ownership and `LocalReplicationTracker` for data pipeline progress.
+

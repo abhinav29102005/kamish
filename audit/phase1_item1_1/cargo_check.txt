@@ -1,0 +1,3 @@
+    Checking kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+    Checking kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.32s

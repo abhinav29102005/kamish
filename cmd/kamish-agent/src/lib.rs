@@ -11,7 +11,7 @@
 //! - INV-8: No payload outside legal set or sealed-only mode.
 
 use kamish_broker::{BrokerClient, BrokerServer, ReplicationRequest};
-use kamish_meta::MetadataAuthority;
+use kamish_meta::LocalReplicationTracker;
 use kamish_outbox::OutboxRange;
 use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
 use serde::{Deserialize, Serialize};
@@ -94,7 +94,7 @@ pub struct TransferSummary {
 pub struct ReplicationAgent {
     pub local_region: String,
     pub local_broker: Arc<BrokerServer>,
-    pub meta: Arc<dyn MetadataAuthority>,
+    pub local_tracker: Arc<dyn LocalReplicationTracker>,
     pub router: RouteSelector,
     peer_brokers: Arc<RwLock<HashMap<String, Arc<BrokerServer>>>>,
     peer_addresses: Arc<RwLock<HashMap<String, String>>>,
@@ -108,16 +108,16 @@ impl ReplicationAgent {
     pub fn new(
         local_region: impl Into<String>,
         local_broker: Arc<BrokerServer>,
-        meta: Arc<dyn MetadataAuthority>,
+        local_tracker: Arc<dyn LocalReplicationTracker>,
         router: RouteSelector,
     ) -> Self {
-        Self::with_queue_capacity(local_region, local_broker, meta, router, 1024)
+        Self::with_queue_capacity(local_region, local_broker, local_tracker, router, 1024)
     }
 
     pub fn with_queue_capacity(
         local_region: impl Into<String>,
         local_broker: Arc<BrokerServer>,
-        meta: Arc<dyn MetadataAuthority>,
+        local_tracker: Arc<dyn LocalReplicationTracker>,
         router: RouteSelector,
         capacity: usize,
     ) -> Self {
@@ -125,7 +125,7 @@ impl ReplicationAgent {
         Self {
             local_region: local_region.into(),
             local_broker,
-            meta,
+            local_tracker,
             router,
             peer_brokers: Arc::new(RwLock::new(HashMap::new())),
             peer_addresses: Arc::new(RwLock::new(HashMap::new())),
@@ -294,7 +294,7 @@ impl ReplicationAgent {
                         res.applied_watermark,
                     );
                 }
-                self.meta.update_watermark(
+                self.local_tracker.update_watermark(
                     &task.range.topic,
                     task.range.partition,
                     &task.target_region,
@@ -310,7 +310,7 @@ impl ReplicationAgent {
                             res.applied_watermark,
                         );
                     }
-                    self.meta.update_watermark(
+                    self.local_tracker.update_watermark(
                         &task.range.topic,
                         task.range.partition,
                         &task.target_region,
@@ -356,7 +356,7 @@ impl ReplicationAgent {
                         res.applied_watermark,
                     );
                 }
-                self.meta.update_watermark(
+                self.local_tracker.update_watermark(
                     &task.range.topic,
                     task.range.partition,
                     &task.target_region,
@@ -372,7 +372,7 @@ impl ReplicationAgent {
                             res.applied_watermark,
                         );
                     }
-                    self.meta.update_watermark(
+                    self.local_tracker.update_watermark(
                         &task.range.topic,
                         task.range.partition,
                         &task.target_region,
@@ -583,7 +583,7 @@ impl ReplicationAgent {
         if let Some(outbox) = self.local_broker.get_outbox(target_region) {
             outbox.advance_partition_watermark(topic, partition, remote_watermark);
         }
-        self.meta
+        self.local_tracker
             .update_watermark(topic, partition, target_region, remote_watermark);
 
         // Repopulate outbox from disk log if there are committed records ahead of remote watermark
@@ -678,7 +678,7 @@ impl ReplicationAgent {
                     range.partition,
                     rep_res.applied_watermark,
                 );
-                self.meta.update_watermark(
+                self.local_tracker.update_watermark(
                     &range.topic,
                     range.partition,
                     target_region,
@@ -696,7 +696,7 @@ impl ReplicationAgent {
                     range.partition,
                     rep_res.applied_watermark,
                 );
-                self.meta.update_watermark(
+                self.local_tracker.update_watermark(
                     &range.topic,
                     range.partition,
                     target_region,
@@ -827,7 +827,7 @@ impl ReplicationAgent {
                     range.partition,
                     rep_res.applied_watermark,
                 );
-                self.meta.update_watermark(
+                self.local_tracker.update_watermark(
                     &range.topic,
                     range.partition,
                     target_region,
@@ -845,7 +845,7 @@ impl ReplicationAgent {
                     range.partition,
                     rep_res.applied_watermark,
                 );
-                self.meta.update_watermark(
+                self.local_tracker.update_watermark(
                     &range.topic,
                     range.partition,
                     target_region,
@@ -1119,7 +1119,7 @@ mod tests {
         let agent = Arc::new(ReplicationAgent::with_queue_capacity(
             agent.local_region.clone(),
             agent.local_broker.clone(),
-            agent.meta.clone(),
+            agent.local_tracker.clone(),
             agent.router.clone(),
             2,
         ));

@@ -19,7 +19,8 @@ use kamish_log::{
     LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager,
 };
 use kamish_meta::{
-    DeploymentMode, MetadataAuthority, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent,
+    DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, PolicyEngine,
+    RegionId, ResidencyPolicy, StreamEvent,
 };
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
@@ -229,6 +230,7 @@ pub struct BrokerServer {
     pub region_id: RegionId,
     pub enforcer: Arc<Enforcer>,
     pub meta: Arc<dyn MetadataAuthority>,
+    pub local_tracker: Arc<dyn LocalReplicationTracker>,
     pub policy_engine: Option<Arc<dyn PolicyEngine>>,
     pub known_peers: Vec<String>,
     data_dir: PathBuf,
@@ -246,7 +248,25 @@ impl BrokerServer {
         known_peers: Vec<String>,
         data_dir: P,
     ) -> Self {
-        Self::try_new(region, enforcer, meta, known_peers, data_dir)
+        Self::new_with_tracker(
+            region,
+            enforcer,
+            meta,
+            Arc::new(MetadataStore::new()),
+            known_peers,
+            data_dir,
+        )
+    }
+
+    pub fn new_with_tracker<P: AsRef<Path>>(
+        region: impl Into<String>,
+        enforcer: Arc<Enforcer>,
+        meta: Arc<dyn MetadataAuthority>,
+        local_tracker: Arc<dyn LocalReplicationTracker>,
+        known_peers: Vec<String>,
+        data_dir: P,
+    ) -> Self {
+        Self::try_new_with_tracker(region, enforcer, meta, local_tracker, known_peers, data_dir)
             .expect("broker storage initialization failed; use try_new to handle the error")
     }
 
@@ -256,6 +276,24 @@ impl BrokerServer {
         region: impl Into<String>,
         enforcer: Arc<Enforcer>,
         meta: Arc<dyn MetadataAuthority>,
+        known_peers: Vec<String>,
+        data_dir: P,
+    ) -> Result<Self, BrokerError> {
+        Self::try_new_with_tracker(
+            region,
+            enforcer,
+            meta,
+            Arc::new(MetadataStore::new()),
+            known_peers,
+            data_dir,
+        )
+    }
+
+    pub fn try_new_with_tracker<P: AsRef<Path>>(
+        region: impl Into<String>,
+        enforcer: Arc<Enforcer>,
+        meta: Arc<dyn MetadataAuthority>,
+        local_tracker: Arc<dyn LocalReplicationTracker>,
         known_peers: Vec<String>,
         data_dir: P,
     ) -> Result<Self, BrokerError> {
@@ -277,6 +315,7 @@ impl BrokerServer {
             region_id,
             enforcer,
             meta,
+            local_tracker,
             policy_engine: None,
             known_peers,
             data_dir: data_dir_buf,
@@ -769,7 +808,7 @@ impl BrokerServer {
                 req.payload,
             )?;
             let new_watermark = applied_offset + 1;
-            self.meta.update_watermark(
+            self.local_tracker.update_watermark(
                 &req.topic,
                 req.partition,
                 &req.source_region,
@@ -808,7 +847,9 @@ impl BrokerServer {
 
     /// Returns the durable watermark for a replicated stream from `source_region`.
     pub fn get_watermark(&self, topic: &str, partition: u32, source_region: &str) -> u64 {
-        let meta_wm = self.meta.get_watermark(topic, partition, source_region);
+        let meta_wm = self
+            .local_tracker
+            .get_watermark(topic, partition, source_region);
         let log_wm = {
             let key = (topic.to_string(), partition);
             self.logs.get(&key).map(|l| l.next_offset()).unwrap_or(0)

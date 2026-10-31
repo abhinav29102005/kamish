@@ -32,18 +32,21 @@ passing / two failing, four frontend tests, 23 SDK tests and one Rust/Node
 integration test passing, plus format/Clippy/lint/type/build/package checks.
 Older CLI/browser/advisory results below retain their original dates and scope.
 
-**Phase 1 Authority Progress (Item 1.1 completed):**
-- Defined `MetadataAuthority` trait in `crates/kamish-meta`:
+**Phase 1 Authority Progress (Item 1.1 completed & reviewed with corrections):**
+- Defined `MetadataAuthority` trait in `crates/kamish-meta` covering *only* consensus-backed operations:
   - Epoch compare-and-swap (`compare_and_swap_epoch`)
   - Time-limited lease management (`grant_lease`, `renew_lease`, `revoke_lease` with barrier bounds)
   - Cluster durable policy-version floor tracking (`get_policy_floor`, `advance_policy_floor`)
   - Quorum-issued source identity and generation (`issue_source_identity`)
   - Audit witness checkpoints (`commit_audit_checkpoint`, `read_audit_checkpoint`)
-  - Local cached ownership and watermark query methods (NFR-01: write path does not consult quorum per write)
-- Decoupled `BrokerServer` in `cmd/kamish-broker` to depend strictly on `Arc<dyn MetadataAuthority>`, introducing `DeploymentMode` (`SingleNodeCompatibility` vs `MultiRegion`).
-- Decoupled `PartitionOwnerCoordinator` (`crates/kamish-own`) and `ReplicationAgent` (`cmd/kamish-agent`) to use `Arc<dyn MetadataAuthority>`.
-- Implemented `MetadataAuthority` for `MetadataStore` with 4 new dedicated unit tests.
-- 106 workspace tests passing, 0 clippy warnings, 0 format diffs. Both extended gap probes remain intentionally untouched until behavior implementation.
+  - Deployment mode and authoritative ownership lookup (`deployment_mode`, `get_ownership`, `set_ownership`)
+- Separated local replication state into `LocalReplicationTracker` (ADR-0017):
+  - `update_watermark`, `get_watermark`, `record_outbox_stream`, `get_outbox_stream` do NOT consult the metadata quorum and run strictly locally on the data transfer path.
+- Enforced local monotonic lease clock rules (`docs/CONTRACT.md` §2.3.1):
+  - `LocalLease` validates validity from an injectable monotonic clock (`MonotonicClock`), subtracting clock drift and transit delay allowances at grant receipt. Immune to wall-clock skew and fails closed upon client pauses.
+- Decoupled `BrokerServer` in `cmd/kamish-broker` to depend strictly on `Arc<dyn MetadataAuthority>` and `Arc<dyn LocalReplicationTracker>`, with explicit `DeploymentMode` (`SingleNodeCompatibility` vs `MultiRegion`).
+- Added broker-level multi-region test `cmd/kamish-broker/tests/multiregion_ownership.rs` proving unregistered streams fail closed and registered owners succeed (noting fail-closed admission is an edge gate, not distributed authority).
+- 108 workspace tests passing, 0 clippy warnings, 0 format diffs. Full unedited logs saved in `audit/phase1_item1_1/`. Both extended gap probes remain intentionally untouched until behavior implementation.
 
 ---
 

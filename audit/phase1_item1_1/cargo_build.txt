@@ -1,0 +1,4 @@
+   Compiling kamish-client v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-client)
+   Compiling kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+   Compiling kamish-ctl v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-ctl)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.76s

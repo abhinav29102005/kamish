@@ -1,0 +1,7 @@
+    Checking kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+    Checking kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+    Checking kamish-own v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-own)
+    Checking kamish-client v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-client)
+    Checking kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+    Checking kamish-ctl v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-ctl)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.98s

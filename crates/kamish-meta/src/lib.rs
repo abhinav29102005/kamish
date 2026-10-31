@@ -665,7 +665,12 @@ pub trait MetadataAuthority: Send + Sync {
 
     /// Returns the locally verified/cached partition ownership without consulting quorum per write (NFR-01).
     fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership>;
+}
 
+/// Local state tracking for replication watermarks and outbox streams.
+/// This state is strictly local to the node/region and does NOT go through
+/// the metadata consensus quorum on the replication path.
+pub trait LocalReplicationTracker: Send + Sync {
     /// Updates the durable replication watermark for an ingress/egress peer.
     fn update_watermark(&self, topic: &str, partition: u32, region: &str, watermark: u64);
 
@@ -682,6 +687,125 @@ pub trait MetadataAuthority: Send + Sync {
         partition: u32,
         dest: &str,
     ) -> Option<OutboxStreamMeta>;
+}
+
+// ============================================================================
+// 4.1 Monotonic Clock & Local Lease Validation (CONTRACT §2.1, Phase 1)
+// ============================================================================
+
+/// Injectable monotonic clock interface for lease duration tracking.
+pub trait MonotonicClock: Send + Sync {
+    /// Returns current monotonic milliseconds. Guaranteed never to regress.
+    fn now_monotonic_ms(&self) -> u64;
+}
+
+/// Standard system monotonic clock backed by an initialized `Instant`.
+#[derive(Clone)]
+pub struct SystemMonotonicClock {
+    start: std::time::Instant,
+}
+
+impl Default for SystemMonotonicClock {
+    fn default() -> Self {
+        Self {
+            start: std::time::Instant::now(),
+        }
+    }
+}
+
+impl SystemMonotonicClock {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl MonotonicClock for SystemMonotonicClock {
+    fn now_monotonic_ms(&self) -> u64 {
+        self.start.elapsed().as_millis() as u64
+    }
+}
+
+/// Mock monotonic clock for deterministic unit tests covering pause, skew, and expiry.
+pub struct MockMonotonicClock {
+    now_ms: std::sync::atomic::AtomicU64,
+}
+
+impl MockMonotonicClock {
+    pub fn new(initial_ms: u64) -> Self {
+        Self {
+            now_ms: std::sync::atomic::AtomicU64::new(initial_ms),
+        }
+    }
+
+    pub fn advance_ms(&self, delta_ms: u64) {
+        self.now_ms
+            .fetch_add(delta_ms, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn set_ms(&self, ms: u64) {
+        self.now_ms.store(ms, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl MonotonicClock for MockMonotonicClock {
+    fn now_monotonic_ms(&self) -> u64 {
+        self.now_ms.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// Locally verified write lease tracked via a monotonic clock.
+///
+/// Complies with `docs/CONTRACT.md` (§2.1, §2.3) and Master Plan Phase 1:
+/// - Lease validity is computed from a local monotonic clock measured from when
+///   the grant was received.
+/// - Never computed from etcd or wall-clock timestamps.
+/// - Incorporates a safety allowance for max clock drift and transit delay.
+#[derive(Clone, Debug)]
+pub struct LocalLease {
+    pub lease_id: u64,
+    pub stream: StreamId,
+    pub holder_region: String,
+    pub epoch: u64,
+    pub received_monotonic_ms: u64,
+    pub effective_duration_ms: u64,
+}
+
+impl LocalLease {
+    pub fn from_grant(
+        grant: &LeaseGrant,
+        received_monotonic_ms: u64,
+        max_clock_drift_ms: u64,
+        transit_delay_allowance_ms: u64,
+    ) -> Self {
+        let total_allowance = max_clock_drift_ms + transit_delay_allowance_ms;
+        let grant_duration_ms = ((grant.expiry_ns - grant.granted_at_ns) / 1_000_000).max(0) as u64;
+        let effective_duration_ms = grant_duration_ms.saturating_sub(total_allowance);
+
+        Self {
+            lease_id: grant.lease_id,
+            stream: grant.stream.clone(),
+            holder_region: grant.holder_region.clone(),
+            epoch: grant.epoch,
+            received_monotonic_ms,
+            effective_duration_ms,
+        }
+    }
+
+    pub fn is_valid(&self, current_monotonic_ms: u64) -> bool {
+        if current_monotonic_ms < self.received_monotonic_ms {
+            return false;
+        }
+        let elapsed = current_monotonic_ms - self.received_monotonic_ms;
+        elapsed < self.effective_duration_ms
+    }
+
+    pub fn remaining_ms(&self, current_monotonic_ms: u64) -> u64 {
+        if !self.is_valid(current_monotonic_ms) {
+            return 0;
+        }
+        self.effective_duration_ms
+            .saturating_sub(current_monotonic_ms - self.received_monotonic_ms)
+    }
 }
 
 /// Central in-memory, thread-safe Metadata Store (D4 in DFDs §2.7.2).
@@ -1142,7 +1266,9 @@ impl MetadataAuthority for MetadataStore {
     fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership> {
         self.get_ownership(topic, partition)
     }
+}
 
+impl LocalReplicationTracker for MetadataStore {
     fn update_watermark(&self, topic: &str, partition: u32, region: &str, watermark: u64) {
         self.update_watermark(topic, partition, region, watermark);
     }
@@ -1347,5 +1473,42 @@ mod tests {
         // Multi-region mode strictly rejects CAS for unregistered stream
         let res = authority.compare_and_swap_epoch(&stream, 0, 1, "region-a", 10_000);
         assert!(matches!(res, Err(MetaError::PartitionNotFound { .. })));
+    }
+
+    #[test]
+    fn test_lease_monotonic_clock_pause_skew_and_expiry() {
+        let clock = Arc::new(MockMonotonicClock::new(1000));
+        let stream = StreamId::new("orders", 0);
+
+        let grant = LeaseGrant {
+            lease_id: 42,
+            stream: stream.clone(),
+            holder_region: "region-a".to_string(),
+            granted_at_ns: 0,
+            expiry_ns: 5_000_000_000, // 5000 ms duration
+            epoch: 3,
+        };
+
+        // Safety allowance: 200 ms max clock drift + 100 ms network transit = 300 ms
+        let lease = LocalLease::from_grant(&grant, clock.now_monotonic_ms(), 200, 100);
+        // Effective duration = 5000 - 300 = 4700 ms
+        assert_eq!(lease.effective_duration_ms, 4700);
+
+        // Immediately valid
+        assert!(lease.is_valid(clock.now_monotonic_ms()));
+        assert_eq!(lease.remaining_ms(clock.now_monotonic_ms()), 4700);
+
+        // Advance 2000 ms (normal operation)
+        clock.advance_ms(2000);
+        assert!(lease.is_valid(clock.now_monotonic_ms()));
+        assert_eq!(lease.remaining_ms(clock.now_monotonic_ms()), 2700);
+
+        // Simulate client/thread pause (e.g. GC or deschedule) of 2800 ms
+        clock.advance_ms(2800); // total elapsed 4800 ms > 4700 ms
+        assert!(!lease.is_valid(clock.now_monotonic_ms()));
+        assert_eq!(lease.remaining_ms(clock.now_monotonic_ms()), 0);
+
+        // Wall-clock backward step does NOT resurrect expired lease because monotonic clock only moves forward
+        assert!(!lease.is_valid(clock.now_monotonic_ms()));
     }
 }
