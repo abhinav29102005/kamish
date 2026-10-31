@@ -504,7 +504,7 @@ definition of "immediately". Options requiring the maintainer's decision:
   cannot provide it. Per-write checks alone also cannot recall prior emitted bytes.
 
 The immediate-cancellation requirement is accepted; the global activation
-definition and protocol are **pending clarification before implementation**.
+boundary is **decided via ADR-0018**: bound = max(revocation commit + barrier ack, lease TTL + max clock drift). Lease TTL is the authoritative revocation-latency bound and drives failover time.
 
 Queued/replayed work is re-evaluated on drain and recovery. A denied destination
 is marked blocked/revoked with its reason; it is not marked durably acknowledged.

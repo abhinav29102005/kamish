@@ -19,8 +19,8 @@ use kamish_log::{
     LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager,
 };
 use kamish_meta::{
-    DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, PolicyEngine,
-    RegionId, ResidencyPolicy, StreamEvent,
+    DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, PartitionOwnership,
+    PolicyEngine, RegionId, ResidencyPolicy, StreamEvent, StreamId,
 };
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
@@ -48,6 +48,12 @@ pub enum BrokerError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Epoch fenced: current {current}, attempted {attempted}")]
+    EpochFenced { current: u64, attempted: u64 },
+
+    #[error("Authority error: {0}")]
+    Authority(String),
 }
 
 /// Helper function to parse region string into strongly-typed RegionId.
@@ -357,6 +363,35 @@ impl BrokerServer {
     /// Dynamically sets or updates the policy engine hook.
     pub fn set_policy_engine(&mut self, engine: Arc<dyn PolicyEngine>) {
         self.policy_engine = Some(engine);
+    }
+
+    /// Claims or updates partition ownership via atomic CAS on the metadata authority.
+    pub fn claim_partition_ownership(
+        &self,
+        topic: &str,
+        partition: u32,
+        expected_epoch: u64,
+        new_epoch: u64,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, BrokerError> {
+        let stream = StreamId::new(topic, partition);
+        self.meta
+            .compare_and_swap_epoch(
+                &stream,
+                expected_epoch,
+                new_epoch,
+                &self.region,
+                lease_duration_ms,
+            )
+            .map_err(|e| match e {
+                kamish_meta::MetaError::StaleEpoch { current, proposed } => {
+                    BrokerError::EpochFenced {
+                        current,
+                        attempted: proposed,
+                    }
+                }
+                other => BrokerError::Authority(other.to_string()),
+            })
     }
 
     /// Handles record ingestion with Ingress Interceptor Hooks, E1/E2 policy enforcement,
@@ -2092,5 +2127,62 @@ mod tests {
                 assert_eq!(rec.base_offset, idx as u64);
             }
         }
+    }
+
+    #[test]
+    fn test_broker_claim_partition_ownership_and_epoch_fencing() {
+        let meta = Arc::new(MetadataStore::new_multi_region());
+        let (mut broker_a, _dir_a) = setup_test_broker("region-eu", vec![]);
+        broker_a.meta = meta.clone();
+
+        let (mut broker_b, _dir_b) = setup_test_broker("region-us", vec![]);
+        broker_b.meta = meta.clone();
+
+        let req = ProduceRequest {
+            topic: "claims".into(),
+            partition: 0,
+            producer_id: 1,
+            producer_epoch: 1,
+            sequence_base: 0,
+            class_id: "global-data".into(),
+            payload: vec![1, 2, 3],
+            residency_rule: None,
+        };
+
+        // 1. Unregistered partition in MultiRegion mode fails closed
+        let unreg_err = broker_a.produce(req.clone()).unwrap_err();
+        assert!(
+            matches!(unreg_err, BrokerError::PolicyDenied(ref s) if s == "unregistered_stream_in_multi_region_mode")
+        );
+
+        // 2. Broker A claims epoch 1
+        let claim_a = broker_a
+            .claim_partition_ownership("claims", 0, 0, 1, 60_000)
+            .unwrap();
+        assert_eq!(claim_a.epoch, 1);
+        assert_eq!(claim_a.owner_region, "region-eu");
+
+        // 3. Broker B attempts to claim epoch 1 with expected_epoch 0 -> fails with EpochFenced
+        let claim_b = broker_b
+            .claim_partition_ownership("claims", 0, 0, 1, 60_000)
+            .unwrap_err();
+        assert!(matches!(
+            claim_b,
+            BrokerError::EpochFenced {
+                current: 1,
+                attempted: 0
+            }
+        ));
+
+        // 4. Broker A produces successfully at epoch 1
+        let resp_a = broker_a.produce(req.clone()).unwrap();
+        assert_eq!(resp_a.committed_epoch, 1);
+        assert!(resp_a.sovereignty_allowed);
+
+        // 5. Broker B attempts to produce -> fails with not_current_partition_owner
+        let err_b = broker_b.produce(req).unwrap_err();
+        assert!(
+            matches!(err_b, BrokerError::PolicyDenied(ref s) if s == "not_current_partition_owner")
+        );
     }
 }

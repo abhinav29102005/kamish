@@ -395,8 +395,12 @@ impl MetadataAuthority for EtcdMetadataAuthority {
                 Err(err) => {
                     last_err = err;
                     if attempt < max_attempts {
-                        self.reset_connection();
-                        std::thread::sleep(Duration::from_millis(400 * attempt as u64));
+                        // Allow Tower balanced channel to rotate to healthy endpoints
+                        // before destroying channel state
+                        if attempt >= 2 {
+                            self.reset_connection();
+                        }
+                        std::thread::sleep(Duration::from_millis(300 * attempt as u64));
                     }
                 }
             }

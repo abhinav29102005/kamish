@@ -487,10 +487,10 @@ impl ReplicationAgent {
                         let targets = self.registered_targets();
                         let now = tokio::time::Instant::now();
                         for target in targets {
-                            if let Some((ready_at, _)) = target_backoffs.get(&target) {
-                                if now < *ready_at {
-                                    continue;
-                                }
+                            if let Some((ready_at, _)) = target_backoffs.get(&target)
+                                && now < *ready_at
+                            {
+                                continue;
                             }
                             let _ = self.local_broker.refill_outbox(&target);
                             if let Some(outbox) = self.local_broker.get_outbox(&target) {

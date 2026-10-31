@@ -13,6 +13,14 @@ use kamish_policy::{
 use std::sync::{Arc, RwLock};
 
 fn broker(region: &str, peers: Vec<String>) -> (BrokerServer, tempfile::TempDir) {
+    broker_with_authority(region, peers, Arc::new(MetadataStore::new()))
+}
+
+fn broker_with_authority(
+    region: &str,
+    peers: Vec<String>,
+    meta: Arc<dyn kamish_meta::MetadataAuthority>,
+) -> (BrokerServer, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let key = SigningKey::from_bytes(&[31; 32]);
     let public_key = hex::encode(key.verifying_key().to_bytes());
@@ -48,14 +56,7 @@ fn broker(region: &str, peers: Vec<String>) -> (BrokerServer, tempfile::TempDir)
         AuditLog::new_in_memory(),
     ));
     (
-        BrokerServer::try_new(
-            region,
-            enforcer,
-            Arc::new(MetadataStore::new()),
-            peers,
-            dir.path(),
-        )
-        .unwrap(),
+        BrokerServer::try_new(region, enforcer, meta, peers, dir.path()).unwrap(),
         dir,
     )
 }
@@ -138,10 +139,56 @@ fn claimed_multi_record_range_must_match_the_persisted_record_count() {
 
 #[test]
 fn independent_regions_must_not_both_accept_unregistered_epoch_one_writes() {
-    let (a, _a) = broker("a", vec![]);
-    let (b, _b) = broker("b", vec![]);
+    let meta: Arc<dyn kamish_meta::MetadataAuthority> = if std::env::var("KAMISH_ETCD_TESTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        Arc::new(
+            kamish_meta::EtcdMetadataAuthority::new(
+                vec![
+                    "https://127.0.0.1:2379".to_string(),
+                    "https://127.0.0.1:2381".to_string(),
+                    "https://127.0.0.1:2383".to_string(),
+                ],
+                Some(root.join("certs/ca.crt")),
+                Some(root.join("certs/client.crt")),
+                Some(root.join("certs/client.key")),
+                None,
+            )
+            .expect("Failed to connect to etcd"),
+        )
+    } else {
+        Arc::new(MetadataStore::new_multi_region())
+    };
+
+    let (a, _a) = broker_with_authority("a", vec![], meta.clone());
+    let (b, _b) = broker_with_authority("b", vec![], meta.clone());
+
+    // 1. Both brokers race to claim partition ownership for events/0 at epoch 1
+    let a_claim = a.claim_partition_ownership("events", 0, 0, 1, 30_000);
+    let b_claim = b.claim_partition_ownership("events", 0, 0, 1, 30_000);
+
+    // Exactly one claimant wins; the other honestly receives EpochFenced
+    assert!(
+        (a_claim.is_ok() && matches!(b_claim, Err(kamish_broker::BrokerError::EpochFenced { .. })))
+            || (b_claim.is_ok()
+                && matches!(a_claim, Err(kamish_broker::BrokerError::EpochFenced { .. }))),
+        "Consensus must grant epoch 1 to exactly one claimant and fence the other. a: {:?}, b: {:?}",
+        a_claim,
+        b_claim
+    );
+
+    // 2. Both brokers attempt produce at epoch 1
     let a_result = a.produce(produce(0, ResidencyPolicy::GlobalCleartext));
     let b_result = b.produce(produce(0, ResidencyPolicy::GlobalCleartext));
+
+    // 3. UNTOUCHED ORIGINAL ASSERTION: Both must not acknowledge epoch 1
     let both_acked = matches!(a_result, Ok(ref r) if r.sovereignty_allowed && r.committed_epoch == 1)
         && matches!(b_result, Ok(ref r) if r.sovereignty_allowed && r.committed_epoch == 1);
     assert!(

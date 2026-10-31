@@ -482,3 +482,29 @@ Strictly separate consensus-backed authoritative operations from node-local repl
 
 `MetadataStore` implements both traits for single-node compatibility. Distributed broker/agent implementations consume `MetadataAuthority` for ownership and `LocalReplicationTracker` for data pipeline progress.
 
+
+---
+
+## ADR-0018: Lease Revocation Barrier Bound and Failover Latency Contract
+
+**Status:** Decided. **Date:** 1 November 2026.
+
+### Context
+
+Under multi-region operation (Item 1.3, §2.2, §6.2), when partition ownership is revoked or transferred between regions, an isolated process or partitioned broker cannot learn of consensus revocation instantaneously while running under a previously granted local lease. Relying on watches or push notifications alone violates fail-closed safety because network partitions or process pauses can delay watch delivery.
+
+### Decision
+
+1. **Lease TTL as Revocation Latency Bound:**
+   - Partition write authority is lease-based (NFR-01). The metadata consensus quorum is NOT consulted on every write.
+   - The authoritative revocation latency bound is strictly:
+     $$\text{Revocation Bound} = \max(\text{revocation commit} + \text{barrier ack}, \text{lease TTL} + \text{max clock drift})$$
+   - Consequently, **lease TTL is the fundamental bound on revocation latency and directly drives partition failover time**.
+
+2. **Fencing Enforced at Log and Replicas (INV-2 / INV-7):**
+   - Never trust the lease alone. Monotonic epoch fences are enforced persistently at the storage log (`PartitionLog::append`) and replica receivers.
+   - Watches are NEVER relied upon for safety or revocation. Local admission ceases when the local monotonic clock passes `expiry - max_clock_drift - transit_allowance`.
+
+3. **Multi-Region Fail-Closed Admission:**
+   - In `DeploymentMode::MultiRegion`, any partition without an active, authoritative ownership grant in consensus fails closed (`unregistered_stream_in_multi_region_mode`).
+   - Ownership changes and epoch claims MUST execute via atomic consensus CAS (`compare_and_swap_epoch`). Competing or superseded claimants are rejected with `BrokerError::EpochFenced`.

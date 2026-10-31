@@ -336,7 +336,7 @@ mod review {
         let source = broker("a", dir.path(), DestinationMode::Cleartext);
         source
             .meta
-            .set_ownership("events", 0, "b", 7, 60_000)
+            .compare_and_swap_epoch(&kamish_meta::StreamId::new("events", 0), 0, 7, "b", 60_000)
             .unwrap();
         let result = source.produce(request(0, "class-0", b"wrong-owner".to_vec()));
         assert!(
