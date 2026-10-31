@@ -1,0 +1,2668 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name=claude:viewport-fit-sides content=cover><style>:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-right:env(safe-area-inset-right,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}</style><style>.md-table{overflow-x:auto}@media print{.md-table{overflow-x:visible}}</style><style>:root{color-scheme:light dark;--md-bg:#fff;--md-text:rgba(0,0,0,.8);--md-muted:rgba(0,0,0,.6);--md-fill:rgba(0,0,0,.04);--md-fill-strong:rgba(0,0,0,.06);--md-rule:rgba(0,0,0,.1);--md-rule-strong:rgba(0,0,0,.16);--md-link:hsl(210 100% 45%)}@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){--md-bg:#0d0d0d;--md-text:rgba(255,255,255,.85);--md-muted:rgba(255,255,255,.6);--md-fill:rgba(255,255,255,.06);--md-fill-strong:rgba(255,255,255,.09);--md-rule:rgba(255,255,255,.14);--md-rule-strong:rgba(255,255,255,.22);--md-link:hsl(210 100% 72%)}}:root[data-theme="dark"]{color-scheme:dark;--md-bg:#0d0d0d;--md-text:rgba(255,255,255,.85);--md-muted:rgba(255,255,255,.6);--md-fill:rgba(255,255,255,.06);--md-fill-strong:rgba(255,255,255,.09);--md-rule:rgba(255,255,255,.14);--md-rule-strong:rgba(255,255,255,.22);--md-link:hsl(210 100% 72%)}:root[data-theme="light"]{color-scheme:light}@media print{:root,:root[data-theme="dark"]{color-scheme:light;--md-bg:#fff;--md-text:rgba(0,0,0,.8);--md-muted:rgba(0,0,0,.6);--md-fill:rgba(0,0,0,.04);--md-fill-strong:rgba(0,0,0,.06);--md-rule:rgba(0,0,0,.1);--md-rule-strong:rgba(0,0,0,.16);--md-link:hsl(210 100% 45%)}}body{background:var(--md-bg);color:var(--md-text);max-width:720px;margin:0 auto;padding:32px;display:flex;flex-direction:column;gap:10px;font:14px/1.55 -apple-system,BlinkMacSystemFont,'SF Pro','Segoe UI',sans-serif;overflow-wrap:break-word}body>:first-child{margin-top:0}h1,h2,h3,h4,h5,h6{margin:6px 0 0;line-height:1.25;font-weight:600;text-wrap:balance}h1{font-size:1.35em}h2{font-size:1.15em;color:var(--md-muted)}h3,h4,h5,h6{font-size:1em}p,ul,ol,blockquote,table,pre,hr{margin:0}strong{font-weight:600}a{color:var(--md-link);text-decoration:none}a:hover{text-decoration:underline}ul,ol{display:flex;flex-direction:column;gap:6px;padding-left:22px}ul{list-style:disc}ol{list-style:decimal}:is(li,td,th)>*+:is(p,ul,ol,blockquote){margin-top:6px}blockquote{display:flex;flex-direction:column;gap:10px;border-left:2px solid var(--md-rule);padding-left:10px;color:var(--md-muted)}:not(pre)>code{background:var(--md-fill);padding:1px 3px;border-radius:4px;font:.92em 'SF Mono',ui-monospace,Menlo,Consolas,monospace}a>code{background:none;color:inherit}pre{background:var(--md-fill);padding:10px 12px;border-radius:6px;overflow-x:auto;font:12px/1.5 'SF Mono',ui-monospace,Menlo,Consolas,monospace;margin-block:4px}pre code{background:none;padding:0;font:inherit}table{width:100%;border-collapse:separate;border-spacing:2px;font:inherit}th,td{padding:6px 8px;border-radius:3px;text-align:left;vertical-align:top}th{background:var(--md-fill-strong);font-weight:600}td{background:var(--md-fill)}:is(th,td) :not(pre)>code{background:transparent}hr{border:0;border-top:1px solid var(--md-rule-strong);margin-block:10px}img{max-width:100%;height:auto;border-radius:4px}</style>
+</head><body>
+<hr>
+<p>title: &quot;Hydra Stream — Project Documentation&quot;
+subtitle: &quot;Sovereignty-aware, WAN-adaptive multi-region event streaming&quot;
+version: &quot;0.1-draft&quot;
+date: &quot;2026-10-31&quot;
+status: &quot;Draft&quot;
+event: &quot;BIOS Hackathon 2026 / Frontier&quot;
+sources:</p>
+<ul>
+<li>&quot;02_Hydra_Stream_Research_Dossier.docx&quot;</li>
+<li>&quot;Hydra Stream — Baseline Components.md&quot;</li>
+<li>&quot;Hydra Stream — What We Do Differently.md&quot;
+diagrams: &quot;Mermaid (renders natively on GitHub, GitLab, VS Code, Obsidian)&quot;</li>
+</ul>
+<hr>
+<h1>Hydra Stream — Project Documentation</h1>
+<blockquote>
+<p><strong>Hydra Stream</strong> is a Kafka-style distributed event broker in which data stays inside its legally permitted regions, replication routes around slow or degraded links, and a regional outage degrades the service per data class instead of freezing it.</p>
+</blockquote>
+<p><strong>Document status:</strong> Draft v0.1 · 31 Oct 2026 · Prototype scope, not a compliance product.</p>
+<hr>
+<h2>How This Document Is Organised</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Part</th>
+<th>Title</th>
+<th>Answers the question</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#part-1--foundations">Part 1</a></td>
+<td>Foundations</td>
+<td><em>What are we building, why, and what exactly are we promising?</em></td>
+</tr>
+<tr>
+<td><a href="#part-2--architecture-and-data-flow">Part 2</a></td>
+<td>Architecture and Data Flow</td>
+<td><em>How is the system structured and how does data move?</em></td>
+</tr>
+<tr>
+<td><a href="#part-3--core-logic-and-implementation">Part 3</a></td>
+<td>Core Logic and Implementation</td>
+<td><em>How does each critical behaviour work, step by step?</em></td>
+</tr>
+<tr>
+<td><a href="#part-4--validation-risk-and-delivery">Part 4</a></td>
+<td>Validation, Risk and Delivery</td>
+<td><em>How do we prove it, what can go wrong, and how do we ship it?</em></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>Table of Contents</h2>
+<ul>
+<li><a href="#part-1--foundations">Part 1 — Foundations</a>
+<ul>
+<li><a href="#11-purpose-and-research-question">1.1 Purpose and Research Question</a></li>
+<li><a href="#12-scope-and-non-goals">1.2 Scope and Non-Goals</a></li>
+<li><a href="#13-semantics-we-commit-to">1.3 Semantics We Commit To</a></li>
+<li><a href="#14-requirements">1.4 Requirements</a></li>
+<li><a href="#15-build-reuse-and-tiers">1.5 Build, Reuse and Tiers</a></li>
+<li><a href="#16-what-is-different-novelty">1.6 What Is Different (Novelty)</a></li>
+<li><a href="#17-glossary">1.7 Glossary</a></li>
+</ul>
+</li>
+<li><a href="#part-2--architecture-and-data-flow">Part 2 — Architecture and Data Flow</a>
+<ul>
+<li><a href="#21-system-context">2.1 System Context</a></li>
+<li><a href="#22-federated-regional-architecture">2.2 Federated Regional Architecture</a></li>
+<li><a href="#23-deployment-view">2.3 Deployment View</a></li>
+<li><a href="#24-policy-data-model">2.4 Policy Data Model</a></li>
+<li><a href="#25-metadata-entity-relationship-model">2.5 Metadata Entity-Relationship Model</a></li>
+<li><a href="#26-enforcement-points-map">2.6 Enforcement Points Map</a></li>
+<li><a href="#27-data-flow-diagrams-levels-0-to-3">2.7 Data Flow Diagrams (Levels 0 to 3)</a></li>
+</ul>
+</li>
+<li><a href="#part-3--core-logic-and-implementation">Part 3 — Core Logic and Implementation</a>
+<ul>
+<li><a href="#31-sequence-diagrams">3.1 Sequence Diagrams</a></li>
+<li><a href="#32-logic-flowcharts">3.2 Logic Flowcharts</a></li>
+<li><a href="#33-state-machines">3.3 State Machines</a></li>
+<li><a href="#34-reference-pseudocode">3.4 Reference Pseudocode</a></li>
+<li><a href="#35-api-and-record-envelope">3.5 API and Record Envelope</a></li>
+<li><a href="#36-repository-and-module-layout">3.6 Repository and Module Layout</a></li>
+</ul>
+</li>
+<li><a href="#part-4--validation-risk-and-delivery">Part 4 — Validation, Risk and Delivery</a>
+<ul>
+<li><a href="#41-test-bed">4.1 Test Bed</a></li>
+<li><a href="#42-scenario-matrix">4.2 Scenario Matrix</a></li>
+<li><a href="#43-failure-matrix">4.3 Failure Matrix</a></li>
+<li><a href="#44-metrics-and-method">4.4 Metrics and Method</a></li>
+<li><a href="#45-baselines-and-fairness-rules">4.5 Baselines and Fairness Rules</a></li>
+<li><a href="#46-hypotheses">4.6 Hypotheses</a></li>
+<li><a href="#47-threat-model-and-risks">4.7 Threat Model and Risks</a></li>
+<li><a href="#48-delivery-plan">4.8 Delivery Plan</a></li>
+<li><a href="#49-demo-script">4.9 Demo Script</a></li>
+<li><a href="#410-open-questions-and-assumptions">4.10 Open Questions and Assumptions</a></li>
+<li><a href="#411-claims-checklist">4.11 Claims Checklist</a></li>
+<li><a href="#412-references">4.12 References</a></li>
+</ul>
+</li>
+</ul>
+<hr>
+<h1>Part 1 — Foundations</h1>
+<h2>1.1 Purpose and Research Question</h2>
+<p>Hydra Stream exists to test one question:</p>
+<blockquote>
+<p>How can a multi-region event-streaming platform preserve strict data-residency constraints while adapting to WAN degradation and regional failures, without violating durability, ordering, authorization, or recovery guarantees?</p>
+</blockquote>
+<p>Kafka with MirrorMaker 2 and Apache Pulsar already provide geo-replication. Hydra Stream is therefore <strong>not</strong> &quot;Kafka with replication&quot;. Its contribution is the sovereignty-aware control and data-plane behaviour that sits on top of a standard log.</p>
+<p>Three requirements from the challenge, treated as separate and interacting:</p>
+<ol>
+<li><strong>Residency.</strong> Data must remain within its legally permitted region.</li>
+<li><strong>Adaptivity.</strong> Messages should route around slow or degraded links.</li>
+<li><strong>Survivability.</strong> The system survives a regional outage without freezing the entire service.</li>
+</ol>
+<h2>1.2 Scope and Non-Goals</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>In scope</th>
+<th>Out of scope</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Three emulated logical regions</td>
+<td>Real multi-cloud deployment</td>
+</tr>
+<tr>
+<td>Per-class residency policy, signed and versioned</td>
+<td>Legal compliance certification or legal advice</td>
+</tr>
+<tr>
+<td>Broker-side enforcement at every persistence and send point</td>
+<td>Defence against a compromised broker already holding cleartext</td>
+</tr>
+<tr>
+<td>Policy-constrained adaptive replication with a durable outbox</td>
+<td>A new congestion-control algorithm</td>
+</tr>
+<tr>
+<td>Epoch-based fencing and policy-gated failover</td>
+<td>Exactly-once delivery or transactions</td>
+</tr>
+<tr>
+<td>Canary-based evidence and reproducible test runs</td>
+<td>Cryptographic proof of physical location</td>
+</tr>
+<tr>
+<td>Comparison against Kafka + MirrorMaker 2 and Pulsar geo-replication</td>
+<td>Production workload identity and HSM key management</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>1.3 Semantics We Commit To</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Commitment</th>
+<th>Not claimed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Delivery</td>
+<td>At-least-once to consumers; producer retries deduplicated by session and sequence</td>
+<td>Exactly-once, global or transactional</td>
+</tr>
+<tr>
+<td>Ordering</td>
+<td>Per partition, within one owner epoch</td>
+<td>Global or per-topic order</td>
+</tr>
+<tr>
+<td>Duplicates</td>
+<td>After failover, bounded by the checkpoint interval</td>
+<td>Zero duplicates</td>
+</tr>
+<tr>
+<td>Durability</td>
+<td>Per class acknowledgment mode (see below)</td>
+<td>Zero loss during any partition</td>
+</tr>
+<tr>
+<td>Residency</td>
+<td>Zero unauthorized replication <strong>in the tested scenarios and scanned locations</strong></td>
+<td>A universal or legal guarantee</td>
+</tr>
+<tr>
+<td>Location</td>
+<td>Taken from configured infrastructure labels</td>
+<td>Proven physical location</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Acknowledgment modes</strong> (declared per class):</p>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Acknowledged when</th>
+<th>Failure trade-off</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>local-quorum</code></td>
+<td>Majority of in-region replicas have fsynced</td>
+<td>Acknowledged but unreplicated records can be lost on whole-region loss, bounded by replication lag</td>
+</tr>
+<tr>
+<td><code>legal-set-sync(k)</code></td>
+<td>Local quorum <strong>and</strong> <code>k</code> replicas in the legal set are durable</td>
+<td>No loss for acknowledged records, but higher latency and writes block when <code>k</code> replicas are unreachable</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>1.4 Requirements</h2>
+<h3>1.4.1 Functional Requirements</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Tier</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FR-01</td>
+<td>Create a topic bound to a data class</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-02</td>
+<td>Produce batches with idempotent producer sessions</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-03</td>
+<td>Fetch records in offset order up to the committed high-water mark</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-04</td>
+<td>Evaluate one signed policy decision before every persist, send, export and fetch</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-05</td>
+<td>Replicate in mirror mode with offsets preserved</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-06</td>
+<td>Queue replication in a bounded durable outbox and resume from a durable watermark</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-07</td>
+<td>Maintain per-partition <code>(owner_region, epoch)</code> and fence stale writers</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-08</td>
+<td>Promote a new owner only if policy lists it as eligible</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-09</td>
+<td>Apply per-class degradation when no legal alternate exists</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-10</td>
+<td>Provide canary scanner and invariant checkers</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>FR-11</td>
+<td>Sealed-only (ciphertext) destination mode</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>FR-12</td>
+<td>Transit-allowed relay hops for ciphertext only</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>FR-13</td>
+<td>Hash-chained, region-local decision log</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>FR-14</td>
+<td>Derive mode with offset lineage</td>
+<td>P2</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3>1.4.2 Non-Functional Requirements</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Requirement</th>
+<th>Verification</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NFR-01</td>
+<td>Control plane is <strong>off the write path</strong>; pinned classes keep accepting local writes if it is lost</td>
+<td>Control-plane outage scenario</td>
+</tr>
+<tr>
+<td>NFR-02</td>
+<td>Fail closed on unknown, unsigned, rolled-back or stale policy for restricted classes</td>
+<td>Tampered, replayed and expired policy tests</td>
+</tr>
+<tr>
+<td>NFR-03</td>
+<td>Memory is bounded; at the outbox disk bound the class backpressure rule applies</td>
+<td>Long-outage scenario with memory monitoring</td>
+</tr>
+<tr>
+<td>NFR-04</td>
+<td>Route changes require smoothed, windowed evidence</td>
+<td>Oscillation-rate metric</td>
+</tr>
+<tr>
+<td>NFR-05</td>
+<td>Every reported number links to a run, configuration and date</td>
+<td>Results log</td>
+</tr>
+<tr>
+<td>NFR-06</td>
+<td>All inter-component traffic uses mutually authenticated TLS 1.3</td>
+<td>Plaintext scan, unknown-client rejection</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>1.5 Build, Reuse and Tiers</h2>
+<p>Tiers: <strong>P0</strong> committed · <strong>P1</strong> committed if time allows · <strong>P2</strong> cut first, and removed from pitch material if cut.</p>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Component</th>
+<th>Build or reuse</th>
+<th>Tier</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Segmented append-only log</td>
+<td>Build (small)</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>In-region replication</td>
+<td>Build on Raft or quorum-fsync design</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Producer and consumer API (gRPC)</td>
+<td>Build</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Idempotent producers and offsets</td>
+<td>Build</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Mirror-mode replication between regions</td>
+<td>Build</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Durable outbox and resumable transfer</td>
+<td>Build</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Metadata quorum</td>
+<td>Reuse a Raft library</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Transport security and identity</td>
+<td>Reuse TLS 1.3 and standard certificates</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Link measurement</td>
+<td>Build (small)</td>
+<td>P1</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Region emulation and fault injection</td>
+<td>Reuse Linux tools and containers</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Checkers and metrics</td>
+<td>Build checkers, reuse metrics libraries</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Baselines (Kafka + MirrorMaker 2, Pulsar)</td>
+<td>Deploy as documented</td>
+<td>P0</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Policy signing and verification</td>
+<td>Reuse standard signature primitives</td>
+<td>P0</td>
+</tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p><strong>Provisional.</strong> If organizers allow building on Kafka or Pulsar, components 1 to 4 could be replaced by an existing broker, at the cost of weaker control over the storage and send path the enforcement library depends on.</p>
+</blockquote>
+<h2>1.6 What Is Different (Novelty)</h2>
+<p>Only the following are proposed as different. Everything in <a href="#15-build-reuse-and-tiers">section 1.5</a> is standard engineering and is <strong>not</strong> claimed as new.</p>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Difference</th>
+<th>Tier</th>
+<th>Proof</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td>Broker-side residency enforcement at every persistence and send point</td>
+<td>P0</td>
+<td>Canary scan across fault scenarios, including mis-set producer lists</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>Three destination modes: deny, sealed-only, cleartext</td>
+<td>P1</td>
+<td>Sealed-copy canary test and key-escrow drill</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>Transit as an explicit policy dimension</td>
+<td>P1</td>
+<td>Permitted ciphertext-only relay test and denied-relay test</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>Per-class survival and degradation rules</td>
+<td>P0</td>
+<td>Failure matrix, class by class</td>
+</tr>
+<tr>
+<td>D5</td>
+<td>Fencing built into the broker, gated by policy eligibility</td>
+<td>P0</td>
+<td>Stale-epoch writer test, partition and clock-skew tests</td>
+</tr>
+<tr>
+<td>D6</td>
+<td>Evidence package: canaries, decision log, stated limits</td>
+<td>P0 / P1</td>
+<td>Reproducible run script and raw logs</td>
+</tr>
+<tr>
+<td>D7</td>
+<td>Derive mode with offset lineage</td>
+<td>P2</td>
+<td>Lineage lookup test</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Explicitly not new:</strong> offset-preserving mirror replication, producer idempotence, per-partition ordering, majority-fsync replication, Raft metadata, TLS 1.3, standard congestion control, and hysteresis or circuit-breaker route stability (we only apply them inside the policy-permitted graph).</p>
+<p><strong>Draft novelty statement</strong> <em>(adjust to what survives the cut line):</em></p>
+<blockquote>
+<p>Hydra Stream is a prototype broker that enforces a signed, versioned residency policy at every point where payload is stored or sent, allows ciphertext-only replicas where policy permits, treats relay hops as policy-controlled data movement, and fences regional failover with epochs gated by the same policy. We evaluate it against Kafka with MirrorMaker 2 and Pulsar geo-replication in an emulated three-region testbed, and report both the cases where it helps and the cases where it cannot.</p>
+</blockquote>
+<p><strong>Comparison basis.</strong> Statements about other systems come from public documentation and vendor material reviewed in a targeted, not exhaustive, review. Word them as &quot;in the documentation we reviewed&quot;, never &quot;nobody does this&quot;, and re-check before submission.</p>
+<h2>1.7 Glossary</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Class</strong></td>
+<td>A data classification that carries a policy (legal set, mode, ack mode, failover candidates)</td>
+</tr>
+<tr>
+<td><strong>Legal set</strong></td>
+<td>Regions where a class may be stored or processed</td>
+</tr>
+<tr>
+<td><strong>Epoch</strong></td>
+<td>Monotonically increasing ownership number per partition, used as a fencing token</td>
+</tr>
+<tr>
+<td><strong>Lease</strong></td>
+<td>Time-limited ownership right; an owner that cannot renew stops acknowledging writes</td>
+</tr>
+<tr>
+<td><strong>Outbox</strong></td>
+<td>Bounded, durable, per-destination replication queue</td>
+</tr>
+<tr>
+<td><strong>Watermark</strong></td>
+<td>Highest offset a receiver has durably applied</td>
+</tr>
+<tr>
+<td><strong>Sealed copy</strong></td>
+<td>Ciphertext-only replica whose key stays in the key-residency region</td>
+</tr>
+<tr>
+<td><strong>Transit</strong></td>
+<td>A relay hop through a third region, permitted only for ciphertext</td>
+</tr>
+<tr>
+<td><strong>Canary</strong></td>
+<td>Unique synthetic record per class used to detect leaks</td>
+</tr>
+<tr>
+<td><strong>RPO / RTO</strong></td>
+<td>Recovery point / recovery time objective, measured per scenario</td>
+</tr>
+<tr>
+<td><strong>Quarantine segment</strong></td>
+<td>Local, never-replicated store for a recovered old owner's superseded log suffix</td>
+</tr>
+<tr>
+<td><strong>Fail closed</strong></td>
+<td>Deny the operation when policy is unknown, invalid or stale</td>
+</tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h1>Part 2 — Architecture and Data Flow</h1>
+<h2>2.1 System Context</h2>
+<p>Hydra Stream is a federated set of autonomous regions plus a small, payload-free global control plane.</p>
+<pre class="mermaid">flowchart LR
+    PROD[&#34;Producers&#34;]
+    CONS[&#34;Consumers&#34;]
+    AUTH[&#34;Policy Authority&lt;br/&gt;offline signer&#34;]
+    OPS[&#34;Operators&#34;]
+    AUD[&#34;Auditor / Judge&#34;]
+
+    subgraph HS[&#34;Hydra Stream&#34;]
+        RA[&#34;Region A&lt;br/&gt;data plane&#34;]
+        RB[&#34;Region B&lt;br/&gt;data plane&#34;]
+        RC[&#34;Region C&lt;br/&gt;data plane&#34;]
+        CP[&#34;Global control plane&lt;br/&gt;3-voter Raft, no payload&#34;]
+    end
+
+    PROD --&gt;|&#34;records&#34;| RA
+    PROD --&gt;|&#34;records&#34;| RB
+    RA --&gt;|&#34;records&#34;| CONS
+    RB --&gt;|&#34;records&#34;| CONS
+    AUTH --&gt;|&#34;signed policy&#34;| CP
+    OPS --&gt;|&#34;admin commands&#34;| CP
+    CP --&gt;|&#34;ownership, policy versions&#34;| RA
+    CP --&gt;|&#34;ownership, policy versions&#34;| RB
+    CP --&gt;|&#34;ownership, policy versions&#34;| RC
+    RA &lt;--&gt;|&#34;policy-permitted replication&#34;| RB
+    RB &lt;--&gt;|&#34;policy-permitted replication&#34;| RC
+    RA &lt;--&gt;|&#34;policy-permitted replication&#34;| RC
+    RA --&gt;|&#34;decision logs, canary reports&#34;| AUD
+</pre>
+<h2>2.2 Federated Regional Architecture</h2>
+<p>Each region is autonomous. The control plane distributes <strong>permitted metadata and replication intent only</strong>.</p>
+<pre class="mermaid">flowchart TB
+    subgraph REGION[&#34;One Region (identical in A, B, C)&#34;]
+        GW[&#34;Ingress gateway&lt;br/&gt;mTLS, class stamp&#34;]
+        ENF[&#34;Enforcement library&lt;br/&gt;single decision function&#34;]
+        BRK[&#34;Broker cluster&lt;br/&gt;3 replicas, majority fsync&#34;]
+        LOG[(&#34;Segmented&lt;br/&gt;append-only log&#34;)]
+        QUA[(&#34;Quarantine&lt;br/&gt;segment&#34;)]
+        OBX[(&#34;Durable outbox&lt;br/&gt;per destination&#34;)]
+        REP[&#34;Replication agent&lt;br/&gt;sender and receiver&#34;]
+        RTS[&#34;Route selector&lt;br/&gt;permitted graph first&#34;]
+        LMS[&#34;Link measurement&#34;]
+        KMS[&#34;Region key service&lt;br/&gt;simulated&#34;]
+        BKP[&#34;Backup / tiered export&#34;]
+        TEL[&#34;Telemetry collector&lt;br/&gt;export policy&#34;]
+        DEC[(&#34;Hash-chained&lt;br/&gt;decision log&#34;)]
+        PCACHE[(&#34;Signed policy cache&lt;br/&gt;+ staleness timer&#34;)]
+        FET[&#34;Consumer fetch service&#34;]
+    end
+
+    GW --&gt; ENF
+    ENF --&gt; BRK
+    BRK --&gt; LOG
+    LOG --&gt; OBX
+    OBX --&gt; REP
+    REP --&gt; RTS
+    LMS --&gt; RTS
+    REP --&gt; ENF
+    BKP --&gt; ENF
+    TEL --&gt; ENF
+    FET --&gt; ENF
+    ENF --&gt; PCACHE
+    ENF --&gt; DEC
+    BRK --&gt; QUA
+    ENF --&gt; KMS
+    LOG --&gt; FET
+    LOG --&gt; BKP
+    BRK --&gt; TEL
+
+    META[&#34;Global metadata quorum&#34;]
+    META -.-&gt;|&#34;ownership, epochs, policy versions&#34;| PCACHE
+    META -.-&gt;|&#34;lease and epoch&#34;| BRK
+</pre>
+<p><strong>Design rules</strong></p>
+<ol>
+<li>The enforcement library is linked into ingress, broker, sender, receiver, backup/export, fetch, telemetry export and admin tools. No component persists or sends payload without calling it.</li>
+<li>The metadata quorum holds ownership, policy versions and membership. It holds <strong>no payload</strong> and is <strong>not on the ordinary write path</strong>.</li>
+<li>The route selector filters to the policy-permitted graph first, then optimises inside it. Policy is a hard constraint, never a score.</li>
+</ol>
+<h2>2.3 Deployment View</h2>
+<pre class="mermaid">flowchart TB
+    subgraph HOST[&#34;Single test host (Linux)&#34;]
+        subgraph NSA[&#34;Namespace / container group: Region A&#34;]
+            A1[&#34;broker-a1&#34;]
+            A2[&#34;broker-a2&#34;]
+            A3[&#34;broker-a3&#34;]
+            AG[&#34;agent-a&#34;]
+            AM[&#34;meta-voter-a&#34;]
+        end
+        subgraph NSB[&#34;Region B&#34;]
+            B1[&#34;broker-b1&#34;]
+            B2[&#34;broker-b2&#34;]
+            B3[&#34;broker-b3&#34;]
+            BG[&#34;agent-b&#34;]
+            BM[&#34;meta-voter-b&#34;]
+        end
+        subgraph NSC[&#34;Region C&#34;]
+            C1[&#34;broker-c1&#34;]
+            C2[&#34;broker-c2&#34;]
+            C3[&#34;broker-c3&#34;]
+            CG[&#34;agent-c&#34;]
+            CM[&#34;meta-voter-c&#34;]
+        end
+        TC[&#34;tc / netem&lt;br/&gt;delay, jitter, loss, bandwidth, partition&#34;]
+        LG[&#34;Load generator +&lt;br/&gt;reference client&#34;]
+        CHK[&#34;Checkers + canary scanner&#34;]
+        OBS[&#34;Metrics, raw logs,&lt;br/&gt;results log&#34;]
+    end
+
+    AG &lt;--&gt;|&#34;emulated WAN&#34;| BG
+    BG &lt;--&gt;|&#34;emulated WAN&#34;| CG
+    AG &lt;--&gt;|&#34;emulated WAN&#34;| CG
+    TC -.-&gt;|&#34;shapes links&#34;| AG
+    LG --&gt; A1
+    CHK -.-&gt;|&#34;scans disks, logs, captures&#34;| NSB
+    CHK -.-&gt; NSC
+    AM --- BM
+    BM --- CM
+    AM --- CM
+    NSA --&gt; OBS
+</pre>
+<blockquote>
+<p><strong>Limit.</strong> A single-host emulation approximates real wide-area behaviour. State the hardware, calibrate the emulator (achieved versus configured delay and bandwidth), and treat <strong>ratios between configurations</strong> as more meaningful than absolute numbers.</p>
+</blockquote>
+<h2>2.4 Policy Data Model</h2>
+<pre class="mermaid">classDiagram
+    class Policy {
+        +string policy_id
+        +uint64 policy_version
+        +string data_classification
+        +string origin_region
+        +timestamp effective_time
+        +timestamp expiry_time
+        +duration staleness_limit
+        +bytes policy_signature
+        +verify() bool
+        +isFresh(now) bool
+    }
+    class ClassRule {
+        +string class_id
+        +string[] permitted_storage_regions
+        +string[] permitted_processing_regions
+        +string[] permitted_backup_regions
+        +string[] transit_allowed
+        +string key_residency_region
+        +duration retention_period
+        +string transformation_requirements
+        +string[] access_roles
+        +OwnershipMode ownership_mode
+        +AckMode ack_mode
+        +int sync_k
+        +BackpressureRule backpressure
+    }
+    class DestinationRule {
+        +string region
+        +DestMode mode
+        +string escrow_path
+    }
+    class FailoverPolicy {
+        +string[] eligible_candidates
+        +duration lease_period
+        +duration checkpoint_interval
+    }
+    class DestMode {
+        &lt;&lt;enumeration&gt;&gt;
+        DENY
+        SEALED_ONLY
+        CLEARTEXT
+    }
+    class OwnershipMode {
+        &lt;&lt;enumeration&gt;&gt;
+        MOVABLE
+        PINNED
+    }
+    class AckMode {
+        &lt;&lt;enumeration&gt;&gt;
+        LOCAL_QUORUM
+        LEGAL_SET_SYNC_K
+    }
+    class BackpressureRule {
+        &lt;&lt;enumeration&gt;&gt;
+        BLOCK
+        REJECT
+        DEGRADE_LOCAL
+    }
+
+    Policy &#34;1&#34; *-- &#34;many&#34; ClassRule
+    ClassRule &#34;1&#34; *-- &#34;many&#34; DestinationRule
+    ClassRule &#34;1&#34; *-- &#34;1&#34; FailoverPolicy
+    DestinationRule --&gt; DestMode
+    ClassRule --&gt; OwnershipMode
+    ClassRule --&gt; AckMode
+    ClassRule --&gt; BackpressureRule
+</pre>
+<p><strong>Policy versioning rules</strong></p>
+<ul>
+<li>Versions increase monotonically. Regions reject any version lower than the one they hold.</li>
+<li>A policy past its staleness limit puts the restricted class into <strong>fail-closed</strong> mode.</li>
+<li>A record's envelope carries the policy version it was stamped under, so its lifecycle is traceable.</li>
+<li>A newly restrictive policy does not silently rewrite old data: the system flags already-replicated records for the class's documented retention or purge path, and the decision is logged.</li>
+</ul>
+<h2>2.5 Metadata Entity-Relationship Model</h2>
+<pre class="mermaid">erDiagram
+    REGION ||--o{ BROKER : hosts
+    REGION ||--o{ META_VOTER : &#34;has one&#34;
+    TOPIC ||--|{ PARTITION : contains
+    CLASS ||--o{ TOPIC : &#34;governs&#34;
+    POLICY_VERSION ||--|{ CLASS : &#34;defines rules for&#34;
+    PARTITION ||--|| OWNERSHIP : &#34;has current&#34;
+    OWNERSHIP }o--|| REGION : &#34;owner_region&#34;
+    PARTITION ||--o{ REPLICA : &#34;stored as&#34;
+    REPLICA }o--|| REGION : &#34;located in&#34;
+    PARTITION ||--o{ OUTBOX_STREAM : &#34;feeds&#34;
+    OUTBOX_STREAM }o--|| REGION : &#34;destination&#34;
+
+    REGION {
+        string region_id PK
+        string label
+    }
+    CLASS {
+        string class_id PK
+        string ack_mode
+        string ownership_mode
+    }
+    POLICY_VERSION {
+        string policy_id
+        uint64 version PK
+        bytes signature
+        timestamp expiry
+    }
+    TOPIC {
+        string topic_id PK
+        string class_id FK
+    }
+    PARTITION {
+        string partition_id PK
+        string topic_id FK
+    }
+    OWNERSHIP {
+        string partition_id FK
+        string owner_region FK
+        uint64 epoch
+        timestamp lease_expiry
+    }
+    REPLICA {
+        string partition_id FK
+        string region_id FK
+        string dest_mode
+        uint64 durable_watermark
+    }
+    OUTBOX_STREAM {
+        string partition_id FK
+        string dest_region FK
+        uint64 epoch
+        uint64 next_offset
+        uint64 bytes_queued
+    }
+</pre>
+<blockquote>
+<p>Metadata contains <strong>no payload</strong>. It is stored in a three-voter Raft group, one voter per region, using an existing, version-pinned Raft library.</p>
+</blockquote>
+<h2>2.6 Enforcement Points Map</h2>
+<p>Every byte-movement and storage location must call the same decision function. This table is the contract the canary scanner verifies.</p>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Point</th>
+<th>Operation checked</th>
+<th>Decision inputs</th>
+<th>On deny</th>
+<th>If policy unknown or stale</th>
+<th>Audit event</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E1</td>
+<td>Ingress</td>
+<td><code>PERSIST_LOCAL</code></td>
+<td>class, origin region, policy version</td>
+<td>Reject produce</td>
+<td>Fail closed (restricted classes)</td>
+<td><code>ingress.deny</code></td>
+</tr>
+<tr>
+<td>E2</td>
+<td>Broker append</td>
+<td><code>PERSIST_LOCAL</code></td>
+<td>class, partition epoch</td>
+<td>Reject batch</td>
+<td>Fail closed</td>
+<td><code>append.deny</code></td>
+</tr>
+<tr>
+<td>E3</td>
+<td>In-region replica</td>
+<td><code>PERSIST_REPLICA</code></td>
+<td>class, replica region</td>
+<td>Remove replica</td>
+<td>Fail closed</td>
+<td><code>replica.deny</code></td>
+</tr>
+<tr>
+<td>E4</td>
+<td>Replication sender</td>
+<td><code>SEND_REGION(dest, mode)</code></td>
+<td>class, dest mode, route</td>
+<td>Drop from outbox plan</td>
+<td>Fail closed</td>
+<td><code>send.deny</code></td>
+</tr>
+<tr>
+<td>E5</td>
+<td>Replication receiver</td>
+<td><code>PERSIST_REMOTE</code></td>
+<td>class, source region, mode</td>
+<td>Reject range</td>
+<td>Fail closed</td>
+<td><code>recv.deny</code></td>
+</tr>
+<tr>
+<td>E6</td>
+<td>Backup / tiered export</td>
+<td><code>EXPORT_BACKUP</code></td>
+<td>class, backup regions</td>
+<td>Skip object</td>
+<td>Fail closed</td>
+<td><code>backup.deny</code></td>
+</tr>
+<tr>
+<td>E7</td>
+<td>Consumer fetch</td>
+<td><code>SERVE_FETCH(region)</code></td>
+<td>class, consumer region, role</td>
+<td>Reject fetch</td>
+<td>Fail closed</td>
+<td><code>fetch.deny</code></td>
+</tr>
+<tr>
+<td>E8</td>
+<td>Telemetry export</td>
+<td><code>EXPORT_TELEMETRY</code></td>
+<td>metric class, destination</td>
+<td>Drop or redact</td>
+<td>Fail closed</td>
+<td><code>telemetry.deny</code></td>
+</tr>
+<tr>
+<td>E9</td>
+<td>Admin / replay tools</td>
+<td><code>ADMIN_READ</code>, <code>REPLAY</code></td>
+<td>class, operator region, role</td>
+<td>Reject</td>
+<td>Fail closed</td>
+<td><code>admin.deny</code></td>
+</tr>
+<tr>
+<td>E10</td>
+<td>Relay hop</td>
+<td><code>TRANSIT(region)</code></td>
+<td>transit list, ciphertext flag</td>
+<td>Reject reroute</td>
+<td>Fail closed</td>
+<td><code>transit.deny</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>2.7 Data Flow Diagrams (Levels 0 to 3)</h2>
+<p><strong>Notation.</strong> Rounded rectangles are processes, parallelograms are external entities, cylinders are data stores, and labelled arrows are data flows. Process numbers nest: <code>P4</code> → <code>4.3</code> → <code>4.3.2</code>.</p>
+<h3>2.7.1 Level 0 — Context DFD</h3>
+<pre class="mermaid">flowchart LR
+    E1[/&#34;Producer&#34;/]
+    E2[/&#34;Consumer&#34;/]
+    E3[/&#34;Policy Authority&#34;/]
+    E4[/&#34;Operator&#34;/]
+    E5[/&#34;Auditor&#34;/]
+
+    P0((&#34;0.0&lt;br/&gt;Hydra Stream&lt;br/&gt;System&#34;))
+
+    E1 --&gt;|&#34;record batches&#34;| P0
+    P0 --&gt;|&#34;acks, errors&#34;| E1
+    E2 --&gt;|&#34;fetch requests, offset commits&#34;| P0
+    P0 --&gt;|&#34;permitted records&#34;| E2
+    E3 --&gt;|&#34;signed policy versions&#34;| P0
+    E4 --&gt;|&#34;topic, class, admin commands&#34;| P0
+    P0 --&gt;|&#34;status, alerts&#34;| E4
+    P0 --&gt;|&#34;canary reports, decision logs&#34;| E5
+</pre>
+<h3>2.7.2 Level 1 — Major Processes</h3>
+<pre class="mermaid">flowchart TB
+    PROD[/&#34;Producer&#34;/]
+    CONS[/&#34;Consumer&#34;/]
+    AUTH[/&#34;Policy Authority&#34;/]
+    OPS[/&#34;Operator&#34;/]
+    AUD[/&#34;Auditor&#34;/]
+
+    P1(&#34;1.0 Ingest and Stamp&#34;)
+    P2(&#34;2.0 Policy Decision&#34;)
+    P3(&#34;3.0 Store and Replicate In-Region&#34;)
+    P4(&#34;4.0 Replicate Cross-Region&#34;)
+    P5(&#34;5.0 Ownership and Failover&#34;)
+    P6(&#34;6.0 Serve Consumers&#34;)
+    P7(&#34;7.0 Evidence and Telemetry&#34;)
+    P8(&#34;8.0 Policy Management&#34;)
+
+    D1[(&#34;D1 Segmented log&#34;)]
+    D2[(&#34;D2 Durable outbox&#34;)]
+    D3[(&#34;D3 Signed policy cache&#34;)]
+    D4[(&#34;D4 Metadata store&lt;br/&gt;ownership, epochs&#34;)]
+    D5[(&#34;D5 Decision log&#34;)]
+    D6[(&#34;D6 Quarantine segment&#34;)]
+    D7[(&#34;D7 Link metrics&#34;)]
+
+    PROD --&gt;|&#34;record batch&#34;| P1
+    P1 --&gt;|&#34;ack or reject&#34;| PROD
+    P1 --&gt;|&#34;class, op request&#34;| P2
+    P2 --&gt;|&#34;allow or deny&#34;| P1
+    P1 --&gt;|&#34;stamped batch&#34;| P3
+    P3 --&gt;|&#34;append&#34;| D1
+    D1 --&gt;|&#34;new offsets&#34;| P4
+    P4 --&gt;|&#34;enqueue&#34;| D2
+    D2 --&gt;|&#34;pending ranges&#34;| P4
+    P4 --&gt;|&#34;send/receive op request&#34;| P2
+    D7 --&gt;|&#34;smoothed measurements&#34;| P4
+    P2 --&gt;|&#34;read rules&#34;| D3
+    P2 --&gt;|&#34;decision record&#34;| D5
+    AUTH --&gt;|&#34;signed policy&#34;| P8
+    OPS --&gt;|&#34;admin commands&#34;| P8
+    P8 --&gt;|&#34;verified policy&#34;| D3
+    P8 --&gt;|&#34;policy version&#34;| D4
+    P5 --&gt;|&#34;epoch, lease&#34;| D4
+    D4 --&gt;|&#34;ownership&#34;| P3
+    P5 --&gt;|&#34;superseded suffix&#34;| D6
+    P5 --&gt;|&#34;promotion eligibility query&#34;| P2
+    CONS --&gt;|&#34;fetch&#34;| P6
+    P6 --&gt;|&#34;fetch op request&#34;| P2
+    D1 --&gt;|&#34;records up to high-water mark&#34;| P6
+    P6 --&gt;|&#34;permitted records&#34;| CONS
+    D5 --&gt;|&#34;decisions&#34;| P7
+    P7 --&gt;|&#34;canary report, decision log&#34;| AUD
+    P7 --&gt;|&#34;scan&#34;| D1
+</pre>
+<h3>2.7.3 Level 2 — Process 4.0 Replicate Cross-Region</h3>
+<pre class="mermaid">flowchart TB
+    D1[(&#34;D1 Segmented log&#34;)]
+    D2[(&#34;D2 Durable outbox&#34;)]
+    D3[(&#34;D3 Policy cache&#34;)]
+    D7[(&#34;D7 Link metrics&#34;)]
+    D8[(&#34;D8 Receiver log&lt;br/&gt;remote region&#34;)]
+    D9[(&#34;D9 Durable watermark&#34;)]
+    P2(&#34;2.0 Policy Decision&#34;)
+
+    P41(&#34;4.1 Plan Destinations&#34;)
+    P42(&#34;4.2 Enqueue to Outbox&#34;)
+    P43(&#34;4.3 Select Route&#34;)
+    P44(&#34;4.4 Transfer Range&#34;)
+    P45(&#34;4.5 Apply at Receiver&#34;)
+    P46(&#34;4.6 Advance Watermark&#34;)
+
+    D1 --&gt;|&#34;new batch offsets&#34;| P41
+    P41 --&gt;|&#34;per-destination mode request&#34;| P2
+    P2 --&gt;|&#34;DENY, SEALED, or CLEARTEXT&#34;| P41
+    P41 --&gt;|&#34;permitted destinations&#34;| P42
+    P42 --&gt;|&#34;range (partition, epoch, offsets)&#34;| D2
+    D2 --&gt;|&#34;oldest pending range&#34;| P43
+    D7 --&gt;|&#34;RTT, loss, goodput, backlog age&#34;| P43
+    P43 --&gt;|&#34;chosen path&#34;| P44
+    P44 --&gt;|&#34;send op request per hop&#34;| P2
+    P44 --&gt;|&#34;range over mTLS&#34;| P45
+    P45 --&gt;|&#34;receive op request&#34;| P2
+    P45 --&gt;|&#34;append at same offsets&#34;| D8
+    P45 --&gt;|&#34;applied offset&#34;| P46
+    P46 --&gt;|&#34;durable watermark&#34;| D9
+    D9 --&gt;|&#34;resume point&#34;| P42
+    D3 --&gt;|&#34;rules&#34;| P2
+</pre>
+<h3>2.7.4 Level 3 — Process 4.3 Select Route</h3>
+<pre class="mermaid">flowchart TB
+    D7[(&#34;D7 Link metrics&#34;)]
+    D3[(&#34;D3 Policy cache&#34;)]
+    D2[(&#34;D2 Durable outbox&#34;)]
+    D10[(&#34;D10 Route state&lt;br/&gt;current path, dwell timer,&lt;br/&gt;breaker state&#34;)]
+    P2(&#34;2.0 Policy Decision&#34;)
+    NEXT(&#34;4.4 Transfer Range&#34;)
+
+    P431(&#34;4.3.1 Collect Measurements&#34;)
+    P432(&#34;4.3.2 Smooth and Window&#34;)
+    P433(&#34;4.3.3 Build Permitted Graph&#34;)
+    P434(&#34;4.3.4 Score Candidate Paths&#34;)
+    P435(&#34;4.3.5 Apply Hysteresis&lt;br/&gt;and Circuit Breaker&#34;)
+    P436(&#34;4.3.6 Commit Route&lt;br/&gt;and Audit&#34;)
+
+    D7 --&gt;|&#34;raw samples&#34;| P431
+    P431 --&gt;|&#34;per-link raw values&#34;| P432
+    P432 --&gt;|&#34;smoothed RTT, variance, loss, goodput&#34;| P434
+    D3 --&gt;|&#34;destination modes, transit list&#34;| P433
+    P433 --&gt;|&#34;edge permission query&#34;| P2
+    P2 --&gt;|&#34;edge allowed or denied&#34;| P433
+    P433 --&gt;|&#34;permitted paths only&#34;| P434
+    D2 --&gt;|&#34;backlog size, oldest age&#34;| P434
+    P434 --&gt;|&#34;ranked paths with cost&#34;| P435
+    D10 --&gt;|&#34;dwell, cooldown, breaker&#34;| P435
+    P435 --&gt;|&#34;keep or switch&#34;| P436
+    P436 --&gt;|&#34;new route state&#34;| D10
+    P436 --&gt;|&#34;selected path&#34;| NEXT
+    P433 --&gt;|&#34;no permitted alternate&#34;| P436
+</pre>
+<h3>2.7.5 Level 3 — Process 2.0 Policy Decision</h3>
+<pre class="mermaid">flowchart TB
+    CALLER(&#34;Calling component&lt;br/&gt;E1 to E10&#34;)
+    D3[(&#34;D3 Signed policy cache&#34;)]
+    D5[(&#34;D5 Hash-chained&lt;br/&gt;decision log&#34;)]
+    D4[(&#34;D4 Metadata store&#34;)]
+
+    P21(&#34;2.1 Validate Policy Object&#34;)
+    P22(&#34;2.2 Check Freshness&lt;br/&gt;and Version&#34;)
+    P23(&#34;2.3 Resolve Class Rule&#34;)
+    P24(&#34;2.4 Evaluate Operation&#34;)
+    P25(&#34;2.5 Resolve Destination Mode&#34;)
+    P26(&#34;2.6 Record Decision&#34;)
+
+    CALLER --&gt;|&#34;Decide(op, class, region, mode, policy_version)&#34;| P21
+    D3 --&gt;|&#34;policy object, signature&#34;| P21
+    P21 --&gt;|&#34;verified policy or INVALID&#34;| P22
+    D4 --&gt;|&#34;latest known version&#34;| P22
+    P22 --&gt;|&#34;fresh policy or STALE&#34;| P23
+    P23 --&gt;|&#34;class rule or UNKNOWN_CLASS&#34;| P24
+    P24 --&gt;|&#34;allowed or denied for op&#34;| P25
+    P25 --&gt;|&#34;DENY, SEALED, or CLEARTEXT&#34;| P26
+    P21 --&gt;|&#34;INVALID, fail closed&#34;| P26
+    P22 --&gt;|&#34;STALE, fail closed&#34;| P26
+    P23 --&gt;|&#34;UNKNOWN_CLASS, fail closed&#34;| P26
+    P26 --&gt;|&#34;append entry with prev_hash&#34;| D5
+    P26 --&gt;|&#34;Decision(result, reason, version)&#34;| CALLER
+</pre>
+<h3>2.7.6 Level 3 — Process 5.0 Ownership and Failover</h3>
+<pre class="mermaid">flowchart TB
+    D4[(&#34;D4 Metadata store&#34;)]
+    D1[(&#34;D1 Segmented log&#34;)]
+    D6[(&#34;D6 Quarantine segment&#34;)]
+    D9[(&#34;D9 Watermarks&#34;)]
+    P2(&#34;2.0 Policy Decision&#34;)
+    PEERS[/&#34;Peer regions&#34;/]
+
+    P51(&#34;5.1 Renew or Lose Lease&#34;)
+    P52(&#34;5.2 Detect Owner Failure&#34;)
+    P53(&#34;5.3 Check Promotion Eligibility&#34;)
+    P54(&#34;5.4 Commit New Epoch&#34;)
+    P55(&#34;5.5 Fence Stale Writers&#34;)
+    P56(&#34;5.6 Reconcile Divergent Log&#34;)
+    P57(&#34;5.7 Reconcile Consumer Offsets&#34;)
+
+    D4 --&gt;|&#34;lease expiry&#34;| P51
+    P51 --&gt;|&#34;cannot renew, stop acking&#34;| P55
+    PEERS --&gt;|&#34;heartbeats, lag&#34;| P52
+    P52 --&gt;|&#34;lease expired, candidate region&#34;| P53
+    D9 --&gt;|&#34;candidate holds replica up to offset&#34;| P53
+    P53 --&gt;|&#34;eligibility query&#34;| P2
+    P2 --&gt;|&#34;eligible or not&#34;| P53
+    P53 --&gt;|&#34;eligible candidate&#34;| P54
+    P54 --&gt;|&#34;quorum-committed (owner, epoch+1)&#34;| D4
+    D4 --&gt;|&#34;new epoch&#34;| P55
+    P55 --&gt;|&#34;reject appends with lower epoch&#34;| D1
+    D1 --&gt;|&#34;old owner returns, superseded suffix&#34;| P56
+    P56 --&gt;|&#34;move suffix&#34;| D6
+    D1 --&gt;|&#34;checkpoint with epoch&#34;| P57
+    P57 --&gt;|&#34;resume position, bounded duplicates&#34;| PEERS
+</pre>
+<hr>
+<h1>Part 3 — Core Logic and Implementation</h1>
+<h2>3.1 Sequence Diagrams</h2>
+<h3>3.1.1 Produce Path with Policy Enforcement and Acknowledgment</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant P as Producer
+    participant G as Ingress Gateway
+    participant E as Enforcement Library
+    participant L as Partition Leader
+    participant F as In-Region Followers
+    participant O as Outbox
+
+    P-&gt;&gt;G: Produce(batch, session_id, seq) over mTLS
+    G-&gt;&gt;E: Decide(PERSIST_LOCAL, class, origin_region)
+    E--&gt;&gt;G: ALLOW, policy_version=v12
+    G-&gt;&gt;G: Stamp envelope (class, policy_version, checksum)
+    G-&gt;&gt;L: Append(batch, epoch)
+    L-&gt;&gt;E: Decide(PERSIST_LOCAL, class)
+    E--&gt;&gt;L: ALLOW
+    L-&gt;&gt;L: Check (session_id, seq) for duplicate or gap
+    L-&gt;&gt;L: Write to segment + fsync
+    par replicate in region
+        L-&gt;&gt;F: Replicate(batch)
+        F-&gt;&gt;E: Decide(PERSIST_REPLICA)
+        E--&gt;&gt;F: ALLOW
+        F-&gt;&gt;F: fsync
+        F--&gt;&gt;L: Ack
+    end
+    L-&gt;&gt;L: Majority fsynced, advance high-water mark
+    L-&gt;&gt;O: Enqueue range for permitted destinations
+    alt ack_mode = local-quorum
+        L--&gt;&gt;P: Ack(offset)
+    else ack_mode = legal-set-sync(k)
+        O-&gt;&gt;O: Wait until k legal-set replicas are durable
+        O--&gt;&gt;L: k durable
+        L--&gt;&gt;P: Ack(offset)
+    end
+</pre>
+<h3>3.1.2 Cross-Region Replication with Durable Outbox and Resume</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant O as Outbox (Region A)
+    participant S as Sender Agent A
+    participant E as Enforcement Library
+    participant R as Route Selector
+    participant X as Receiver Agent B
+    participant L as Log (Region B)
+    participant W as Durable Watermark
+
+    loop for each pending range
+        O-&gt;&gt;S: Next range (partition, epoch, from, to)
+        S-&gt;&gt;E: Decide(SEND_REGION, dest=B, mode)
+        alt DENY
+            E--&gt;&gt;S: DENY
+            S-&gt;&gt;O: Drop range from plan, audit send.deny
+        else CLEARTEXT or SEALED
+            E--&gt;&gt;S: ALLOW(mode)
+            S-&gt;&gt;R: PickRoute(dest=B)
+            R--&gt;&gt;S: path (direct or permitted relay)
+            opt mode = SEALED
+                S-&gt;&gt;S: Encrypt with key held in key-residency region
+            end
+            S-&gt;&gt;X: Transfer(range, epoch, checksum) over mTLS
+            X-&gt;&gt;E: Decide(PERSIST_REMOTE)
+            E--&gt;&gt;X: ALLOW
+            X-&gt;&gt;X: Verify epoch not stale
+            X-&gt;&gt;L: Append at same offsets
+            L--&gt;&gt;X: Durable
+            X-&gt;&gt;W: Persist watermark
+            X--&gt;&gt;S: Ack(watermark)
+            S-&gt;&gt;O: Trim up to watermark
+        end
+    end
+    Note over S,X: On any failure the sender resumes from the receiver&#39;s durable watermark. Re-sending an applied range is a no-op.
+</pre>
+<h3>3.1.3 Regional Failover with Epoch Fencing</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant A as Region A (current owner)
+    participant M as Metadata Quorum
+    participant B as Region B (candidate)
+    participant E as Enforcement Library (B)
+    participant C as Consumers
+
+    A-&gt;&gt;M: Renew lease (owner=A, epoch=7)
+    M--&gt;&gt;A: OK
+    Note over A,B: WAN partition begins
+    A-xM: Renew lease fails
+    A-&gt;&gt;A: Cannot renew, stop acknowledging writes, self-fence
+    B-&gt;&gt;B: Detect missed heartbeats, wait for old lease expiry
+    B-&gt;&gt;E: Decide(PROMOTE, class, candidate=B)
+    E--&gt;&gt;B: ELIGIBLE (listed in policy, holds replica)
+    B-&gt;&gt;M: Propose (owner=B, epoch=8) if lease expired
+    M-&gt;&gt;M: Commit new epoch by quorum
+    M--&gt;&gt;B: Committed epoch=8
+    B-&gt;&gt;B: Start accepting writes with epoch=8
+    C-&gt;&gt;B: Fetch from last checkpoint
+    B--&gt;&gt;C: Records (bounded duplicates, no gaps for data B holds)
+    Note over A,B: Partition heals
+    A-&gt;&gt;M: Query ownership
+    M--&gt;&gt;A: owner=B, epoch=8
+    A-&gt;&gt;A: Compare logs, find superseded suffix
+    A-&gt;&gt;A: Move suffix to local quarantine segment
+    A-&gt;&gt;B: Catch up as follower from agreed offset
+    Note over A,B: Any append from A with epoch 7 is rejected by replicas
+</pre>
+<h3>3.1.4 Adaptive Route Change with Hysteresis</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant LM as Link Measurement
+    participant R as Route Selector
+    participant E as Enforcement Library
+    participant ST as Route State
+    participant S as Sender Agent
+
+    loop every measurement window
+        LM-&gt;&gt;R: Smoothed RTT, variance, loss, goodput, oldest unsent age
+        R-&gt;&gt;E: Decide edges for dest (direct, via relay)
+        E--&gt;&gt;R: Permitted graph
+        alt only one permitted path
+            R-&gt;&gt;S: Keep path (no alternate, report this case)
+        else multiple permitted paths
+            R-&gt;&gt;R: Score each path
+            R-&gt;&gt;ST: Read dwell timer, breaker state
+            alt current path degraded beyond threshold for N windows and dwell elapsed
+                R-&gt;&gt;ST: Open breaker on current path, start cooldown
+                R-&gt;&gt;S: Switch to best permitted path
+                R-&gt;&gt;E: Audit route.switch
+            else within hysteresis band
+                R-&gt;&gt;S: Keep current path
+            end
+        end
+    end
+    Note over R,ST: A single sample never triggers a switch. Recovery needs a threshold and cooldown to avoid flapping.
+</pre>
+<h3>3.1.5 Signed Policy Distribution and Revocation</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant PA as Policy Authority (offline)
+    participant OP as Operator
+    participant M as Metadata Quorum
+    participant RX as Region Policy Cache
+    participant E as Enforcement Library
+
+    PA-&gt;&gt;PA: Sign policy v13 (monotonic version)
+    PA-&gt;&gt;OP: Signed policy object
+    OP-&gt;&gt;M: Publish v13
+    M-&gt;&gt;M: Commit version
+    M--&gt;&gt;RX: Notify v13 available
+    RX-&gt;&gt;RX: Verify signature, expiry, version greater than v12
+    alt valid
+        RX-&gt;&gt;RX: Activate v13, reset staleness timer
+        RX-&gt;&gt;E: Policy cache updated
+        E-&gt;&gt;E: Re-evaluate in-flight outbox ranges against v13
+        E--&gt;&gt;RX: Dropped or re-moded ranges, audit policy.apply
+    else tampered, replayed, or lower version
+        RX-&gt;&gt;RX: Reject, keep current, audit policy.reject
+    end
+    Note over RX,E: If no valid refresh arrives within the staleness limit, the restricted class enters fail-closed mode.
+</pre>
+<h3>3.1.6 Sealed Copy Write and Key-Escrow Recovery</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant S as Sender (Home Region A)
+    participant K as Key Service (Region A)
+    participant B as Region B (sealed-only)
+    participant ESC as Escrow Path (named per class)
+    participant R as Recovery Operator
+
+    S-&gt;&gt;K: Request data key for class
+    K--&gt;&gt;S: Wrapped data key (stays in key-residency region)
+    S-&gt;&gt;S: Encrypt range, headers remain routing-only
+    S-&gt;&gt;B: Transfer ciphertext
+    B-&gt;&gt;B: Store ciphertext, cannot decrypt
+    Note over B: Canary scan on B must find ciphertext only, never cleartext
+    Note over S,K: Home region lost
+    R-&gt;&gt;ESC: Retrieve key via documented escrow path
+    ESC--&gt;&gt;R: Key material
+    R-&gt;&gt;B: Read sealed copy
+    R-&gt;&gt;R: Decrypt in permitted recovery location
+    Note over R: If no escrow exists, the sealed copy is unrecoverable
+</pre>
+<h3>3.1.7 Canary Verification Run</h3>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant RUN as Scenario Runner
+    participant LG as Load Generator
+    participant SYS as Hydra Stream (3 regions)
+    participant FI as Fault Injector
+    participant SC as Canary Scanner
+    participant RL as Results Log
+
+    RUN-&gt;&gt;RUN: Load recorded config and seed
+    RUN-&gt;&gt;LG: Start workload with unique canary per class
+    RUN-&gt;&gt;FI: Apply scenario (delay, loss, partition, kill)
+    LG-&gt;&gt;SYS: Produce records and canaries
+    SYS--&gt;&gt;LG: Acks recorded
+    FI-&gt;&gt;SYS: Inject and later heal fault
+    RUN-&gt;&gt;SC: Scan forbidden regions (disks, logs, metrics, packet captures)
+    SC--&gt;&gt;RUN: Canary hits, expected zero
+    RUN-&gt;&gt;RUN: Run loss, duplicate, order, stale-epoch checkers
+    RUN-&gt;&gt;RL: Write config, seed, raw logs, results, date
+</pre>
+<h2>3.2 Logic Flowcharts</h2>
+<h3>3.2.1 Central Decision Function</h3>
+<pre class="mermaid">flowchart TD
+    START([&#34;Decide(op, class, region, mode, version)&#34;])
+    V{&#34;Policy signature valid?&#34;}
+    F{&#34;Policy fresh and&lt;br/&gt;version not rolled back?&#34;}
+    K{&#34;Class known?&#34;}
+    O{&#34;Operation allowed&lt;br/&gt;for class and region?&#34;}
+    M{&#34;Operation is send&lt;br/&gt;or remote persist?&#34;}
+    DM{&#34;Destination mode&#34;}
+    ALLOWC([&#34;ALLOW cleartext&#34;])
+    ALLOWS([&#34;ALLOW sealed only&#34;])
+    DENY([&#34;DENY&#34;])
+    FC([&#34;DENY fail closed&lt;br/&gt;reason recorded&#34;])
+    LOG[&#34;Append to hash-chained&lt;br/&gt;decision log&#34;]
+
+    START --&gt; V
+    V --&gt;|&#34;no&#34;| FC
+    V --&gt;|&#34;yes&#34;| F
+    F --&gt;|&#34;no&#34;| FC
+    F --&gt;|&#34;yes&#34;| K
+    K --&gt;|&#34;no&#34;| FC
+    K --&gt;|&#34;yes&#34;| O
+    O --&gt;|&#34;no&#34;| DENY
+    O --&gt;|&#34;yes&#34;| M
+    M --&gt;|&#34;no&#34;| ALLOWC
+    M --&gt;|&#34;yes&#34;| DM
+    DM --&gt;|&#34;CLEARTEXT&#34;| ALLOWC
+    DM --&gt;|&#34;SEALED_ONLY&#34;| ALLOWS
+    DM --&gt;|&#34;DENY&#34;| DENY
+    ALLOWC --&gt; LOG
+    ALLOWS --&gt; LOG
+    DENY --&gt; LOG
+    FC --&gt; LOG
+</pre>
+<h3>3.2.2 Route Selection</h3>
+<pre class="mermaid">flowchart TD
+    A([&#34;Measurement window ends&#34;])
+    B[&#34;Smooth RTT, variance, loss, goodput,&lt;br/&gt;backlog age&#34;]
+    C[&#34;Build permitted graph&lt;br/&gt;(destination modes + transit list)&#34;]
+    D{&#34;Any permitted path&lt;br/&gt;to destination?&#34;}
+    E[&#34;Hold. Apply class degradation rule.&lt;br/&gt;Report: no legal alternate&#34;]
+    F{&#34;More than one&lt;br/&gt;permitted path?&#34;}
+    G[&#34;Keep only path. Report:&lt;br/&gt;no alternate to adapt to&#34;]
+    H[&#34;Score paths:&lt;br/&gt;w1 latency + w2 loss + w3 queue delay&lt;br/&gt;+ w4 transfer cost + w5 congestion risk&#34;]
+    I{&#34;Best path better than current&lt;br/&gt;by more than hysteresis margin&lt;br/&gt;for N consecutive windows?&#34;}
+    J{&#34;Dwell time elapsed&lt;br/&gt;and breaker closed?&#34;}
+    K[&#34;Keep current path&#34;]
+    L[&#34;Switch to best path.&lt;br/&gt;Open breaker on old path.&lt;br/&gt;Start cooldown. Audit route.switch&#34;]
+
+    A --&gt; B --&gt; C --&gt; D
+    D --&gt;|&#34;no&#34;| E
+    D --&gt;|&#34;yes&#34;| F
+    F --&gt;|&#34;no&#34;| G
+    F --&gt;|&#34;yes&#34;| H --&gt; I
+    I --&gt;|&#34;no&#34;| K
+    I --&gt;|&#34;yes&#34;| J
+    J --&gt;|&#34;no&#34;| K
+    J --&gt;|&#34;yes&#34;| L
+</pre>
+<blockquote>
+<p>Legal policy is a <strong>hard filter</strong> applied in step C. It is never a term in the score in step H.</p>
+</blockquote>
+<h3>3.2.3 Failover Promotion</h3>
+<pre class="mermaid">flowchart TD
+    A([&#34;Heartbeats from owner missed&#34;])
+    B{&#34;Old lease expired?&#34;}
+    C[&#34;Wait. Do not promote.&#34;]
+    D{&#34;Policy lists this region&lt;br/&gt;as eligible candidate?&#34;}
+    E[&#34;Refuse promotion. Class degrades&lt;br/&gt;per its rule&#34;]
+    F{&#34;Candidate holds a replica&lt;br/&gt;for the partition?&#34;}
+    G[&#34;Refuse promotion&#34;]
+    H[&#34;Propose (owner=self, epoch+1)&lt;br/&gt;to metadata quorum&#34;]
+    I{&#34;Quorum commits?&#34;}
+    J[&#34;Stay follower. Retry or give up.&#34;]
+    K[&#34;Begin accepting writes&lt;br/&gt;with new epoch. Audit failover&#34;]
+    L[&#34;Replicas reject any append with lower epoch&#34;]
+
+    A --&gt; B
+    B --&gt;|&#34;no&#34;| C
+    B --&gt;|&#34;yes&#34;| D
+    D --&gt;|&#34;no&#34;| E
+    D --&gt;|&#34;yes&#34;| F
+    F --&gt;|&#34;no&#34;| G
+    F --&gt;|&#34;yes&#34;| H --&gt; I
+    I --&gt;|&#34;no&#34;| J
+    I --&gt;|&#34;yes&#34;| K --&gt; L
+</pre>
+<h3>3.2.4 Class Degradation When No Legal Destination Exists</h3>
+<pre class="mermaid">flowchart TD
+    A([&#34;Replication to legal set blocked&lt;br/&gt;or no legal alternate region&#34;])
+    B{&#34;Class backpressure rule&#34;}
+    C[&#34;Keep accepting local writes&lt;br/&gt;into bounded outbox&#34;]
+    D{&#34;Outbox at disk bound?&#34;}
+    E[&#34;Block producers&lt;br/&gt;until space frees&#34;]
+    F[&#34;Reject writes with&lt;br/&gt;explicit error&#34;]
+    G[&#34;Continue until bound,&lt;br/&gt;then reject&#34;]
+    H[&#34;Other classes keep running&lt;br/&gt;unaffected&#34;]
+
+    A --&gt; B
+    B --&gt;|&#34;DEGRADE_LOCAL&#34;| C --&gt; D
+    B --&gt;|&#34;BLOCK&#34;| E
+    B --&gt;|&#34;REJECT&#34;| F
+    D --&gt;|&#34;no&#34;| C
+    D --&gt;|&#34;yes&#34;| G
+    E --&gt; H
+    F --&gt; H
+    G --&gt; H
+</pre>
+<h3>3.2.5 Recovery of a Returning Old Owner</h3>
+<pre class="mermaid">flowchart TD
+    A([&#34;Old owner A reconnects&#34;])
+    B[&#34;Read ownership from quorum:&lt;br/&gt;owner=B, epoch=8&#34;]
+    C{&#34;A&#39;s local epoch&lt;br/&gt;lower than current?&#34;}
+    D[&#34;Continue as owner&#34;]
+    E[&#34;Self-fence: stop acking writes&#34;]
+    F[&#34;Find last offset agreed with new owner&#34;]
+    G{&#34;A has records beyond&lt;br/&gt;the agreed offset?&#34;}
+    H[&#34;Move suffix to local quarantine segment&lt;br/&gt;(never replicated, never silently deleted)&#34;]
+    I[&#34;Truncate to agreed offset&#34;]
+    J[&#34;Catch up as follower from B&#34;]
+    K[&#34;Epoch auditor: scan for stale-epoch appends&#34;]
+
+    A --&gt; B --&gt; C
+    C --&gt;|&#34;no&#34;| D
+    C --&gt;|&#34;yes&#34;| E --&gt; F --&gt; G
+    G --&gt;|&#34;yes&#34;| H --&gt; I
+    G --&gt;|&#34;no&#34;| I
+    I --&gt; J --&gt; K
+</pre>
+<h2>3.3 State Machines</h2>
+<h3>3.3.1 Partition Ownership Lifecycle</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Follower
+    Follower --&gt; Candidate: owner lease expired and policy eligible
+    Candidate --&gt; Owner: quorum commits epoch+1
+    Candidate --&gt; Follower: quorum rejects or ineligible
+    Owner --&gt; Fenced: lease renewal fails
+    Owner --&gt; Follower: higher epoch observed
+    Fenced --&gt; Follower: ownership read, superseded suffix quarantined
+    Fenced --&gt; Owner: lease renewed before expiry
+    Follower --&gt; [*]: partition deleted
+</pre>
+<h3>3.3.2 Outbox Transfer</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Pending
+    Pending --&gt; Planning: new range enqueued
+    Planning --&gt; Denied: policy DENY
+    Planning --&gt; Routing: policy ALLOW
+    Routing --&gt; Sending: path selected
+    Sending --&gt; AwaitingAck: bytes sent
+    AwaitingAck --&gt; Applied: receiver ack, watermark durable
+    AwaitingAck --&gt; Pending: timeout or failure, resume from watermark
+    Applied --&gt; [*]: trimmed from outbox
+    Denied --&gt; [*]: dropped from plan, audited
+    Pending --&gt; Backpressure: disk bound reached
+    Backpressure --&gt; Pending: space freed
+</pre>
+<h3>3.3.3 Policy Freshness per Class</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Fresh
+    Fresh --&gt; Fresh: valid newer version received
+    Fresh --&gt; Stale: staleness limit exceeded
+    Stale --&gt; FailClosed: restricted class
+    Stale --&gt; Fresh: valid refresh received
+    FailClosed --&gt; Fresh: valid refresh received
+    Fresh --&gt; Rejected: tampered or rolled-back object
+    Rejected --&gt; Fresh: keep current version, audit only
+</pre>
+<h3>3.3.4 Route Circuit Breaker</h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; Closed
+    Closed --&gt; Open: degradation sustained for N windows
+    Open --&gt; HalfOpen: cooldown elapsed
+    HalfOpen --&gt; Closed: recovery threshold met
+    HalfOpen --&gt; Open: probe fails
+</pre>
+<h2>3.4 Reference Pseudocode</h2>
+<blockquote>
+<p>Illustrative Go-style sketches. They define behaviour, not final code.</p>
+</blockquote>
+<h3>3.4.1 Decision Function</h3>
+<pre><code class="language-go">type Result struct {
+    Allow  bool
+    Mode   DestMode // CLEARTEXT, SEALED_ONLY, DENY
+    Reason string
+}
+
+func (e *Enforcer) Decide(req Request) Result {
+    pol := e.cache.Current()
+
+    switch {
+    case !pol.Verify():
+        return e.record(req, Result{false, DENY, &#34;invalid_signature&#34;})
+    case !pol.IsFresh(e.clock.Now()) || pol.Version &lt; e.cache.HighestSeen():
+        return e.record(req, Result{false, DENY, &#34;stale_or_rolled_back&#34;})
+    }
+
+    rule, ok := pol.Class(req.Class)
+    if !ok {
+        return e.record(req, Result{false, DENY, &#34;unknown_class&#34;})
+    }
+    if !rule.Allows(req.Op, req.Region) {
+        return e.record(req, Result{false, DENY, &#34;not_in_legal_set&#34;})
+    }
+
+    if req.Op == SEND_REGION || req.Op == PERSIST_REMOTE {
+        switch rule.Destination(req.Region).Mode {
+        case CLEARTEXT:
+            return e.record(req, Result{true, CLEARTEXT, &#34;ok&#34;})
+        case SEALED_ONLY:
+            return e.record(req, Result{true, SEALED_ONLY, &#34;ok_sealed&#34;})
+        default:
+            return e.record(req, Result{false, DENY, &#34;dest_denied&#34;})
+        }
+    }
+    return e.record(req, Result{true, CLEARTEXT, &#34;ok_local&#34;})
+}
+</code></pre>
+<h3>3.4.2 Idempotent Append</h3>
+<pre><code class="language-go">func (l *Leader) Append(b Batch, epoch uint64) (Offset, error) {
+    if epoch &lt; l.epoch {
+        return 0, ErrStaleEpoch // replicas reject lower epochs
+    }
+    st := l.sessions.Get(b.ProducerID)
+    switch {
+    case b.Seq == st.LastSeq:
+        return st.LastOffset, nil // duplicate retry, no new append
+    case b.Seq != st.LastSeq+1:
+        return 0, ErrOutOfOrderSeq
+    }
+    off := l.segment.Write(b) // writes envelope with epoch, class, version
+    l.segment.Fsync()
+    l.replicateToMajority(b)
+    st.Update(b.Seq, off)
+    return off, nil
+}
+</code></pre>
+<h3>3.4.3 Route Scoring with Hard Policy Filter</h3>
+<pre><code class="language-go">func (r *Router) Pick(dest Region, now Time) Path {
+    graph := r.permittedGraph(dest) // calls Decide per edge, first
+    if len(graph.Paths) == 0 {
+        return NoPath // class degradation applies
+    }
+    if len(graph.Paths) == 1 {
+        return graph.Paths[0]
+    }
+
+    best := graph.Paths[0]
+    for _, p := range graph.Paths {
+        c := W1*p.RTT + W2*p.Loss + W3*p.QueueDelay + W4*p.Cost + W5*p.CongestionRisk
+        if c &lt; p.cost(best) {
+            best = p
+        }
+    }
+
+    cur := r.state.Current(dest)
+    if best == cur {
+        return cur
+    }
+    if r.state.Wins(best, cur) &gt;= N &amp;&amp;
+        best.Cost &lt; cur.Cost*(1-HysteresisMargin) &amp;&amp;
+        now.Sub(r.state.LastSwitch(dest)) &gt;= MinDwell &amp;&amp;
+        r.state.BreakerClosed(cur) {
+        r.state.Switch(dest, best, now)
+        return best
+    }
+    return cur
+}
+</code></pre>
+<h3>3.4.4 Promotion</h3>
+<pre><code class="language-go">func (n *Node) TryPromote(part PartitionID) error {
+    own := n.meta.Ownership(part)
+    if n.clock.Now().Before(own.LeaseExpiry.Add(n.maxClockDrift)) {
+        return ErrLeaseNotExpired
+    }
+    d := n.enforcer.Decide(Request{Op: PROMOTE, Class: n.classOf(part), Region: n.region})
+    if !d.Allow {
+        return ErrNotEligible
+    }
+    if !n.holdsReplica(part) {
+        return ErrNoReplica
+    }
+    // Commit through the metadata quorum. Fails if another region committed first.
+    return n.meta.CompareAndSwapOwner(part, own.Epoch, Owner{Region: n.region, Epoch: own.Epoch + 1})
+}
+</code></pre>
+<h3>3.4.5 Outbox Resume</h3>
+<pre><code class="language-go">func (s *Sender) Run(dest Region, part PartitionID) {
+    for {
+        wm := s.receiver.DurableWatermark(dest, part) // resume point
+        rng := s.outbox.Next(dest, part, wm)
+        if rng.Empty() {
+            s.wait()
+            continue
+        }
+        d := s.enforcer.Decide(Request{Op: SEND_REGION, Class: rng.Class, Region: dest})
+        if !d.Allow {
+            s.outbox.Drop(rng)
+            continue
+        }
+        payload := s.seal(rng, d.Mode)
+        path := s.router.Pick(dest, s.clock.Now())
+        if err := s.transfer(path, payload); err != nil {
+            continue // retry resumes from the receiver watermark, applied ranges are no-ops
+        }
+        s.outbox.TrimTo(s.receiver.DurableWatermark(dest, part))
+    }
+}
+</code></pre>
+<h2>3.5 API and Record Envelope</h2>
+<h3>3.5.1 gRPC Surface (Protobuf sketch)</h3>
+<pre><code class="language-protobuf">syntax = &#34;proto3&#34;;
+package hydra.v1;
+
+service Stream {
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
+  rpc Produce(ProduceRequest) returns (ProduceResponse);
+  rpc Fetch(FetchRequest) returns (FetchResponse);
+  rpc CommitOffset(CommitOffsetRequest) returns (CommitOffsetResponse);
+  rpc ReadOffset(ReadOffsetRequest) returns (ReadOffsetResponse);
+  rpc ListOwnership(ListOwnershipRequest) returns (ListOwnershipResponse);
+}
+
+message CreateTopicRequest {
+  string topic = 1;
+  string class_id = 2;
+  uint32 partitions = 3;
+}
+
+message ProduceRequest {
+  string topic = 1;
+  uint32 partition = 2;
+  uint64 producer_id = 3;
+  uint64 sequence = 4;
+  repeated bytes records = 5;
+}
+
+message ProduceResponse {
+  uint64 base_offset = 1;
+  uint64 epoch = 2;
+  string error = 3;
+}
+</code></pre>
+<h3>3.5.2 Record Batch Envelope</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>partition_epoch</code></td>
+<td>uint64</td>
+<td>Fencing and stale-epoch audit</td>
+</tr>
+<tr>
+<td><code>producer_id</code>, <code>sequence</code></td>
+<td>uint64</td>
+<td>Idempotent dedupe</td>
+</tr>
+<tr>
+<td><code>class_id</code></td>
+<td>string</td>
+<td>Selects the class rule</td>
+</tr>
+<tr>
+<td><code>policy_version</code></td>
+<td>uint64</td>
+<td>Traceability of the stamping policy</td>
+</tr>
+<tr>
+<td><code>base_offset</code>, <code>count</code></td>
+<td>uint64, uint32</td>
+<td>Dense monotonic offsets</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td>bytes</td>
+<td>Records (never logged)</td>
+</tr>
+<tr>
+<td><code>checksum</code></td>
+<td>uint32</td>
+<td>Detect corrupt tail, truncated on recovery</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3>3.5.3 Core Invariants</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Invariant</th>
+<th>Checker</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>INV-1</td>
+<td>Offsets are dense and monotonic per partition</td>
+<td>Ordering checker</td>
+</tr>
+<tr>
+<td>INV-2</td>
+<td>An acknowledged record is on a majority of in-region replicas</td>
+<td>Loss checker</td>
+</tr>
+<tr>
+<td>INV-3</td>
+<td>A new leader holds all acknowledged records</td>
+<td>Loss checker after broker kill</td>
+</tr>
+<tr>
+<td>INV-4</td>
+<td>A fetch never returns records beyond the committed high-water mark</td>
+<td>API contract tests</td>
+</tr>
+<tr>
+<td>INV-5</td>
+<td>Destination log is a prefix of the source log, offsets match exactly</td>
+<td>Prefix and checksum check</td>
+</tr>
+<tr>
+<td>INV-6</td>
+<td>Retrying an applied range is a no-op</td>
+<td>Retry-storm tests</td>
+</tr>
+<tr>
+<td>INV-7</td>
+<td>No two regions commit writes for the same partition and epoch</td>
+<td>Stale-epoch auditor</td>
+</tr>
+<tr>
+<td>INV-8</td>
+<td>No payload outside the legal set or sealed-only mode</td>
+<td>Canary scanner</td>
+</tr>
+<tr>
+<td>INV-9</td>
+<td>An unsigned, invalid or rolled-back policy is never applied</td>
+<td>Tampered and replayed policy tests</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>3.6 Repository and Module Layout</h2>
+<pre><code class="language-text">hydra-stream/
+├── README.md
+├── project.md
+├── LICENSE
+├── api/
+│   └── hydra/v1/stream.proto
+├── cmd/
+│   ├── hydra-broker/
+│   ├── hydra-agent/          # replication sender and receiver
+│   ├── hydra-meta/           # metadata voter
+│   └── hydra-ctl/            # admin, policy publish
+├── internal/
+│   ├── log/                  # segmented log, index, recovery
+│   ├── replica/              # in-region replication
+│   ├── session/              # idempotent producer state
+│   ├── enforce/              # single decision function (shared library)
+│   ├── policy/               # signing, verification, versioning
+│   ├── outbox/               # durable queue, watermark, resume
+│   ├── route/                # measurement, graph, scoring, hysteresis
+│   ├── own/                  # epochs, leases, fencing, quarantine
+│   ├── seal/                 # sealed-copy encryption, key service (simulated)
+│   ├── meta/                 # Raft wrapper
+│   └── audit/                # hash-chained decision log
+├── test/
+│   ├── emulation/            # netns, tc/netem scripts
+│   ├── scenarios/            # parameterized scenario definitions
+│   ├── checkers/             # loss, duplicate, order, stale-epoch
+│   ├── canary/               # canary generator and scanner
+│   └── baselines/            # Kafka + MM2, Pulsar deployments
+├── scripts/
+│   └── run_scenario.sh       # one-command reproducible run
+└── results/
+    └── &lt;run-id&gt;/             # config, seed, raw logs, summary
+</code></pre>
+<hr>
+<h1>Part 4 — Validation, Risk and Delivery</h1>
+<h2>4.1 Test Bed</h2>
+<ul>
+<li>Three logical regions as containers or network namespaces on one host, with documented links.</li>
+<li>Delay, jitter, loss, bandwidth limits and partitions applied with standard Linux traffic control (<code>tc</code>, <code>netem</code>).</li>
+<li>Clock skew injected for lease tests.</li>
+<li>Every scenario is scripted and parameterized so any run is repeatable from its recorded configuration.</li>
+<li><strong>Calibration.</strong> Measure achieved delay and bandwidth against configured values and publish the calibration.</li>
+</ul>
+<pre class="mermaid">flowchart LR
+    CFG[&#34;Scenario config + seed&#34;] --&gt; RUN[&#34;Scenario runner&#34;]
+    RUN --&gt; FI[&#34;Fault injector&lt;br/&gt;tc, netem, kill, clock skew&#34;]
+    RUN --&gt; LG[&#34;Load generator&#34;]
+    LG --&gt; SYS[&#34;Hydra Stream&lt;br/&gt;3 regions&#34;]
+    FI --&gt; SYS
+    SYS --&gt; CHK[&#34;Checkers&lt;br/&gt;loss, duplicate, order, epoch&#34;]
+    SYS --&gt; CAN[&#34;Canary scanner&#34;]
+    SYS --&gt; MET[&#34;Metrics&#34;]
+    CHK --&gt; RES[(&#34;results/run-id&#34;)]
+    CAN --&gt; RES
+    MET --&gt; RES
+</pre>
+<h2>4.2 Scenario Matrix</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Scenario</th>
+<th>Primary evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>S1</td>
+<td>Baseline, all links healthy</td>
+<td>Reference throughput, latency, zero leaks</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>Progressive bandwidth reduction</td>
+<td>Lag growth, outbox depth, route behaviour</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>Increasing RTT and jitter</td>
+<td>Latency percentiles, route switches</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>Random and burst packet loss</td>
+<td>Retransmission, goodput, oscillation</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>Asymmetric link conditions</td>
+<td>Direction-specific lag</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>WAN partition between two regions</td>
+<td>Stale-epoch writes, RPO, duplicates</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>Full region outage</td>
+<td>RTO, loss bound, per-class behaviour</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>Broker outage inside a region</td>
+<td>No acknowledged record lost</td>
+</tr>
+<tr>
+<td>S9</td>
+<td>Control-plane outage, regions healthy</td>
+<td>Pinned classes still write</td>
+</tr>
+<tr>
+<td>S10</td>
+<td>Recovery with replication backlog</td>
+<td>Catch-up time, no gaps</td>
+</tr>
+<tr>
+<td>S11</td>
+<td>Policy revocation or stricter policy during outage</td>
+<td>Outbox re-evaluation, fail-closed</td>
+</tr>
+<tr>
+<td>S12</td>
+<td>Unauthorized replication via alternate path, backup, log exporter, replay tool</td>
+<td>Zero canary hits in forbidden regions</td>
+</tr>
+<tr>
+<td>S13</td>
+<td>Mis-set producer replication list</td>
+<td>Broker still refuses</td>
+</tr>
+<tr>
+<td>S14</td>
+<td>Sealed copy canary and key-escrow drill (P1)</td>
+<td>Ciphertext only, recovery works</td>
+</tr>
+<tr>
+<td>S15</td>
+<td>Reroute through permitted relay and denied relay (P1)</td>
+<td>Route accepted or denied, audited</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>4.3 Failure Matrix</h2>
+<p>The dossier requires each case to specify allowed writes and reads, commit, replication, loss bound, duplicates, ordering, RPO, RTO and operator action. Values below are <strong>design expectations to be measured</strong>, not results.</p>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Failure case</th>
+<th>Writes</th>
+<th>Reads</th>
+<th>Replication behaviour</th>
+<th>Loss bound</th>
+<th>Duplicates</th>
+<th>Ordering</th>
+<th>Operator action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A isolated from control plane, healthy locally</strong></td>
+<td>Pinned: continue. Movable: continue under valid lease until expiry, then fence</td>
+<td>Local reads continue</td>
+<td>Outbox continues on existing permitted routes</td>
+<td>None for acked data under <code>legal-set-sync(k)</code>, lag-bounded under <code>local-quorum</code></td>
+<td>None</td>
+<td>Per partition</td>
+<td>Restore control plane</td>
+</tr>
+<tr>
+<td><strong>A isolated from B, both have local producers</strong></td>
+<td>Only the epoch owner writes. Non-owner rejects or buffers per class rule</td>
+<td>Local</td>
+<td>Queue in outbox, resume on heal</td>
+<td>Lag-bounded under <code>local-quorum</code></td>
+<td>Possible after failover, bounded by checkpoint interval</td>
+<td>Per partition within epoch</td>
+<td>Confirm owner, heal link</td>
+</tr>
+<tr>
+<td><strong>A completely lost</strong></td>
+<td>Eligible candidate promoted after lease expiry. Single-region classes stop</td>
+<td>Candidate serves data it holds</td>
+<td>Candidate becomes source</td>
+<td><code>local-quorum</code>: records not yet replicated. <code>legal-set-sync(k)</code>: none for acked</td>
+<td>Bounded by checkpoint interval</td>
+<td>Per partition, new epoch</td>
+<td>Verify eligibility, recover or accept loss for single-region classes</td>
+</tr>
+<tr>
+<td><strong>B has lagging replica</strong></td>
+<td>Continue. B is excluded from the ack set until caught up</td>
+<td>Local</td>
+<td>Catch-up from watermark</td>
+<td>Lag-bounded</td>
+<td>None</td>
+<td>Preserved</td>
+<td>Investigate lag</td>
+</tr>
+<tr>
+<td><strong>Both regions believe they are primary</strong></td>
+<td>Lower epoch fenced and rejected</td>
+<td>Local</td>
+<td>Superseded suffix quarantined</td>
+<td>Stale writes quarantined, never merged silently</td>
+<td>Possible</td>
+<td>Higher epoch wins</td>
+<td>Review quarantine segment</td>
+</tr>
+<tr>
+<td><strong>Metadata quorum unavailable</strong></td>
+<td>Pinned: continue. Movable: continue until lease expiry, then fence. No promotions</td>
+<td>Local</td>
+<td>Existing routes continue</td>
+<td>As per ack mode</td>
+<td>None new</td>
+<td>Preserved</td>
+<td>Restore quorum</td>
+</tr>
+<tr>
+<td><strong>Policy update arrives during outage</strong></td>
+<td>Applied on receipt. Staleness timer decides fail-closed</td>
+<td>Per policy</td>
+<td>Outbox ranges re-evaluated</td>
+<td>Dropped ranges audited</td>
+<td>None</td>
+<td>Preserved</td>
+<td>Confirm applied version</td>
+</tr>
+<tr>
+<td><strong>Region recovers with divergent logs</strong></td>
+<td>Returns as follower</td>
+<td>Catch-up</td>
+<td>Truncate to agreed offset, quarantine suffix</td>
+<td>Quarantined records not replicated</td>
+<td>Possible within bound</td>
+<td>New owner's order</td>
+<td>Inspect quarantine</td>
+</tr>
+<tr>
+<td><strong>No legal alternate region exists</strong></td>
+<td>Per class: block, reject or degrade-local until bound</td>
+<td>Local</td>
+<td>None possible</td>
+<td>Not applicable</td>
+<td>None</td>
+<td>Preserved</td>
+<td>Add capacity or change policy</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>4.4 Metrics and Method</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Metrics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Throughput</td>
+<td>Messages per second, bytes per second</td>
+</tr>
+<tr>
+<td>Latency</td>
+<td>End-to-end P50, P95, P99</td>
+</tr>
+<tr>
+<td>Replication</td>
+<td>Lag in time and offsets, outbox depth, oldest unreplicated record age</td>
+</tr>
+<tr>
+<td>Recovery</td>
+<td>Measured RPO and RTO per scenario</td>
+</tr>
+<tr>
+<td>Correctness</td>
+<td>Duplicate rate, loss rate, ordering violations, stale-epoch commits</td>
+</tr>
+<tr>
+<td>Routing</td>
+<td>Route switches, oscillation rate</td>
+</tr>
+<tr>
+<td>Pressure</td>
+<td>Backpressure duration, rejected writes</td>
+</tr>
+<tr>
+<td>Resources</td>
+<td>CPU, memory, disk I/O, network</td>
+</tr>
+<tr>
+<td>Policy</td>
+<td>Enforcement violations (target zero in the test matrix), audit completeness, time to detect violations</td>
+</tr>
+<tr>
+<td>Availability</td>
+<td>Control-plane availability, local data-plane availability</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><strong>Method.</strong> Fixed seeds, several repetitions per scenario, medians and spread reported, raw logs kept. Numeric targets are set only after the hardware and test conditions are established. <strong>Targets are not results.</strong></p>
+<p><strong>Checkers we write:</strong> loss and duplicate checker, per-partition ordering checker, canary scanner for forbidden regions, epoch auditor for stale-epoch appends.</p>
+<h2>4.5 Baselines and Fairness Rules</h2>
+<p>Compared systems:</p>
+<ol>
+<li>Kafka with local replication only</li>
+<li>Kafka with MirrorMaker 2 using static flows</li>
+<li>Pulsar geo-replication</li>
+<li>Naive latency-only router</li>
+<li>Policy-filtered static routing</li>
+<li>Policy-filtered adaptive routing with hysteresis</li>
+<li>Failover without fencing versus with fencing</li>
+</ol>
+<p><strong>Fairness rules</strong></p>
+<ul>
+<li>Use identical topology, message size, partitions, retention, durability settings and network impairment.</li>
+<li>Record every setting and list differences that cannot be normalized.</li>
+<li>Do not tune baselines less than our own system.</li>
+<li>Where a baseline lacks a feature (for example a per-record server-side residency check), compare on measurable outcomes rather than listing the absence as a defect.</li>
+<li>Each baseline passes its own smoke test and a replication-lag measurement before any comparison run.</li>
+</ul>
+<h2>4.6 Hypotheses</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Hypothesis</th>
+<th>Test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>H1</td>
+<td>A hard policy filter followed by adaptive route scoring can improve replication latency under WAN degradation without increasing policy violations</td>
+<td>S2 to S4, route comparison against static and latency-only routing</td>
+</tr>
+<tr>
+<td>H2</td>
+<td>Region-local durable queues plus bounded backpressure preserve local ingestion during WAN outages without unbounded memory growth</td>
+<td>S6, long outage with memory monitoring</td>
+</tr>
+<tr>
+<td>H3</td>
+<td>Fencing epochs and explicit failover eligibility prevent two regions committing writes for the same partition in the tested partition scenarios</td>
+<td>S6, S7, clock-skew tests, stale-epoch auditor</td>
+</tr>
+<tr>
+<td>H4</td>
+<td>Policy checks at every payload movement boundary give an auditable zero-unauthorized-replication result in the tested scenarios</td>
+<td>S12, S13, canary scans</td>
+</tr>
+<tr>
+<td>H5</td>
+<td>Hysteresis and dampening reduce route oscillation while keeping lag below a defined bound</td>
+<td>S3, S4, oscillation rate</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>These are hypotheses. Test them and report counterexamples.</p>
+<h2>4.7 Threat Model and Risks</h2>
+<h3>4.7.1 Threat Model</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Threat</th>
+<th>Mitigation</th>
+<th>Residual risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gateway bypass by replication worker, backup job or replay tool</td>
+<td>One enforcement library at all persist and send points</td>
+<td>Scan covers observed locations only</td>
+</tr>
+<tr>
+<td>Producer supplies a wrong replication list</td>
+<td>Server-side enforcement ignores producer lists</td>
+<td>None for tested path</td>
+</tr>
+<tr>
+<td>Tampered or replayed policy</td>
+<td>Offline signing, monotonic versions, verification in every region</td>
+<td>Compromise of the signing authority</td>
+</tr>
+<tr>
+<td>Stale policy during outage</td>
+<td>Staleness limit, fail-closed for restricted classes</td>
+<td>Availability loss for that class</td>
+</tr>
+<tr>
+<td>Split brain after partition</td>
+<td>Leases, epochs, quorum-committed promotion, fencing</td>
+<td>Bounded clock drift assumption</td>
+</tr>
+<tr>
+<td>Rerouting through a third region</td>
+<td>Transit-allowed list, ciphertext-only relay</td>
+<td>Small permitted graph limits adaptivity</td>
+</tr>
+<tr>
+<td>Telemetry or audit logs becoming regulated data</td>
+<td>Telemetry export policy, decision log stores decisions and versions, never payload</td>
+<td>Operator misconfiguration</td>
+</tr>
+<tr>
+<td>Compromised regional broker holding cleartext</td>
+<td>Not defended by this design</td>
+<td>Out of scope</td>
+</tr>
+<tr>
+<td>Compromised global control plane</td>
+<td>Control plane holds no payload, policy is signed, regions verify</td>
+<td>Denial of service on promotions</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3>4.7.2 Risk Register</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Risk</th>
+<th>Likelihood</th>
+<th>Impact</th>
+<th>Mitigation</th>
+<th>Owner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R1</td>
+<td>Scope too large for the event</td>
+<td>High</td>
+<td>High</td>
+<td>Tier cut line, P2 removed from pitch if cut</td>
+<td>Lead</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>Own broker has safety bugs</td>
+<td>Medium</td>
+<td>High</td>
+<td>Crash, kill and ordering tests before any differentiator work</td>
+<td>Storage</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>Rules forbid custom broker or require Kafka compatibility</td>
+<td>Medium</td>
+<td>High</td>
+<td>Ask organizers, fallback to a substrate with a thin enforcement layer</td>
+<td>Lead</td>
+</tr>
+<tr>
+<td>R4</td>
+<td>Single-host emulation misleads</td>
+<td>Medium</td>
+<td>Medium</td>
+<td>Calibration and ratio-based reporting</td>
+<td>Test</td>
+</tr>
+<tr>
+<td>R5</td>
+<td>Adaptive routing shows no gain under strict residency</td>
+<td>High</td>
+<td>Medium</td>
+<td>Report cases with and without alternate path</td>
+<td>Routing</td>
+</tr>
+<tr>
+<td>R6</td>
+<td>Lease safety violated by clock drift</td>
+<td>Low</td>
+<td>High</td>
+<td>Drift injection, conservative lease margins</td>
+<td>Failover</td>
+</tr>
+<tr>
+<td>R7</td>
+<td>Novelty claim overstated</td>
+<td>Medium</td>
+<td>High</td>
+<td>Claims checklist, wording &quot;in the documentation we reviewed&quot;</td>
+<td>Lead</td>
+</tr>
+<tr>
+<td>R8</td>
+<td>Sealed copy key lost with home region</td>
+<td>Medium</td>
+<td>High</td>
+<td>Name escrow path per class, key-escrow drill</td>
+<td>Security</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>4.8 Delivery Plan</h2>
+<p>Stages follow the dossier. <strong>Baseline first, then differentiators.</strong></p>
+<pre class="mermaid">gantt
+    title Hydra Stream delivery plan (relative weeks)
+    dateFormat  YYYY-MM-DD
+    axisFormat  W%W
+    section Foundation
+    Stage 1 Policy model and simulator          :s1, 2026-11-02, 7d
+    Stage 2 Regional streaming MVP              :s2, after s1, 14d
+    section Differentiators
+    Stage 3 Sovereignty enforcement (P0)        :s3, after s2, 10d
+    Stage 4 Adaptive replication and outbox     :s4, after s3, 10d
+    Stage 5 Failure recovery and fencing (P0)   :s5, after s4, 10d
+    section Proof
+    Stage 6 Evaluation and baselines            :s6, after s5, 10d
+    Demo script and claims review               :s7, after s6, 4d
+</pre>
+<p><strong>Baseline exit criteria (before any differentiator work)</strong></p>
+<ol>
+<li>A region ingests, replicates in mirror mode and serves reads under healthy conditions with all checkers green.</li>
+<li>Broker loss, network pause and process crash scenarios pass loss, duplicate and ordering checks.</li>
+<li>The metadata quorum survives single-voter loss without losing committed state.</li>
+<li>Baselines run on the same testbed and produce comparable lag measurements.</li>
+<li>The scripted scenario runner reproduces a run from its recorded configuration.</li>
+</ol>
+<p><strong>Shared engineering practices:</strong> pin dependency versions and record licenses, run invariant checkers in CI on a small scenario set, write each component's failure behaviour down before testing it, keep a results log linking every number to a run, configuration and date.</p>
+<p><strong>Cut line (first to last):</strong> D7 derive mode → Kafka wire-protocol subset → D3 transit → D2 sealed mode → link measurement polish. P0 items are never cut.</p>
+<h2>4.9 Demo Script</h2>
+<p>Five minutes, one network impairment and one regional outage.</p>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Time</th>
+<th>Action</th>
+<th>What the audience sees</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0:00</td>
+<td>Show three regions, policy classes, and canary dashboard</td>
+<td>Class <code>EU-restricted</code> limited to Regions A and B, class <code>open</code> allowed everywhere</td>
+</tr>
+<tr>
+<td>0:45</td>
+<td>Start load, show healthy replication lag</td>
+<td>Lag near baseline, zero canary hits in Region C for the restricted class</td>
+</tr>
+<tr>
+<td>1:30</td>
+<td>Degrade the A to B link with <code>tc</code></td>
+<td>Outbox depth rises, route selector reports the permitted alternate or &quot;no legal alternate&quot;</td>
+</tr>
+<tr>
+<td>2:15</td>
+<td>Show a mis-set producer replication list</td>
+<td>Broker refuses, audit shows <code>send.deny</code></td>
+</tr>
+<tr>
+<td>3:00</td>
+<td>Partition and kill Region A</td>
+<td>Lease expires, eligible Region B is promoted with a higher epoch</td>
+</tr>
+<tr>
+<td>3:45</td>
+<td>Heal Region A</td>
+<td>A self-fences, superseded suffix goes to quarantine, A catches up as follower</td>
+</tr>
+<tr>
+<td>4:30</td>
+<td>Run the checkers and canary scanner</td>
+<td>Loss, duplicate, order and stale-epoch results with scope and limitations</td>
+</tr>
+<tr>
+<td>5:00</td>
+<td>Show the run script and raw logs</td>
+<td>Anyone can re-run it</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>4.10 Open Questions and Assumptions</h2>
+<h3>4.10.1 Questions for Organizers</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Question</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q1</td>
+<td>May we build on Kafka or Pulsar, or must the broker be built from scratch?</td>
+<td>Decides whether components 1 to 4 are built or reused</td>
+</tr>
+<tr>
+<td>Q2</td>
+<td>Is Kafka wire-protocol compatibility required?</td>
+<td>P2 stretch becomes mandatory</td>
+</tr>
+<tr>
+<td>Q3</td>
+<td>Is residency per record, per topic, per tenant or per class?</td>
+<td>We assume per class</td>
+</tr>
+<tr>
+<td>Q4</td>
+<td>Do metadata, offsets, metrics and logs fall under residency?</td>
+<td>Affects telemetry and metadata design</td>
+</tr>
+<tr>
+<td>Q5</td>
+<td>Are encryption and key location sufficient, or must the bytes stay resident?</td>
+<td>Decides whether sealed mode is valid</td>
+</tr>
+<tr>
+<td>Q6</td>
+<td>Target RPO and RTO and the delivery semantics expected across regions?</td>
+<td>Sets acknowledgment-mode defaults</td>
+</tr>
+<tr>
+<td>Q7</td>
+<td>Which jurisdictions or policy sets are in scope for the demo?</td>
+<td>Avoids asserting a universal legal rule</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3>4.10.2 Assumptions Register</h3>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Assumption</th>
+<th>Type</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A1</td>
+<td>Region location is taken from infrastructure labels</td>
+<td>Technical</td>
+<td>Stated limit</td>
+</tr>
+<tr>
+<td>A2</td>
+<td>Clock drift between nodes is bounded</td>
+<td>Technical</td>
+<td>Must be tested</td>
+</tr>
+<tr>
+<td>A3</td>
+<td>Policy is a configured legal and business rule, not inferred from IP geolocation</td>
+<td>Legal / technical</td>
+<td>Adopted</td>
+</tr>
+<tr>
+<td>A4</td>
+<td>Some regimes may prohibit out-of-border storage even when encrypted</td>
+<td>Legal</td>
+<td>Sealed mode is a configurable rule, not a compliance claim</td>
+</tr>
+<tr>
+<td>A5</td>
+<td>Key service is a software simulation in the prototype</td>
+<td>Technical</td>
+<td>Stated limit</td>
+</tr>
+<tr>
+<td>A6</td>
+<td>Production workload identity is out of scope</td>
+<td>Technical</td>
+<td>Stated limit</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2>4.11 Claims Checklist</h2>
+<p>Before submission, confirm:</p>
+<ol>
+<li>Does each difference still exist in the final build (tier not cut)?</li>
+<li>Is each &quot;others do X&quot; statement re-checked against current documentation, with version and date?</li>
+<li>Does each &quot;we do Y&quot; claim have a test and a run log?</li>
+<li>Is every guarantee stated with scope and mechanism?</li>
+<li>Are limits written next to the claim, not in an appendix?</li>
+</ol>
+<p><strong>Do not claim</strong> legal compliance, global exactly-once delivery, zero data loss, or zero unauthorized replication without a precise scope, mechanism and test evidence.</p>
+<h2>4.12 References</h2>
+<div class="md-table" role="group" aria-label="Table" tabindex="0"><table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Type</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://kafka.apache.org/documentation/#georeplication">Apache Kafka — Geo-Replication / MirrorMaker 2</a></td>
+<td>Product docs</td>
+<td>Baseline behaviour</td>
+</tr>
+<tr>
+<td><a href="https://kafka.apache.org/operations/geo-replication-cross-cluster-data-mirroring/">Apache Kafka — Cross-cluster data mirroring</a></td>
+<td>Product docs</td>
+<td>Operations reference</td>
+</tr>
+<tr>
+<td><a href="https://cwiki.apache.org/confluence/display/KAFKA/KIP-382%3A+MirrorMaker+2.0">KIP-382 — MirrorMaker 2.0</a></td>
+<td>Design proposal</td>
+<td>Offset sync background</td>
+</tr>
+<tr>
+<td><a href="https://pulsar.apache.org/docs/next/concepts-architecture-overview/">Apache Pulsar — Architecture</a></td>
+<td>Product docs</td>
+<td>Baseline architecture</td>
+</tr>
+<tr>
+<td><a href="https://pulsar.apache.org/docs/next/administration-geo/">Apache Pulsar — Geo-replication</a></td>
+<td>Product docs</td>
+<td>Baseline replication</td>
+</tr>
+<tr>
+<td><a href="https://www.rfc-editor.org/rfc/rfc9000.html">RFC 9000 — QUIC</a></td>
+<td>IETF standard</td>
+<td>Transport background</td>
+</tr>
+<tr>
+<td><a href="https://www.rfc-editor.org/rfc/rfc8684.html">RFC 8684 — Multipath TCP</a></td>
+<td>IETF standard</td>
+<td>Multipath background</td>
+</tr>
+<tr>
+<td><a href="https://www.rfc-editor.org/rfc/rfc8446.html">RFC 8446 — TLS 1.3</a></td>
+<td>IETF standard</td>
+<td>Transport security</td>
+</tr>
+<tr>
+<td><a href="https://github.com/cloudevents/spec">CloudEvents</a></td>
+<td>Specification</td>
+<td>Envelope interoperability</td>
+</tr>
+<tr>
+<td><a href="https://www.asyncapi.com/docs/reference/specification/latest">AsyncAPI</a></td>
+<td>Specification</td>
+<td>API description</td>
+</tr>
+<tr>
+<td><a href="https://opentelemetry.io/docs/">OpenTelemetry</a></td>
+<td>Project docs</td>
+<td>Telemetry, export controls</td>
+</tr>
+<tr>
+<td><a href="https://raft.github.io/raft.pdf">Raft paper (Ongaro, Ousterhout)</a></td>
+<td>Research paper</td>
+<td>Metadata consensus</td>
+</tr>
+<tr>
+<td><a href="https://github.com/etcd-io/raft">etcd Raft</a></td>
+<td>Library</td>
+<td>Reuse candidate</td>
+</tr>
+<tr>
+<td><a href="https://eur-lex.europa.eu/eli/reg/2016/679/oj">GDPR official text</a></td>
+<td>Law</td>
+<td>Only if EU data is in scope</td>
+</tr>
+<tr>
+<td><a href="https://www.nist.gov/privacy-framework">NIST Privacy Framework</a></td>
+<td>Framework</td>
+<td>Privacy risk background</td>
+</tr>
+</tbody>
+</table>
+</div>
+<blockquote>
+<p>For each source, record document version, publication date, status, requirements, assumptions and limitations. Confirm the current supported documentation version before implementation decisions. Separate legal text from engineering interpretation.</p>
+</blockquote>
+<hr>
+<p><em>End of document · Hydra Stream project documentation · Draft v0.1 · 31 Oct 2026</em></p>
+
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="/_runtime/mermaid-11.16.1.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+</body></html>
