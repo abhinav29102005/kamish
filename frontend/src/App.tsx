@@ -22,25 +22,8 @@ const DashboardContent: React.FC = () => {
   const latestRejection = auditLedger.slice().reverse().find((a) => a.outcome === 'Deny');
 
   return (
-    <div className="relative min-h-screen text-slate-100 selection:bg-purple-500 selection:text-white overflow-x-hidden">
-      {/* 1. Atmospheric Shadow Dragon Background Overlay (Solo Leveling Kamish) */}
-      <div className="fixed inset-0 pointer-events-none z-[-2] overflow-hidden select-none">
-        <img
-          src="/kamish-dragon.jpg"
-          alt="Kamish Ancient Shadow Dragon"
-          className={`w-full h-full object-cover transition-opacity duration-700 ${
-            isShadowMonarchMode ? 'opacity-30' : 'opacity-15'
-          }`}
-          style={{
-            mixBlendMode: 'screen',
-            transform: 'scale(1.05)',
-          }}
-        />
-        {/* Solid flat dark tint layer - strictly NO gradients */}
-        <div className="absolute inset-0 bg-[#040308]/85" />
-      </div>
-
-      {/* 2. Global Interactive 3D WebGL Canvas (The Whole Website 3D Render) */}
+    <div className="relative min-h-screen text-slate-100 selection:bg-purple-500 selection:text-white overflow-x-hidden bg-[#040308]">
+      {/* 1. Global Interactive 3D WebGL Canvas (The Whole Website 3D Render) */}
       <ThreeTopologyGlobe
         isGlobalBackground={true}
         activeTab={activeTab}
