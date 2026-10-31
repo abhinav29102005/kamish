@@ -435,8 +435,11 @@ fn test_broker_restart_with_pending_replication_obligations() {
 
         // Advance restarted outbox watermark to 2 (learned via remote handshake)
         let outbox = broker_restarted.get_outbox("US_EAST").unwrap();
-        assert_eq!(outbox.next_transfer_batch(10).len(), 5,
-            "Startup must reconstruct pending work without an explicit recovery call");
+        assert_eq!(
+            outbox.next_transfer_batch(10).len(),
+            5,
+            "Startup must reconstruct pending work without an explicit recovery call"
+        );
         outbox.advance_partition_watermark("audit-stream", 0, 2);
 
         // Repopulate pending replication obligations from disk commit log

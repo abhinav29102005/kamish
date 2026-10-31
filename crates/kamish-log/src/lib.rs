@@ -110,19 +110,30 @@ impl RecordEnvelope {
     }
 
     pub fn verify_checksum(&self) -> bool {
-        self.expected_checksum().is_some_and(|computed| computed == self.checksum)
+        self.expected_checksum()
+            .is_some_and(|computed| computed == self.checksum)
     }
 
     fn expected_checksum(&self) -> Option<u32> {
         match (self.magic, &self.context) {
             (RECORD_MAGIC_V1, None) => Some(Self::compute_checksum(
-                self.epoch, &self.class_id, self.policy_version, self.base_offset, &self.payload,
+                self.epoch,
+                &self.class_id,
+                self.policy_version,
+                self.base_offset,
+                &self.payload,
             )),
             (RECORD_MAGIC_V2, Some(context)) => {
                 let bytes = serde_json::to_vec(&(
-                    self.magic, self.epoch, &self.class_id, self.policy_version,
-                    self.base_offset, &self.payload, context,
-                )).ok()?;
+                    self.magic,
+                    self.epoch,
+                    &self.class_id,
+                    self.policy_version,
+                    self.base_offset,
+                    &self.payload,
+                    context,
+                ))
+                .ok()?;
                 Some(crc32fast::hash(&bytes))
             }
             _ => None,
@@ -184,7 +195,8 @@ impl PartitionLog {
 
                 match bincode_deserialize_envelope(&mut cursor) {
                     Ok(envelope) => {
-                        let computed = envelope.expected_checksum()
+                        let computed = envelope
+                            .expected_checksum()
                             .ok_or(LogError::InvalidMagic(envelope.magic))?;
                         if computed != envelope.checksum {
                             return Err(LogError::ChecksumMismatch {
@@ -225,7 +237,11 @@ impl PartitionLog {
         }
 
         let high_watermark = records.len() as u64;
-        let recovered_epoch = records.iter().map(|record| record.epoch).max().unwrap_or(initial_epoch);
+        let recovered_epoch = records
+            .iter()
+            .map(|record| record.epoch)
+            .max()
+            .unwrap_or(initial_epoch);
 
         Ok(Self {
             inner: Arc::new(RwLock::new(PartitionLogInner {
@@ -581,8 +597,13 @@ impl SessionManager {
             }
 
             if producer_epoch > state.producer_epoch {
-                return if seq == 0 { Ok(None) } else {
-                    Err(SessionError::OutOfOrderSequence { expected: 0, received: seq })
+                return if seq == 0 {
+                    Ok(None)
+                } else {
+                    Err(SessionError::OutOfOrderSequence {
+                        expected: 0,
+                        received: seq,
+                    })
                 };
             }
 
@@ -591,7 +612,10 @@ impl SessionManager {
                 return Ok(Some(state.last_offset));
             }
 
-            let expected = state.last_seq.checked_add(1).ok_or(SessionError::SequenceExhausted)?;
+            let expected = state
+                .last_seq
+                .checked_add(1)
+                .ok_or(SessionError::SequenceExhausted)?;
             if seq != expected {
                 return Err(SessionError::OutOfOrderSequence {
                     expected,

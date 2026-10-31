@@ -283,8 +283,13 @@ impl Enforcer {
                 // Until telemetry has its own classification schema, it must
                 // obey the supplied class's cleartext destination restrictions.
                 if class_rule.mode_for_region(&req.target_region) != DestinationMode::Cleartext {
-                    return self.record_decision(req, policy_version, false,
-                        DestinationMode::Deny, "telemetry_destination_denied");
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "telemetry_destination_denied",
+                    );
                 }
                 self.record_decision(
                     req,
@@ -335,11 +340,19 @@ impl Enforcer {
                         "transit_denied_for_cleartext",
                     );
                 }
-                let permitted = signed_policy.policy.transit_rules.get(&req.source_region)
+                let permitted = signed_policy
+                    .policy
+                    .transit_rules
+                    .get(&req.source_region)
                     .is_some_and(|regions| regions.contains(&req.target_region));
                 if !permitted {
-                    return self.record_decision(req, policy_version, false,
-                        DestinationMode::Deny, "relay_not_in_transit_allowlist");
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "relay_not_in_transit_allowlist",
+                    );
                 }
                 self.record_decision(
                     req,
@@ -371,15 +384,19 @@ impl Enforcer {
         };
 
         // Append to hash-chained decision log (FR-13)
-        if self.audit_log.record(
-            req.action,
-            &req.class_id,
-            &req.source_region,
-            &req.target_region,
-            policy_version,
-            outcome,
-            reason,
-        ).is_err() {
+        if self
+            .audit_log
+            .record(
+                req.action,
+                &req.class_id,
+                &req.source_region,
+                &req.target_region,
+                policy_version,
+                outcome,
+                reason,
+            )
+            .is_err()
+        {
             return EnforcementDecision {
                 allowed: false,
                 mode: DestinationMode::Deny,
@@ -514,7 +531,10 @@ mod tests {
         std::fs::rename(&path, dir.path().join("saved.log")).unwrap();
         std::fs::create_dir(&path).unwrap();
         let decision = enforcer.decide(EnforcementRequest::new(
-            AuditAction::BrokerAppend, "EU-restricted", "region-eu-1", "region-eu-1",
+            AuditAction::BrokerAppend,
+            "EU-restricted",
+            "region-eu-1",
+            "region-eu-1",
         ));
         assert!(!decision.allowed);
         assert_eq!(decision.mode, DestinationMode::Deny);
@@ -524,13 +544,25 @@ mod tests {
     #[test]
     fn sealed_only_region_cannot_process_or_export_cleartext() {
         let base = setup_test_enforcer();
-        let enforcer = Enforcer::new("region-eu-2", base.policy_cache.clone(), AuditLog::new_in_memory());
-        for action in [AuditAction::Ingress, AuditAction::BrokerAppend, AuditAction::InRegionReplica,
-            AuditAction::AdminReplay, AuditAction::Promote, AuditAction::BackupExport,
-            AuditAction::TelemetryExport]
-        {
+        let enforcer = Enforcer::new(
+            "region-eu-2",
+            base.policy_cache.clone(),
+            AuditLog::new_in_memory(),
+        );
+        for action in [
+            AuditAction::Ingress,
+            AuditAction::BrokerAppend,
+            AuditAction::InRegionReplica,
+            AuditAction::AdminReplay,
+            AuditAction::Promote,
+            AuditAction::BackupExport,
+            AuditAction::TelemetryExport,
+        ] {
             let decision = enforcer.decide(EnforcementRequest::new(
-                action, "EU-restricted", "region-eu-1", "region-eu-2",
+                action,
+                "EU-restricted",
+                "region-eu-1",
+                "region-eu-2",
             ));
             assert!(!decision.allowed, "{action:?}");
         }
@@ -539,9 +571,15 @@ mod tests {
     #[test]
     fn ciphertext_does_not_authorize_an_unlisted_relay() {
         let enforcer = setup_test_enforcer();
-        let decision = enforcer.decide(EnforcementRequest::new(
-            AuditAction::RelayTransit, "EU-restricted", "region-eu-1", "unlisted",
-        ).with_ciphertext(true));
+        let decision = enforcer.decide(
+            EnforcementRequest::new(
+                AuditAction::RelayTransit,
+                "EU-restricted",
+                "region-eu-1",
+                "unlisted",
+            )
+            .with_ciphertext(true),
+        );
         assert!(!decision.allowed);
         assert_eq!(decision.reason, "relay_not_in_transit_allowlist");
     }

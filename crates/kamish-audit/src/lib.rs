@@ -125,10 +125,21 @@ impl AuditEntry {
     ) -> String {
         let mut hasher = Sha256::new();
         hasher.update(b"kamish-audit-v2\0");
-        hasher.update(serde_json::to_vec(&(
-            sequence, timestamp_ns, prev_hash, action, class_id, source_region,
-            target_region, policy_version, outcome, reason,
-        )).expect("audit fields contain only serializable primitive values"));
+        hasher.update(
+            serde_json::to_vec(&(
+                sequence,
+                timestamp_ns,
+                prev_hash,
+                action,
+                class_id,
+                source_region,
+                target_region,
+                policy_version,
+                outcome,
+                reason,
+            ))
+            .expect("audit fields contain only serializable primitive values"),
+        );
         hex::encode(hasher.finalize())
     }
 
@@ -250,11 +261,19 @@ impl AuditLog {
 
         // Verify the sink is writable before admitting traffic. Never silently
         // downgrade a configured disk audit to an in-memory log.
-        let file = OpenOptions::new().create(true).append(true).open(&path_buf)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path_buf)?;
         file.sync_all()?;
         #[cfg(unix)]
-        File::open(path_buf.parent().filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new(".")))?.sync_all()?;
+        File::open(
+            path_buf
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new(".")),
+        )?
+        .sync_all()?;
         Ok(Self {
             inner: Arc::new(Mutex::new(AuditLogInner {
                 writer_failed: false,

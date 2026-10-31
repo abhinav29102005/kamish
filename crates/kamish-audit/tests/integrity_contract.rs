@@ -1,15 +1,33 @@
 use kamish_audit::{AuditAction, AuditEntry, AuditError, AuditLog, DecisionOutcome};
 
 fn record(log: &AuditLog) -> Result<AuditEntry, AuditError> {
-    log.record(AuditAction::BrokerAppend, "class", "eu", "us", 1, DecisionOutcome::AllowCleartext, "ok")
+    log.record(
+        AuditAction::BrokerAppend,
+        "class",
+        "eu",
+        "us",
+        1,
+        DecisionOutcome::AllowCleartext,
+        "ok",
+    )
 }
 
 #[test]
 fn adjacent_field_boundaries_are_authenticated() {
-    let hash = |class, source| AuditEntry::compute_hash(
-        0, 1, "genesis", AuditAction::BrokerAppend, class, source, "us", 1,
-        DecisionOutcome::AllowCleartext, "ok",
-    );
+    let hash = |class, source| {
+        AuditEntry::compute_hash(
+            0,
+            1,
+            "genesis",
+            AuditAction::BrokerAppend,
+            class,
+            source,
+            "us",
+            1,
+            DecisionOutcome::AllowCleartext,
+            "ok",
+        )
+    };
     assert_ne!(hash("ab", "c"), hash("a", "bc"));
     assert_ne!(hash("", "a"), hash("a", ""));
 }
@@ -19,12 +37,28 @@ fn disk_tampering_by_repartitioning_fields_is_detected() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.log");
     let log = AuditLog::open(&path).unwrap();
-    let mut entry = log.record(AuditAction::BrokerAppend, "ab", "c", "us", 1,
-        DecisionOutcome::AllowCleartext, "ok").unwrap();
+    let mut entry = log
+        .record(
+            AuditAction::BrokerAppend,
+            "ab",
+            "c",
+            "us",
+            1,
+            DecisionOutcome::AllowCleartext,
+            "ok",
+        )
+        .unwrap();
     entry.class_id = "a".into();
     entry.source_region = "bc".into();
-    std::fs::write(&path, format!("{}\n", serde_json::to_string(&entry).unwrap())).unwrap();
-    assert!(matches!(AuditLog::open(path), Err(AuditError::EntryHashMismatch { .. })));
+    std::fs::write(
+        &path,
+        format!("{}\n", serde_json::to_string(&entry).unwrap()),
+    )
+    .unwrap();
+    assert!(matches!(
+        AuditLog::open(path),
+        Err(AuditError::EntryHashMismatch { .. })
+    ));
 }
 
 #[test]
@@ -35,7 +69,10 @@ fn unsupported_format_is_rejected_without_modifying_existing_file() {
     entry.format_version = 0;
     let bytes = serde_json::to_vec(&entry).unwrap();
     std::fs::write(&path, &bytes).unwrap();
-    assert!(matches!(AuditLog::open(&path), Err(AuditError::UnsupportedFormat(0))));
+    assert!(matches!(
+        AuditLog::open(&path),
+        Err(AuditError::UnsupportedFormat(0))
+    ));
     assert_eq!(std::fs::read(path).unwrap(), bytes);
 }
 

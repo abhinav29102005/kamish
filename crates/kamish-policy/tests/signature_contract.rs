@@ -1,25 +1,39 @@
 use ed25519_dalek::SigningKey;
-use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, PolicyError, SignedPolicy};
+use kamish_policy::{
+    AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, PolicyError, SignedPolicy,
+};
 use std::collections::HashMap;
 
 fn fixture() -> (SigningKey, PolicyDocument) {
     let key = SigningKey::from_bytes(&[17; 32]);
-    let classes = (0..32).map(|i| {
-        let id = format!("class-{i}");
-        (id.clone(), ClassRule {
-            class_id: id, description: "test".into(),
-            legal_regions: ["eu".into(), "us".into(), "ap".into()].into(),
-            destination_modes: [("eu".into(), DestinationMode::Cleartext),
-                ("us".into(), DestinationMode::SealedOnly)].into(),
-            ack_mode: AckMode::LocalMajority,
-            failover_candidates: vec!["eu".into(), "us".into()],
-            transit_allowed: true,
+    let classes = (0..32)
+        .map(|i| {
+            let id = format!("class-{i}");
+            (
+                id.clone(),
+                ClassRule {
+                    class_id: id,
+                    description: "test".into(),
+                    legal_regions: ["eu".into(), "us".into(), "ap".into()].into(),
+                    destination_modes: [
+                        ("eu".into(), DestinationMode::Cleartext),
+                        ("us".into(), DestinationMode::SealedOnly),
+                    ]
+                    .into(),
+                    ack_mode: AckMode::LocalMajority,
+                    failover_candidates: vec!["eu".into(), "us".into()],
+                    transit_allowed: true,
+                },
+            )
         })
-    }).collect();
+        .collect();
     let doc = PolicyDocument {
-        policy_id: "test".into(), version: u64::MAX,
-        issued_at_sec: 1000, ttl_seconds: 100,
-        issuer_pubkey_hex: hex::encode(key.verifying_key().to_bytes()), classes,
+        policy_id: "test".into(),
+        version: u64::MAX,
+        issued_at_sec: 1000,
+        ttl_seconds: 100,
+        issuer_pubkey_hex: hex::encode(key.verifying_key().to_bytes()),
+        classes,
         transit_rules: [("eu".into(), vec!["us".into(), "ap".into()])].into(),
     };
     (key, doc)
@@ -42,15 +56,35 @@ fn map_and_set_order_is_irrelevant_but_preference_order_is_signed() {
     let (key, doc) = fixture();
     let signed = SignedPolicy::sign(doc, &key);
     let mut reordered = signed.clone();
-    reordered.policy.classes = signed.policy.classes.iter().map(|(id, rule)| {
-        let mut rule = rule.clone();
-        rule.legal_regions = rule.legal_regions.iter().cloned().collect();
-        rule.destination_modes = rule.destination_modes.iter().map(|(r, m)| (r.clone(), *m)).collect();
-        (id.clone(), rule)
-    }).collect::<HashMap<_, _>>();
-    reordered.policy.transit_rules.get_mut("eu").unwrap().reverse();
+    reordered.policy.classes = signed
+        .policy
+        .classes
+        .iter()
+        .map(|(id, rule)| {
+            let mut rule = rule.clone();
+            rule.legal_regions = rule.legal_regions.iter().cloned().collect();
+            rule.destination_modes = rule
+                .destination_modes
+                .iter()
+                .map(|(r, m)| (r.clone(), *m))
+                .collect();
+            (id.clone(), rule)
+        })
+        .collect::<HashMap<_, _>>();
+    reordered
+        .policy
+        .transit_rules
+        .get_mut("eu")
+        .unwrap()
+        .reverse();
     reordered.verify_signature().unwrap();
-    reordered.policy.classes.get_mut("class-0").unwrap().failover_candidates.reverse();
+    reordered
+        .policy
+        .classes
+        .get_mut("class-0")
+        .unwrap()
+        .failover_candidates
+        .reverse();
     assert!(reordered.verify_signature().is_err());
 }
 
@@ -63,10 +97,16 @@ fn changed_same_version_and_policy_identity_are_rejected() {
     cache.update(original, 1050).unwrap();
     let mut changed = doc.clone();
     changed.classes.clear();
-    assert!(matches!(cache.update(SignedPolicy::sign(changed, &key), 1050), Err(PolicyError::VersionConflict(_))));
+    assert!(matches!(
+        cache.update(SignedPolicy::sign(changed, &key), 1050),
+        Err(PolicyError::VersionConflict(_))
+    ));
     let mut changed = doc;
     changed.policy_id = "different-authority-scope".into();
-    assert!(matches!(cache.update(SignedPolicy::sign(changed, &key), 1050), Err(PolicyError::IdentityChanged)));
+    assert!(matches!(
+        cache.update(SignedPolicy::sign(changed, &key), 1050),
+        Err(PolicyError::IdentityChanged)
+    ));
     assert_eq!(cache.current().unwrap().policy.classes.len(), 32);
 }
 
@@ -92,8 +132,14 @@ fn legacy_or_unknown_signature_formats_are_not_silently_accepted() {
     let mut json = serde_json::to_value(&signed).unwrap();
     json.as_object_mut().unwrap().remove("signature_format");
     let legacy: SignedPolicy = serde_json::from_value(json).unwrap();
-    assert!(matches!(legacy.verify_signature(), Err(PolicyError::UnsupportedFormat(0))));
+    assert!(matches!(
+        legacy.verify_signature(),
+        Err(PolicyError::UnsupportedFormat(0))
+    ));
     let mut future = signed;
     future.signature_format = 999;
-    assert!(matches!(future.verify_signature(), Err(PolicyError::UnsupportedFormat(999))));
+    assert!(matches!(
+        future.verify_signature(),
+        Err(PolicyError::UnsupportedFormat(999))
+    ));
 }

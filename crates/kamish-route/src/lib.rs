@@ -59,9 +59,17 @@ impl PathCandidate {
 
     fn valid_metrics(&self) -> bool {
         let m = self.metrics;
-        [m.rtt_ms, m.loss_rate, m.queue_delay_ms, m.cost_weight, m.congestion_risk]
-            .iter().all(|v| v.is_finite() && *v >= 0.0)
-            && m.loss_rate <= 1.0 && m.congestion_risk <= 1.0
+        [
+            m.rtt_ms,
+            m.loss_rate,
+            m.queue_delay_ms,
+            m.cost_weight,
+            m.congestion_risk,
+        ]
+        .iter()
+        .all(|v| v.is_finite() && *v >= 0.0)
+            && m.loss_rate <= 1.0
+            && m.congestion_risk <= 1.0
             && self.compute_cost().is_finite()
     }
 
@@ -170,7 +178,9 @@ impl RouteSelector {
                     &cand.target_region,
                 );
                 let send_dec = self.enforcer.decide(send_req);
-                send_dec.allowed && (is_ciphertext || send_dec.mode != kamish_policy::DestinationMode::SealedOnly)
+                send_dec.allowed
+                    && (is_ciphertext
+                        || send_dec.mode != kamish_policy::DestinationMode::SealedOnly)
             })
             .collect();
 
@@ -197,11 +207,15 @@ impl RouteSelector {
         // Resolve the old route against this call's freshly authorized candidates
         // and measurements. Never let hysteresis retain a revoked/missing route.
         let current = previous.as_ref().and_then(|old| {
-            scored.iter().find(|(candidate, _)| candidate.same_route(old))
+            scored
+                .iter()
+                .find(|(candidate, _)| candidate.same_route(old))
                 .map(|(candidate, _)| (*candidate).clone())
         });
         let chosen = if let Some(current) = current {
-            let dwell = inner.last_switch.get(&key)
+            let dwell = inner
+                .last_switch
+                .get(&key)
                 .is_none_or(|last| now.duration_since(*last) >= self.min_dwell);
             if dwell && best_cost < current.compute_cost() * (1.0 - self.hysteresis_margin) {
                 best_candidate

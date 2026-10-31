@@ -16,7 +16,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum OutboxError {
-    #[error("An unscoped watermark requires exactly one known stream; use advance_partition_watermark")]
+    #[error(
+        "An unscoped watermark requires exactly one known stream; use advance_partition_watermark"
+    )]
     AmbiguousStream,
     #[error("Outbox queue capacity exceeded: current bytes {current}, max {max}")]
     QueueCapacityExceeded { current: usize, max: usize },
@@ -95,7 +97,8 @@ impl OutboxReservation {
                 let additional = actual_size - self.reserved_bytes;
                 if additional > inner.max_bytes.saturating_sub(inner.queued_bytes) {
                     return Err(OutboxError::QueueCapacityExceeded {
-                        current: inner.queued_bytes, max: inner.max_bytes,
+                        current: inner.queued_bytes,
+                        max: inner.max_bytes,
                     });
                 }
                 inner.queued_bytes += additional;
@@ -226,14 +229,20 @@ impl DestinationOutbox {
     /// to unrelated partitions. Multi-stream callers must specify the stream.
     pub fn advance_watermark(&self, new_watermark: u64) -> Result<(), OutboxError> {
         let mut inner = self.inner.write().unwrap();
-        let streams: std::collections::HashSet<_> = inner.watermarks.keys().cloned()
-            .chain(inner.ranges.iter().map(|r| (r.topic.clone(), r.partition))).collect();
+        let streams: std::collections::HashSet<_> = inner
+            .watermarks
+            .keys()
+            .cloned()
+            .chain(inner.ranges.iter().map(|r| (r.topic.clone(), r.partition)))
+            .collect();
         if streams.len() != 1 {
             return Err(OutboxError::AmbiguousStream);
         }
         let key = streams.into_iter().next().unwrap();
         let current = inner.watermarks.get(&key).copied().unwrap_or(0);
-        if new_watermark <= current { return Ok(()); }
+        if new_watermark <= current {
+            return Ok(());
+        }
         inner.watermarks.insert(key.clone(), new_watermark);
         inner.durable_watermark = inner.durable_watermark.max(new_watermark);
         let mut trimmed_bytes = 0;

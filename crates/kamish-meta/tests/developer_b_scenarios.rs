@@ -144,9 +144,10 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
     let traverse_res = chaos.simulate_link_traversal().await;
     assert!(traverse_res.is_ok());
 
+    let avg_per_record = local_duration_degraded / 50;
     println!(
-        " [DEMO SCENARIO B PASSED] Injected 300ms delay increased replication lag to 50 without blocking local produce (local write latency {:?}).",
-        local_duration_degraded
+        " [DEMO SCENARIO B PASSED] Injected 300ms delay increased replication lag to 50 without blocking local produce (50-record batch duration: {:?}, calculated avg per record: {:?}).",
+        local_duration_degraded, avg_per_record
     );
 }
 

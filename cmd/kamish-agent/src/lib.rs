@@ -476,7 +476,8 @@ impl ReplicationAgent {
             .update_watermark(topic, partition, target_region, remote_watermark);
 
         // Repopulate outbox from disk log if there are committed records ahead of remote watermark
-        self.local_broker.repopulate_outbox_from_log(topic, partition, target_region)?;
+        self.local_broker
+            .repopulate_outbox_from_log(topic, partition, target_region)?;
 
         info!(
             target = %target_region,

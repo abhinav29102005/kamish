@@ -613,7 +613,9 @@ impl MetadataStore {
     /// prevents local ownership changes during an append/ack operation. This
     /// does NOT turn this store into a distributed metadata quorum.
     pub fn with_ownership<R>(
-        &self, topic: &str, partition: u32,
+        &self,
+        topic: &str,
+        partition: u32,
         operation: impl FnOnce(Option<&PartitionOwnership>) -> R,
     ) -> R {
         let inner = self.inner.read().unwrap();

@@ -108,9 +108,20 @@ mod cli_tests {
     #[test]
     fn every_subcommand_accepts_help() {
         Cli::command().debug_assert();
-        for command in ["verify-audit", "produce", "consume", "watermark", "demo", "benchmark"] {
+        for command in [
+            "verify-audit",
+            "produce",
+            "consume",
+            "watermark",
+            "demo",
+            "benchmark",
+        ] {
             let error = Cli::try_parse_from(["kamish-ctl", command, "--help"]).unwrap_err();
-            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp, "{command}");
+            assert_eq!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp,
+                "{command}"
+            );
         }
     }
 }

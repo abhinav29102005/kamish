@@ -120,24 +120,48 @@ impl PolicyDocument {
             failover_candidates: &'a [String],
             transit_allowed: bool,
         }
-        let classes: BTreeMap<_, _> = self.classes.iter().map(|(id, rule)| {
-            (id.as_str(), CanonicalClass {
-                class_id: &rule.class_id,
-                description: &rule.description,
-                legal_regions: rule.legal_regions.iter().map(String::as_str).collect(),
-                destination_modes: rule.destination_modes.iter().map(|(r, m)| (r.as_str(), *m)).collect(),
-                ack_mode: rule.ack_mode,
-                failover_candidates: &rule.failover_candidates,
-                transit_allowed: rule.transit_allowed,
+        let classes: BTreeMap<_, _> = self
+            .classes
+            .iter()
+            .map(|(id, rule)| {
+                (
+                    id.as_str(),
+                    CanonicalClass {
+                        class_id: &rule.class_id,
+                        description: &rule.description,
+                        legal_regions: rule.legal_regions.iter().map(String::as_str).collect(),
+                        destination_modes: rule
+                            .destination_modes
+                            .iter()
+                            .map(|(r, m)| (r.as_str(), *m))
+                            .collect(),
+                        ack_mode: rule.ack_mode,
+                        failover_candidates: &rule.failover_candidates,
+                        transit_allowed: rule.transit_allowed,
+                    },
+                )
             })
-        }).collect();
-        let transit: BTreeMap<_, BTreeSet<_>> = self.transit_rules.iter().map(|(source, regions)| {
-            (source.as_str(), regions.iter().map(String::as_str).collect())
-        }).collect();
+            .collect();
+        let transit: BTreeMap<_, BTreeSet<_>> = self
+            .transit_rules
+            .iter()
+            .map(|(source, regions)| {
+                (
+                    source.as_str(),
+                    regions.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
         let serialized = serde_json::to_vec(&(
-            &self.policy_id, self.version, self.issued_at_sec, self.ttl_seconds,
-            &self.issuer_pubkey_hex, classes, transit,
-        )).expect("policy contains only serializable primitive values");
+            &self.policy_id,
+            self.version,
+            self.issued_at_sec,
+            self.ttl_seconds,
+            &self.issuer_pubkey_hex,
+            classes,
+            transit,
+        ))
+        .expect("policy contains only serializable primitive values");
         let mut hasher = Sha256::new();
         hasher.update(b"kamish-policy-signature-v2\0");
         hasher.update(&serialized);
@@ -200,7 +224,9 @@ impl SignedPolicy {
     }
 
     fn expires_at(&self) -> Option<i64> {
-        self.policy.issued_at_sec.checked_add(i64::try_from(self.policy.ttl_seconds).ok()?)
+        self.policy
+            .issued_at_sec
+            .checked_add(i64::try_from(self.policy.ttl_seconds).ok()?)
     }
 }
 
