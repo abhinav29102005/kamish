@@ -2,15 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
+export default function KamishDragon3D({ isFlameOn }) {
   const mountRef = useRef(null);
-  const flameRef = useRef(isFlameOn || isKillMode);
-  const killModeRef = useRef(isKillMode);
+  const flameRef = useRef(isFlameOn);
   const [loadProgress, setLoadProgress] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  flameRef.current = isFlameOn || isKillMode;
-  killModeRef.current = isKillMode;
+  flameRef.current = isFlameOn;
 
   useEffect(() => {
     const container = mountRef.current;
@@ -22,36 +20,35 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
     // 1. Scene Setup
     const scene = new THREE.Scene();
 
-    // 2. Camera Setup: Tuned FOV and distance for full wingspan visibility with massive presence
+    // 2. Camera Setup (Locked, non-movable by user, positioned for full wingspan)
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 1000);
-    const baseCamPos = new THREE.Vector3(0, 0.04, 3.85);
-    camera.position.copy(baseCamPos);
+    camera.position.set(0, 0.05, 3.8);
 
-    // 3. Renderer with High Dynamic Range & Tone Mapping
+    // 3. Renderer with HDR & Filmic Tone Mapping
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.45;
+    renderer.toneMappingExposure = 1.48;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(renderer.domElement);
 
-    // 4. Cinematic Multi-Point Lighting System
-    const ambientLight = new THREE.AmbientLight(0x281245, 2.2);
+    // 4. Atmospheric Sovereign Lighting
+    const ambientLight = new THREE.AmbientLight(0x281245, 2.3);
     scene.add(ambientLight);
 
-    // Key Light
-    const keyLight = new THREE.DirectionalLight(0xfff7ed, 3.6);
+    // Key Light: Specular highlights on dragon skull & horns
+    const keyLight = new THREE.DirectionalLight(0xfff7ed, 3.8);
     keyLight.position.set(3.5, 4.5, 4.5);
     scene.add(keyLight);
 
-    // Fill Light
+    // Fill Light: Soft violet fill
     const fillLight = new THREE.DirectionalLight(0x9333ea, 2.6);
     fillLight.position.set(-3.5, -1, 3);
     scene.add(fillLight);
 
-    // High-Intensity Rim / Backlight for razor-sharp wing silhouettes
-    const rimLight = new THREE.DirectionalLight(0xc084fc, 6.0);
+    // Rim / Backlight: High intensity for glowing wing margins
+    const rimLight = new THREE.DirectionalLight(0xc084fc, 6.2);
     rimLight.position.set(0, 3.5, -4.0);
     scene.add(rimLight);
 
@@ -60,21 +57,21 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
     upLight.position.set(0, -3.5, 1.5);
     scene.add(upLight);
 
-    // Mouth / Inferno Maw Light
+    // Mouth / Flame Point Light
     const mouthLight = new THREE.PointLight(0xa855f7, 0, 18);
     mouthLight.position.set(0, 0.52, 1.15);
     scene.add(mouthLight);
 
-    // 5. Root Group for Dragon
+    // 5. Root Group for Dragon (Locked orientation, user cannot rotate or drag)
     const dragonRoot = new THREE.Group();
     scene.add(dragonRoot);
 
-    let dragonModel = null;
+    let mixer = null;
     let modelMaterials = [];
 
     // 6. Volumetric Hellfire Particle System
-    // Core Flame (500 particles)
-    const flameCount = 500;
+    // Core Flame
+    const flameCount = 450;
     const flameGeo = new THREE.BufferGeometry();
     const flamePos = new Float32Array(flameCount * 3);
     const flameVels = [];
@@ -84,8 +81,8 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
       flamePos[i * 3 + 1] = 0;
       flamePos[i * 3 + 2] = 0;
       flameVels.push({
-        x: (Math.random() - 0.5) * 0.45,
-        y: -0.1 - Math.random() * 0.35,
+        x: (Math.random() - 0.5) * 0.42,
+        y: -0.1 - Math.random() * 0.32,
         z: 1.2 + Math.random() * 1.8,
         life: Math.random(),
       });
@@ -106,8 +103,8 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
     flamePoints.position.set(0, 0.45, 0.7);
     dragonRoot.add(flamePoints);
 
-    // Swirling Fiery Embers & Sparks (200 particles)
-    const emberCount = 200;
+    // Swirling Embers
+    const emberCount = 180;
     const emberGeo = new THREE.BufferGeometry();
     const emberPos = new Float32Array(emberCount * 3);
     const emberVels = [];
@@ -117,9 +114,9 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
       emberPos[i * 3 + 1] = (Math.random() - 0.5) * 0.4;
       emberPos[i * 3 + 2] = (Math.random() - 0.5) * 0.4;
       emberVels.push({
-        x: (Math.random() - 0.5) * 0.75,
-        y: (Math.random() - 0.2) * 0.65,
-        z: (Math.random() - 0.5) * 0.75,
+        x: (Math.random() - 0.5) * 0.7,
+        y: (Math.random() - 0.2) * 0.6,
+        z: (Math.random() - 0.5) * 0.7,
         life: Math.random(),
       });
     }
@@ -127,7 +124,7 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
     emberGeo.setAttribute('position', new THREE.BufferAttribute(emberPos, 3));
 
     const emberMat = new THREE.PointsMaterial({
-      size: 0.09,
+      size: 0.08,
       color: 0xffffff,
       transparent: true,
       opacity: 0.0,
@@ -139,12 +136,12 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
     emberPoints.position.set(0, 0.45, 0.7);
     dragonRoot.add(emberPoints);
 
-    // 7. Load Real Dragon GLB Model
+    // 7. Load Real Dragon Animated GLB Model (Slow Flying Animation from Blender)
     const loader = new GLTFLoader();
     loader.load(
-      '/models/kamish_dragon.glb',
+      '/models/kamish_dragon_animated.glb',
       (gltf) => {
-        dragonModel = gltf.scene;
+        const dragonModel = gltf.scene;
 
         // Auto-center geometry bounding box
         const box = new THREE.Box3().setFromObject(dragonModel);
@@ -155,7 +152,7 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
         dragonModel.position.y -= center.y;
         dragonModel.position.z -= center.z;
 
-        // Perfectly scaled to fill width without clipping (3.35 unit wingspan)
+        // Scale to fill viewport gracefully without cropping
         const maxDim = Math.max(size.x, size.y, size.z);
         const desiredScale = 3.35 / maxDim;
         dragonRoot.scale.set(desiredScale, desiredScale, desiredScale);
@@ -171,6 +168,14 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
           }
         });
 
+        // Initialize Blender Flying Animation
+        if (gltf.animations && gltf.animations.length > 0) {
+          mixer = new THREE.AnimationMixer(dragonModel);
+          const flightAction = mixer.clipAction(gltf.animations[0]);
+          flightAction.setEffectiveTimeScale(0.35); // Slow, majestic, hypnotic wing strokes
+          flightAction.play();
+        }
+
         dragonRoot.add(dragonModel);
         setIsLoaded(true);
       },
@@ -181,183 +186,55 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
         }
       },
       (err) => {
-        console.error('Failed to load Kamish dragon model:', err);
+        console.error('Failed to load Kamish dragon animated model:', err);
       }
     );
 
-    // 8. Interaction: Drag-to-Orbit & Cursor Parallax
-    let targetRotY = 0;
-    let targetRotX = 0;
-    let isDragging = false;
-    let prevMouse = { x: 0, y: 0 };
-    let mouseParallax = { x: 0, y: 0 };
-
-    const onMouseDown = (e) => {
-      isDragging = true;
-      prevMouse = { x: e.clientX, y: e.clientY };
-    };
-
-    const onMouseMove = (e) => {
-      const normX = (e.clientX / window.innerWidth) * 2 - 1;
-      const normY = -(e.clientY / window.innerHeight) * 2 + 1;
-      mouseParallax.x = normX * 0.28;
-      mouseParallax.y = normY * 0.16;
-
-      if (isDragging) {
-        const deltaX = e.clientX - prevMouse.x;
-        const deltaY = e.clientY - prevMouse.y;
-        targetRotY += deltaX * 0.008;
-        targetRotX += deltaY * 0.005;
-        prevMouse = { x: e.clientX, y: e.clientY };
-      }
-    };
-
-    const onMouseUp = () => {
-      isDragging = false;
-    };
-
-    window.addEventListener('mousedown', onMouseDown);
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-
-    // Touch support for mobile/tablets
-    const onTouchStart = (e) => {
-      if (e.touches.length === 1) {
-        isDragging = true;
-        prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      }
-    };
-    const onTouchMove = (e) => {
-      if (isDragging && e.touches.length === 1) {
-        const deltaX = e.touches[0].clientX - prevMouse.x;
-        const deltaY = e.touches[0].clientY - prevMouse.y;
-        targetRotY += deltaX * 0.008;
-        targetRotX += deltaY * 0.005;
-        prevMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-      }
-    };
-    const onTouchEnd = () => {
-      isDragging = false;
-    };
-
-    window.addEventListener('touchstart', onTouchStart);
-    window.addEventListener('touchmove', onTouchMove);
-    window.addEventListener('touchend', onTouchEnd);
-
-    // 9. Main Animation Loop
+    // 8. Animation Loop (Strictly autonomous, user cannot move the dragon)
     let clock = new THREE.Clock();
     let animId;
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
+      const delta = clock.getDelta();
       const elapsedTime = clock.getElapsedTime();
 
-      const isKill = killModeRef.current;
+      // Play Blender Slow Flying Animation
+      if (mixer) {
+        mixer.update(delta);
+      }
+
+      // Gentle Autonomous Sovereign Hover (No user drag/movement)
+      const hoverY = Math.sin(elapsedTime * 1.1) * 0.04;
+      const hoverTilt = Math.sin(elapsedTime * 0.8) * 0.015;
+      const hoverTurn = Math.sin(elapsedTime * 0.4) * 0.06;
+
+      dragonRoot.position.y = hoverY;
+      dragonRoot.rotation.z = hoverTilt;
+      dragonRoot.rotation.y = hoverTurn;
+
       const isFlame = flameRef.current;
 
-      // Respiration & Hovering
-      const breatheSpeed = isKill ? 2.5 : 1.3;
-      const breatheY = Math.sin(elapsedTime * breatheSpeed) * (isKill ? 0.07 : 0.05);
-      const breatheTilt = Math.sin(elapsedTime * (breatheSpeed * 0.8)) * 0.025;
-
-      dragonRoot.position.y = breatheY;
-      dragonRoot.rotation.z = breatheTilt;
-
-      // Smooth Rotation & Cursor Following
-      if (!isDragging) {
-        const autoSweep = Math.sin(elapsedTime * 0.4) * 0.12;
-        dragonRoot.rotation.y += (targetRotY + autoSweep + mouseParallax.x - dragonRoot.rotation.y) * 0.05;
-        dragonRoot.rotation.x += (targetRotX + mouseParallax.y - dragonRoot.rotation.x) * 0.05;
-      } else {
-        dragonRoot.rotation.y += (targetRotY - dragonRoot.rotation.y) * 0.1;
-        dragonRoot.rotation.x += (targetRotX - dragonRoot.rotation.x) * 0.1;
-      }
-
-      // 10. KILL MODE vs SOVEREIGN SHADOW MODE
-      if (isKill) {
-        // KILL MODE: Ominous apocalyptic blood crimson theme
-        ambientLight.color.setHex(0x1a0408);
-        ambientLight.intensity = 1.6;
-
-        keyLight.color.setHex(0xff1e38);
-        keyLight.intensity = 5.2;
-
-        fillLight.color.setHex(0xff5500);
-        fillLight.intensity = 3.8;
-
-        rimLight.color.setHex(0xff0044);
-        rimLight.intensity = 8.5;
-
-        upLight.color.setHex(0x991b1b);
-        upLight.intensity = 3.2;
-
-        mouthLight.color.setHex(0xff2a00);
-        mouthLight.intensity = 22.0 + Math.sin(elapsedTime * 30.0) * 7.0;
-
-        flameMat.color.setHex(0xff3300);
-        emberMat.color.setHex(0xffdd44);
-
-        // Sinister volcanic scale texture with pulsing magma veins
-        modelMaterials.forEach((m) => {
-          m.color.setHex(0xff6655);
-          m.emissive.setHex(0x8b0000);
-          m.emissiveIntensity = 1.0 + Math.sin(elapsedTime * 10.0) * 0.3;
-        });
-
-        // Visceral Camera Rumble in Kill Mode
-        const shakeMagnitude = 0.007;
-        camera.position.x = baseCamPos.x + (Math.random() - 0.5) * shakeMagnitude;
-        camera.position.y = baseCamPos.y + (Math.random() - 0.5) * shakeMagnitude;
-        camera.position.z = THREE.MathUtils.lerp(camera.position.z, 3.65, 0.05);
-      } else {
-        // NORMAL SHADOW MONARCH MODE: Deep void obsidian & amethyst
-        ambientLight.color.setHex(0x281245);
-        ambientLight.intensity = 2.2;
-
-        keyLight.color.setHex(0xfff7ed);
-        keyLight.intensity = 3.6;
-
-        fillLight.color.setHex(0x9333ea);
-        fillLight.intensity = 2.6;
-
-        rimLight.color.setHex(0xc084fc);
-        rimLight.intensity = 6.0;
-
-        upLight.color.setHex(0x581c87);
-        upLight.intensity = 2.2;
-
-        mouthLight.color.setHex(0xd8b4fe);
-        flameMat.color.setHex(0xc084fc);
-        emberMat.color.setHex(0xf3e8ff);
+      // Dynamic Flame Eruption when FLAME ON is active
+      if (isFlame) {
+        mouthLight.intensity = 14.0 + Math.sin(elapsedTime * 24.0) * 5.0;
+        flameMat.opacity = 0.94;
+        emberMat.opacity = 0.88;
 
         modelMaterials.forEach((m) => {
-          m.color.setHex(0xffffff);
-          m.emissive.setHex(0x19082e);
-          m.emissiveIntensity = isFlame ? 0.6 : 0.15;
+          m.emissive.setHex(0x3a125c);
+          m.emissiveIntensity = 0.55;
         });
 
-        camera.position.x = THREE.MathUtils.lerp(camera.position.x, baseCamPos.x, 0.1);
-        camera.position.y = THREE.MathUtils.lerp(camera.position.y, baseCamPos.y, 0.1);
-        camera.position.z = THREE.MathUtils.lerp(camera.position.z, baseCamPos.z, 0.08);
-      }
-
-      // Flame Eruption Animation
-      if (isFlame || isKill) {
-        if (!isKill) {
-          mouthLight.intensity = 11.0 + Math.sin(elapsedTime * 22.0) * 4.5;
-        }
-        flameMat.opacity = isKill ? 0.96 : 0.9;
-        emberMat.opacity = isKill ? 0.92 : 0.8;
-
-        // Core flame particle simulation
+        // Core flame particle stream
         const positions = flameGeo.attributes.position.array;
         for (let i = 0; i < flameCount; i++) {
           const vel = flameVels[i];
-          positions[i * 3] += vel.x * (isKill ? 1.2 : 1.0);
-          positions[i * 3 + 1] += (vel.y + 0.015) * (isKill ? 1.2 : 1.0);
-          positions[i * 3 + 2] += vel.z * (isKill ? 0.11 : 0.09);
+          positions[i * 3] += vel.x;
+          positions[i * 3 + 1] += vel.y + 0.015;
+          positions[i * 3 + 2] += vel.z * 0.1;
 
-          vel.life -= isKill ? 0.042 : 0.034;
+          vel.life -= 0.035;
           if (vel.life <= 0) {
             positions[i * 3] = (Math.random() - 0.5) * 0.12;
             positions[i * 3 + 1] = (Math.random() - 0.5) * 0.12;
@@ -367,13 +244,13 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
         }
         flameGeo.attributes.position.needsUpdate = true;
 
-        // Ember sparks particle simulation
+        // Ember sparks particle stream
         const ePos = emberGeo.attributes.position.array;
         for (let j = 0; j < emberCount; j++) {
           const ev = emberVels[j];
-          ePos[j * 3] += ev.x * (isKill ? 0.1 : 0.08);
-          ePos[j * 3 + 1] += ev.y * (isKill ? 0.1 : 0.08);
-          ePos[j * 3 + 2] += ev.z * (isKill ? 0.1 : 0.08);
+          ePos[j * 3] += ev.x * 0.08;
+          ePos[j * 3 + 1] += ev.y * 0.08;
+          ePos[j * 3 + 2] += ev.z * 0.08;
 
           ev.life -= 0.02;
           if (ev.life <= 0) {
@@ -388,6 +265,11 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
         mouthLight.intensity = THREE.MathUtils.lerp(mouthLight.intensity, 0, 0.1);
         flameMat.opacity = THREE.MathUtils.lerp(flameMat.opacity, 0, 0.1);
         emberMat.opacity = THREE.MathUtils.lerp(emberMat.opacity, 0, 0.1);
+
+        modelMaterials.forEach((m) => {
+          m.emissive.setHex(0x19082e);
+          m.emissiveIntensity = 0.18;
+        });
       }
 
       renderer.render(scene, camera);
@@ -409,12 +291,6 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
-      window.removeEventListener('mousedown', onMouseDown);
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
       if (container && renderer.domElement) {
         container.removeChild(renderer.domElement);
       }
@@ -427,7 +303,8 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
       style={{
         position: 'relative',
         width: '100%',
-        height: '620px', // Perfectly proportioned height with zero cropping
+        height: '620px',
+        userSelect: 'none',
       }}
     >
       <div
@@ -435,7 +312,7 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
         style={{
           width: '100%',
           height: '100%',
-          cursor: isKillMode ? 'crosshair' : 'grab',
+          cursor: 'default', // non-movable by user
         }}
       />
 
@@ -479,9 +356,7 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
               style={{
                 width: `${Math.max(loadProgress, 18)}%`,
                 height: '100%',
-                background: isKillMode
-                  ? 'linear-gradient(90deg, #ff1e38, #ff6b35, #ffffff)'
-                  : 'linear-gradient(90deg, #a855f7, #c084fc, #ffffff)',
+                background: 'linear-gradient(90deg, #a855f7, #c084fc, #ffffff)',
                 transition: 'width 0.2s ease',
               }}
             />
@@ -495,26 +370,23 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
               letterSpacing: '0.12em',
             }}
           >
-            REAL 3D ANCIENT DRAGON · PBR TEXTURES
+            SLOW FLYING DRAGON · BLENDER ANIMATION
           </div>
         </div>
       )}
 
-      {/* Volumetric Calamity Nebula Aura behind the Dragon */}
+      {/* Atmospheric Nebula Aura behind the Dragon */}
       <div
         style={{
           position: 'absolute',
-          top: '40%',
+          top: '38%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: isKillMode ? '640px' : '540px',
-          height: isKillMode ? '480px' : '400px',
-          background: isKillMode
-            ? 'radial-gradient(ellipse at center, rgba(255, 30, 56, 0.45) 0%, rgba(185, 28, 28, 0.2) 45%, transparent 75%)'
-            : 'radial-gradient(ellipse at center, rgba(168, 85, 247, 0.38) 0%, rgba(147, 51, 234, 0.16) 45%, transparent 75%)',
+          width: '560px',
+          height: '420px',
+          background: 'radial-gradient(ellipse at center, rgba(168, 85, 247, 0.38) 0%, rgba(147, 51, 234, 0.16) 45%, transparent 75%)',
           filter: 'blur(45px)',
           pointerEvents: 'none',
-          transition: 'all 0.5s ease',
           zIndex: 0,
         }}
       />
@@ -526,14 +398,11 @@ export default function KamishDragon3D({ isFlameOn, isKillMode = false }) {
           bottom: '8%',
           left: '50%',
           transform: 'translateX(-50%)',
-          width: isKillMode ? '480px' : '420px',
+          width: '420px',
           height: '65px',
-          background: isKillMode
-            ? 'radial-gradient(ellipse at center, rgba(255, 30, 56, 0.5) 0%, transparent 70%)'
-            : 'radial-gradient(ellipse at center, rgba(168, 85, 247, 0.4) 0%, transparent 70%)',
+          background: 'radial-gradient(ellipse at center, rgba(168, 85, 247, 0.4) 0%, transparent 70%)',
           filter: 'blur(20px)',
           pointerEvents: 'none',
-          transition: 'all 0.5s ease',
           zIndex: 0,
         }}
       />
