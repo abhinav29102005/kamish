@@ -5,3 +5,7 @@ data/
 
 model/*.obj
 
+
+# Local Environment & Secrets
+.env
+.env.*
