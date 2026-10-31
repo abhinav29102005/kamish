@@ -76,7 +76,7 @@ impl KamishProducer {
                 topic,
                 format!("{}-{}", topic, partition),
                 self.local_region.clone(),
-                residency_rule,
+                residency_rule.clone(),
                 payload.clone(),
             );
             if let Err(violation) = engine.validate_ingestion(&event, &self.local_region) {
@@ -93,6 +93,7 @@ impl KamishProducer {
             sequence_base: seq,
             class_id: class_id.to_string(),
             payload,
+            residency_rule: Some(residency_rule),
         });
 
         let mut client = self.client.lock().await;
