@@ -38,6 +38,9 @@ pub enum LogError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Log directory {0:?} is locked by another physical process (W14)")]
+    LockedByAnotherProcess(PathBuf),
+
     #[error("Invalid record magic byte: {0:#x}")]
     InvalidMagic(u16),
 
@@ -328,6 +331,36 @@ impl std::fmt::Debug for PartitionLog {
     }
 }
 
+/// Physical file lock preventing multiple processes from concurrently mutating a partition log (W14).
+#[derive(Debug)]
+pub struct PartitionLock {
+    _file: File,
+}
+
+impl PartitionLock {
+    pub fn acquire(dir: &Path) -> Result<Self, LogError> {
+        let lock_path = dir.join(".lock");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            let fd = file.as_raw_fd();
+            let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+            if ret != 0 {
+                return Err(LogError::LockedByAnotherProcess(dir.to_path_buf()));
+            }
+        }
+
+        Ok(Self { _file: file })
+    }
+}
+
 struct PartitionLogInner {
     dir: PathBuf,
     current_epoch: u64,
@@ -335,12 +368,14 @@ struct PartitionLogInner {
     high_watermark: u64,
     records: Vec<RecordEnvelope>,
     fenced_reason: Option<String>,
+    _lock: PartitionLock,
 }
 
 impl PartitionLog {
     pub fn open<P: AsRef<Path>>(dir: P, initial_epoch: u64) -> Result<Self, LogError> {
         let dir_buf = dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&dir_buf)?;
+        let lock = PartitionLock::acquire(&dir_buf)?;
 
         let log_file = dir_buf.join("partition.data");
         let mut records = Vec::new();
@@ -420,6 +455,7 @@ impl PartitionLog {
                 high_watermark,
                 records,
                 fenced_reason: None,
+                _lock: lock,
             })),
             writer_lock: Arc::new(std::sync::Mutex::new(None)),
         })
@@ -676,6 +712,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_two_processes_opening_same_log_directory_reject() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let log1 = PartitionLog::open(temp_dir.path(), 1).unwrap();
+
+        // Attempting to open the same partition log concurrently must fail with LockedByAnotherProcess
+        let open_res = PartitionLog::open(temp_dir.path(), 1);
+        assert!(matches!(open_res, Err(LogError::LockedByAnotherProcess(_))));
+
+        // Dropping the original log releases the lock
+        drop(log1);
+        assert!(PartitionLog::open(temp_dir.path(), 1).is_ok());
+    }
+
+    #[test]
     fn test_monotonic_offset_and_crc_verification() {
         let temp_dir = tempfile::tempdir().unwrap();
         let log = PartitionLog::open(temp_dir.path(), 1).unwrap();
@@ -700,6 +750,9 @@ mod tests {
         assert_eq!(records[1].base_offset, 1);
         assert!(records[0].verify_checksum());
         assert!(records[1].verify_checksum());
+
+        // Drop log before reopening to release partition lock (W14)
+        drop(log);
 
         // Reopening preserves monotonic state
         let reopened = PartitionLog::open(temp_dir.path(), 1).unwrap();
@@ -822,6 +875,9 @@ mod tests {
             .unwrap();
         assert_eq!(o3, 3);
         assert_eq!(recovered.high_watermark(), 4);
+
+        // Drop recovered before reopening to release partition lock (W14)
+        drop(recovered);
 
         // 5. Subsequent reopen finds all 4 valid records intact
         let reopened = PartitionLog::open(&path, 1).unwrap();
