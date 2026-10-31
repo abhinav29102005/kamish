@@ -54,7 +54,7 @@ impl OutboxRange {
 #[derive(Clone)]
 pub struct DestinationOutbox {
     target_region: String,
-    max_bytes: usize,
+    #[allow(dead_code)]
     backpressure: BackpressureRule,
     inner: Arc<RwLock<OutboxInner>>,
 }
@@ -63,6 +63,51 @@ struct OutboxInner {
     ranges: VecDeque<OutboxRange>,
     queued_bytes: usize,
     durable_watermark: u64,
+    max_bytes: usize,
+}
+
+/// An atomic capacity reservation ticket for a `DestinationOutbox`.
+///
+/// Ensures zero-race admission control across concurrent producers and
+/// atomicity across multi-destination replication pipelines.
+pub struct OutboxReservation {
+    outbox: DestinationOutbox,
+    reserved_bytes: usize,
+    committed: bool,
+}
+
+impl OutboxReservation {
+    pub fn reserved_bytes(&self) -> usize {
+        self.reserved_bytes
+    }
+
+    /// Commits this reservation by enqueueing the provided range.
+    ///
+    /// Adjusts `queued_bytes` if the actual range size differs from the initial reservation estimate.
+    pub fn commit(mut self, range: OutboxRange) {
+        self.committed = true;
+        let actual_size = range.byte_size();
+        let mut inner = self.outbox.inner.write().unwrap();
+        if actual_size != self.reserved_bytes {
+            if actual_size > self.reserved_bytes {
+                inner.queued_bytes += actual_size - self.reserved_bytes;
+            } else {
+                inner.queued_bytes = inner
+                    .queued_bytes
+                    .saturating_sub(self.reserved_bytes - actual_size);
+            }
+        }
+        inner.ranges.push_back(range);
+    }
+}
+
+impl Drop for OutboxReservation {
+    fn drop(&mut self) {
+        if !self.committed && self.reserved_bytes > 0 {
+            let mut inner = self.outbox.inner.write().unwrap();
+            inner.queued_bytes = inner.queued_bytes.saturating_sub(self.reserved_bytes);
+        }
+    }
 }
 
 impl DestinationOutbox {
@@ -73,47 +118,49 @@ impl DestinationOutbox {
     ) -> Self {
         Self {
             target_region: target_region.into(),
-            max_bytes,
             backpressure,
             inner: Arc::new(RwLock::new(OutboxInner {
                 ranges: VecDeque::new(),
                 queued_bytes: 0,
                 durable_watermark: 0,
+                max_bytes,
             })),
         }
     }
 
-    /// Enqueues a new replication range, enforcing bounded queue capacity (§2.4, §2.7.3).
-    pub fn enqueue(&self, range: OutboxRange) -> Result<(), OutboxError> {
+    /// Atomically checks and reserves replication outbox byte capacity.
+    ///
+    /// If capacity is available, increments `queued_bytes` immediately under
+    /// the write lock and returns an `OutboxReservation` ticket.
+    ///
+    /// If the ticket is committed via `reservation.commit(range)`, the range is placed into the queue.
+    /// If the ticket is dropped before commit (e.g., local log append failure or multi-destination abort),
+    /// the reserved capacity is automatically rolled back via `Drop`.
+    pub fn reserve_capacity(
+        &self,
+        additional_bytes: usize,
+    ) -> Result<OutboxReservation, OutboxError> {
         let mut inner = self.inner.write().unwrap();
-        let range_size = range.byte_size();
-
-        if inner.queued_bytes + range_size > self.max_bytes {
-            match self.backpressure {
-                BackpressureRule::Reject => {
-                    return Err(OutboxError::QueueCapacityExceeded {
-                        current: inner.queued_bytes,
-                        max: self.max_bytes,
-                    });
-                }
-                BackpressureRule::DegradeLocal => {
-                    // In DegradeLocal mode, queue drops oldest or halts replication for this class
-                    return Err(OutboxError::QueueCapacityExceeded {
-                        current: inner.queued_bytes,
-                        max: self.max_bytes,
-                    });
-                }
-                BackpressureRule::Block => {
-                    return Err(OutboxError::QueueCapacityExceeded {
-                        current: inner.queued_bytes,
-                        max: self.max_bytes,
-                    });
-                }
-            }
+        if inner.queued_bytes + additional_bytes > inner.max_bytes {
+            return Err(OutboxError::QueueCapacityExceeded {
+                current: inner.queued_bytes,
+                max: inner.max_bytes,
+            });
         }
 
-        inner.queued_bytes += range_size;
-        inner.ranges.push_back(range);
+        inner.queued_bytes += additional_bytes;
+        Ok(OutboxReservation {
+            outbox: self.clone(),
+            reserved_bytes: additional_bytes,
+            committed: false,
+        })
+    }
+
+    /// Enqueues a new replication range, enforcing bounded queue capacity (§2.4, §2.7.3).
+    pub fn enqueue(&self, range: OutboxRange) -> Result<(), OutboxError> {
+        let range_size = range.byte_size();
+        let reservation = self.reserve_capacity(range_size)?;
+        reservation.commit(range);
         Ok(())
     }
 
@@ -157,11 +204,15 @@ impl DestinationOutbox {
 
     pub fn has_capacity(&self, additional_bytes: usize) -> bool {
         let inner = self.inner.read().unwrap();
-        inner.queued_bytes + additional_bytes <= self.max_bytes
+        inner.queued_bytes + additional_bytes <= inner.max_bytes
     }
 
     pub fn max_bytes(&self) -> usize {
-        self.max_bytes
+        self.inner.read().unwrap().max_bytes
+    }
+
+    pub fn set_max_bytes(&self, new_max: usize) {
+        self.inner.write().unwrap().max_bytes = new_max;
     }
 
     pub fn durable_watermark(&self) -> u64 {
@@ -170,6 +221,18 @@ impl DestinationOutbox {
 
     pub fn target_region(&self) -> &str {
         &self.target_region
+    }
+
+    /// Checks if a given offset has already been queued or acknowledged.
+    pub fn contains_offset(&self, offset: u64) -> bool {
+        let inner = self.inner.read().unwrap();
+        if offset < inner.durable_watermark {
+            return true;
+        }
+        inner
+            .ranges
+            .iter()
+            .any(|r| r.start_offset <= offset && offset < r.end_offset)
     }
 }
 
@@ -242,5 +305,44 @@ mod tests {
 
         let err = outbox.enqueue(r1).unwrap_err();
         assert!(matches!(err, OutboxError::QueueCapacityExceeded { .. }));
+    }
+
+    #[test]
+    fn test_outbox_atomic_reservation_and_rollback() {
+        let outbox = DestinationOutbox::new("region-c", 300, BackpressureRule::Reject);
+
+        // 1. Reserve 200 bytes
+        let res1 = outbox.reserve_capacity(200).expect("res1 should succeed");
+        assert_eq!(outbox.queued_bytes(), 200);
+
+        // 2. Try reserving 150 bytes -> 200 + 150 = 350 > 300 -> Fails
+        let res2_err = outbox.reserve_capacity(150);
+        assert!(res2_err.is_err());
+        assert_eq!(outbox.queued_bytes(), 200);
+
+        // 3. Drop res1 without commit -> Automatically rolls back queued bytes
+        drop(res1);
+        assert_eq!(outbox.queued_bytes(), 0);
+
+        // 4. Now 150 bytes reservation succeeds
+        let res3 = outbox.reserve_capacity(150).expect("res3 should succeed");
+        assert_eq!(outbox.queued_bytes(), 150);
+
+        // 5. Commit reservation with range
+        let r = OutboxRange {
+            topic: "events".to_string(),
+            partition: 0,
+            epoch: 1,
+            start_offset: 0,
+            end_offset: 1,
+            class_id: "standard".to_string(),
+            payload: vec![0; 86], // 86 + 64 = 150 bytes
+            is_sealed: false,
+        };
+        res3.commit(r);
+
+        assert_eq!(outbox.queued_bytes(), 150);
+        assert_eq!(outbox.next_transfer_batch(10).len(), 1);
+        assert!(outbox.contains_offset(0));
     }
 }

@@ -17,7 +17,7 @@ use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
 use kamish_log::{LogError, PartitionLog, RecordEnvelope, SessionError, SessionManager};
 use kamish_meta::{MetadataStore, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
-use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxRange};
+use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -37,6 +37,9 @@ pub enum BrokerError {
 
     #[error("Policy denied operation: {0}")]
     PolicyDenied(String),
+
+    #[error("Outbox error: {0}")]
+    Outbox(#[from] OutboxError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -327,7 +330,13 @@ impl BrokerServer {
         }
 
         // 3.5. Outbox Capacity Admission Control & Backpressure Pre-check (§3.2.4, INV-3)
+        // 3.5. Outbox Capacity Admission Control & Atomic Reservation (§3.2.4, INV-3)
+        // Check policy and atomically reserve capacity in all permitted destination outboxes.
+        // If ANY destination outbox has insufficient capacity, all reservations are rolled back
+        // and the write is rejected BEFORE appending to the local commit log.
         let estimated_range_size = req.payload.len() + 64;
+        let mut reservations = Vec::new();
+
         for peer in &self.known_peers {
             let target_region_id = parse_region_id(peer);
             #[allow(clippy::collapsible_if)]
@@ -349,29 +358,41 @@ impl BrokerServer {
             let send_decision = self.enforcer.decide(send_req);
             if send_decision.allowed {
                 let outbox = self.get_or_create_outbox(peer);
-                if !outbox.has_capacity(estimated_range_size) {
-                    tracing::warn!(
-                        topic = %req.topic,
-                        target = %peer,
-                        queued = outbox.queued_bytes(),
-                        max = outbox.max_bytes(),
-                        "Replication outbox capacity exceeded; rejecting write with backpressure"
-                    );
-                    return Ok(ProduceResponse {
-                        base_offset: 0,
-                        count: 0,
-                        committed_epoch: 0,
-                        sovereignty_allowed: false,
-                        denial_reason: format!(
-                            "Backpressure: destination outbox for '{}' full",
-                            peer
-                        ),
-                    });
+                match outbox.reserve_capacity(estimated_range_size) {
+                    Ok(reservation) => {
+                        let is_sealed = send_decision.mode == DestinationMode::SealedOnly;
+                        reservations.push((peer.clone(), reservation, is_sealed));
+                    }
+                    Err(OutboxError::QueueCapacityExceeded { current, max }) => {
+                        tracing::warn!(
+                            topic = %req.topic,
+                            target = %peer,
+                            current = current,
+                            max = max,
+                            "Replication outbox capacity exceeded; rejecting write with backpressure"
+                        );
+                        // Explicitly clear/drop any reservations acquired for previous peers
+                        drop(reservations);
+                        return Ok(ProduceResponse {
+                            base_offset: 0,
+                            count: 0,
+                            committed_epoch: 0,
+                            sovereignty_allowed: false,
+                            denial_reason: format!(
+                                "Backpressure: destination outbox for '{}' full",
+                                peer
+                            ),
+                        });
+                    }
+                    Err(e) => {
+                        return Err(BrokerError::Outbox(e));
+                    }
                 }
             }
         }
 
         // 4. Append to persistent segmented commit log with fsync durability (INV-1, INV-2)
+        // Note: If log.append fails, `reservations` is dropped and capacity is safely rolled back via RAII.
         let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
         let offset = log.append(
             epoch,
@@ -388,55 +409,19 @@ impl BrokerServer {
             offset,
         );
 
-        // 5. Cross-Region Replication Planning & EGRESS INTERCEPTOR HOOK (§3.B)
-        for peer in &self.known_peers {
-            let target_region_id = parse_region_id(peer);
-
-            // --- EGRESS INTERCEPTOR HOOK: Call PolicyEngine (§3.B) ---
-            #[allow(clippy::collapsible_if)]
-            if let Some(ref engine) = self.policy_engine {
-                if let Err(violation) =
-                    engine.validate_replication(&stream_event, &self.region_id, &target_region_id)
-                {
-                    tracing::warn!(
-                        topic = %req.topic,
-                        source = %self.region,
-                        target = %peer,
-                        violation = %violation,
-                        "Egress replication interceptor hook BLOCKED transfer"
-                    );
-                    continue; // Prohibited from outbox egress!
-                }
-            }
-
-            let send_req = EnforcementRequest::new(
-                AuditAction::ReplicationSender,
-                &req.class_id,
-                &self.region,
-                peer,
-            );
-            let send_decision = self.enforcer.decide(send_req);
-            if send_decision.allowed {
-                let is_sealed = send_decision.mode == DestinationMode::SealedOnly;
-                let outbox = self.get_or_create_outbox(peer);
-                let range = OutboxRange {
-                    topic: req.topic.clone(),
-                    partition: req.partition,
-                    epoch,
-                    start_offset: offset,
-                    end_offset: offset + 1,
-                    class_id: req.class_id.clone(),
-                    payload: req.payload.clone(),
-                    is_sealed,
-                };
-                if let Err(e) = outbox.enqueue(range) {
-                    tracing::error!(
-                        target = %peer,
-                        error = %e,
-                        "Unexpected failure enqueuing to outbox after admission check"
-                    );
-                }
-            }
+        // 5. Commit all reserved outbox ranges (§3.B)
+        for (_peer, reservation, is_sealed) in reservations {
+            let range = OutboxRange {
+                topic: req.topic.clone(),
+                partition: req.partition,
+                epoch,
+                start_offset: offset,
+                end_offset: offset + 1,
+                class_id: req.class_id.clone(),
+                payload: req.payload.clone(),
+                is_sealed,
+            };
+            reservation.commit(range);
         }
 
         Ok(ProduceResponse {
@@ -563,6 +548,68 @@ impl BrokerServer {
     /// Retrieves the durable outbox for a destination region.
     pub fn get_outbox(&self, target_region: &str) -> Option<DestinationOutbox> {
         self.outboxes.read().unwrap().get(target_region).cloned()
+    }
+
+    /// Sets the byte capacity for a specific destination outbox.
+    pub fn set_outbox_capacity(&self, target_region: &str, max_bytes: usize) {
+        let outbox = self.get_or_create_outbox(target_region);
+        outbox.set_max_bytes(max_bytes);
+    }
+
+    /// Repopulates pending un-replicated records from the persistent disk log into the destination outbox.
+    ///
+    /// This ensures that after a broker restart or outage, un-replicated records are recovered
+    /// from the durable commit log starting from the destination's durable watermark up to HWM.
+    pub fn repopulate_outbox_from_log(
+        &self,
+        topic: &str,
+        partition: u32,
+        target_region: &str,
+    ) -> Result<usize, BrokerError> {
+        let outbox = self.get_or_create_outbox(target_region);
+        let start_offset = outbox.durable_watermark();
+
+        let log = self.get_or_create_log(topic, partition, 1)?;
+        let hwm = log.high_watermark();
+
+        if start_offset >= hwm {
+            return Ok(0);
+        }
+
+        let records = log.read_range(start_offset, hwm);
+        let mut staged_count = 0;
+
+        for record in records {
+            if outbox.contains_offset(record.base_offset) {
+                continue;
+            }
+
+            // Check residency / egress policy for target_region
+            let send_req = EnforcementRequest::new(
+                AuditAction::ReplicationSender,
+                &record.class_id,
+                &self.region,
+                target_region,
+            );
+            let send_decision = self.enforcer.decide(send_req);
+            if send_decision.allowed {
+                let range = OutboxRange {
+                    topic: topic.to_string(),
+                    partition,
+                    epoch: record.epoch,
+                    start_offset: record.base_offset,
+                    end_offset: record.base_offset + 1,
+                    class_id: record.class_id.clone(),
+                    payload: record.payload.clone(),
+                    is_sealed: send_decision.mode == DestinationMode::SealedOnly,
+                };
+                if outbox.enqueue(range).is_ok() {
+                    staged_count += 1;
+                }
+            }
+        }
+
+        Ok(staged_count)
     }
 
     fn get_or_create_outbox(&self, target_region: &str) -> DestinationOutbox {
