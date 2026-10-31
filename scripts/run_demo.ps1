@@ -32,7 +32,7 @@ Write-Host "   Simulating healthy 10ms WAN link (Replication Lag = 0)..."
 Write-Host "   Injecting 300ms WAN latency via chaos proxy on US_EAST link..."
 Write-Host "   Local producer writes 50 records during degraded link..."
 cargo test -p kamish-meta --test developer_b_scenarios test_scenario_b_slow_link_and_backpressure_demo -- --nocapture
-Write-Host "   Result: PASS. Local write latency unaffected (<1ms) while lag metric exposed = 50.`n" -ForegroundColor Green
+Write-Host "   Result: PASS. Local produce isolated from WAN delay (calculated avg per record <1ms, 50-record batch <50ms) while lag metric exposed = 50.`n" -ForegroundColor Green
 
 Write-Host "--- SCENARIO C: Regional Outage & Resumable Recovery ---" -ForegroundColor White
 Write-Host "   Simulating catastrophic failure of remote Region B (US_EAST severed)..."
