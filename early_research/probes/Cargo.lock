@@ -733,6 +733,7 @@ name = "kamish-audit"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "ed25519-dalek",
  "hex",
  "serde",
  "serde_json",

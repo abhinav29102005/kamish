@@ -7,12 +7,15 @@
 //! - §4.7.1: Zero-payload threat mitigation — stores decisions and versions, NEVER payload.
 
 use chrono::Utc;
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 
 /// Predefined zero hash for the genesis entry.
@@ -52,6 +55,27 @@ pub enum AuditError {
         expected: u64,
         found: u64,
     },
+
+    #[error(
+        "Truncation detected: expected at least {expected_min} entries from trusted checkpoint, but found {found}"
+    )]
+    TruncationDetected { expected_min: u64, found: u64 },
+
+    #[error("Checkpoint hash mismatch at sequence {sequence}: expected {expected}, found {found}")]
+    CheckpointMismatch {
+        sequence: u64,
+        expected: String,
+        found: String,
+    },
+
+    #[error("Missing witness checkpoint for stream {0}")]
+    MissingWitnessCheckpoint(String),
+
+    #[error("Witness signature error: {0}")]
+    WitnessSignatureError(String),
+
+    #[error("Witness authority error: {0}")]
+    WitnessError(String),
 }
 
 /// Operations subject to policy enforcement and auditing across all 10 enforcement points (§2.6).
@@ -170,12 +194,287 @@ pub struct AuditLog {
     inner: Arc<Mutex<AuditLogInner>>,
 }
 
+/// Domain-separated signature payload for witness checkpoints (§5.1, W08).
+#[allow(clippy::too_many_arguments)]
+pub fn compute_checkpoint_signature_payload(
+    stream_topic: &str,
+    stream_partition: u32,
+    sequence: u64,
+    tail_hash: &str,
+    record_count: u64,
+    timestamp_ns: i64,
+) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"kamish-audit-witness-checkpoint-v1\0");
+    hasher.update(stream_topic.as_bytes());
+    hasher.update(b":");
+    hasher.update(stream_partition.to_be_bytes());
+    hasher.update(b":");
+    hasher.update(sequence.to_be_bytes());
+    hasher.update(b":");
+    hasher.update(tail_hash.as_bytes());
+    hasher.update(b":");
+    hasher.update(record_count.to_be_bytes());
+    hasher.update(b":");
+    hasher.update(timestamp_ns.to_be_bytes());
+    hasher.finalize().to_vec()
+}
+
+/// Verification report providing completeness anchoring (§5.2, W08).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditVerificationReport {
+    pub total_entries: u64,
+    pub anchored_count: u64,
+    pub unanchored_entries: u64,
+    pub anchored_tail_hash: String,
+    pub latest_checkpoint_sequence: u64,
+}
+
+/// Checkpoint payload returned by witness quorum (§5.1, W08).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditWitnessCheckpointData {
+    pub sequence: u64,
+    pub tail_hash: String,
+    pub record_count: u64,
+    pub signature_hex: String,
+    pub timestamp_ns: i64,
+}
+
+/// Trait implemented by metadata consensus for independent witness anchoring (§5.1, W08).
+pub trait AuditWitnessAuthority: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
+    fn commit_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+        sequence: u64,
+        tail_hash: &str,
+        record_count: u64,
+        signature_hex: &str,
+        timestamp_ns: i64,
+    ) -> Result<(), AuditError>;
+
+    fn read_latest_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+    ) -> Result<Option<AuditWitnessCheckpointData>, AuditError>;
+}
+
+impl<T: AuditWitnessAuthority + ?Sized> AuditWitnessAuthority for Arc<T> {
+    #[allow(clippy::too_many_arguments)]
+    fn commit_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+        sequence: u64,
+        tail_hash: &str,
+        record_count: u64,
+        signature_hex: &str,
+        timestamp_ns: i64,
+    ) -> Result<(), AuditError> {
+        (**self).commit_checkpoint(
+            stream_topic,
+            stream_partition,
+            sequence,
+            tail_hash,
+            record_count,
+            signature_hex,
+            timestamp_ns,
+        )
+    }
+
+    fn read_latest_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+    ) -> Result<Option<AuditWitnessCheckpointData>, AuditError> {
+        (**self).read_latest_checkpoint(stream_topic, stream_partition)
+    }
+}
+
+/// Independent witness service that signs and anchors audit log checkpoints (§5.1, W08).
+pub struct AuditWitness {
+    authority: Arc<dyn AuditWitnessAuthority>,
+    topic: String,
+    partition: u32,
+    signing_key: SigningKey,
+    verifying_key: VerifyingKey,
+    window_size: usize,
+    witness_unreachable_count: AtomicU64,
+    time_to_anchor_ms: AtomicU64,
+    last_anchored_count: AtomicU64,
+    last_anchored_hash: RwLock<String>,
+    next_sequence: AtomicU64,
+}
+
+impl AuditWitness {
+    pub fn new(
+        authority: Arc<dyn AuditWitnessAuthority>,
+        topic: impl Into<String>,
+        partition: u32,
+        signing_key: SigningKey,
+        window_size: usize,
+    ) -> Self {
+        let verifying_key = signing_key.verifying_key();
+        Self {
+            authority,
+            topic: topic.into(),
+            partition,
+            signing_key,
+            verifying_key,
+            window_size,
+            witness_unreachable_count: AtomicU64::new(0),
+            time_to_anchor_ms: AtomicU64::new(0),
+            last_anchored_count: AtomicU64::new(0),
+            last_anchored_hash: RwLock::new(hex::encode(GENESIS_PREV_HASH)),
+            next_sequence: AtomicU64::new(0),
+        }
+    }
+
+    pub fn checkpoint(&self, tail_hash: &str, count: u64) -> Result<(), AuditError> {
+        let start = std::time::Instant::now();
+        let seq = self.next_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+        let digest = compute_checkpoint_signature_payload(
+            &self.topic,
+            self.partition,
+            seq,
+            tail_hash,
+            count,
+            now_ns,
+        );
+        let sig = self.signing_key.sign(&digest);
+        let sig_hex = hex::encode(sig.to_bytes());
+
+        match self.authority.commit_checkpoint(
+            &self.topic,
+            self.partition,
+            seq,
+            tail_hash,
+            count,
+            &sig_hex,
+            now_ns,
+        ) {
+            Ok(()) => {
+                self.time_to_anchor_ms
+                    .store(start.elapsed().as_millis() as u64, Ordering::SeqCst);
+                self.last_anchored_count.store(count, Ordering::SeqCst);
+                *self.last_anchored_hash.write().unwrap() = tail_hash.to_string();
+                Ok(())
+            }
+            Err(e) => {
+                self.witness_unreachable_count
+                    .fetch_add(1, Ordering::SeqCst);
+                Err(e)
+            }
+        }
+    }
+
+    pub fn verify_open(&self, entries: &[AuditEntry]) -> Result<(), AuditError> {
+        let cp_opt = self
+            .authority
+            .read_latest_checkpoint(&self.topic, self.partition)?;
+        if let Some(cp) = cp_opt {
+            self.verify_checkpoint_integrity(&cp, entries)?;
+        }
+        Ok(())
+    }
+
+    pub fn verify_file<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> Result<AuditVerificationReport, AuditError> {
+        let entries = AuditLog::read_verified_entries(path.as_ref())?;
+        let total_entries = entries.len() as u64;
+
+        let cp_opt = self
+            .authority
+            .read_latest_checkpoint(&self.topic, self.partition)?;
+        let cp = cp_opt.ok_or_else(|| {
+            AuditError::MissingWitnessCheckpoint(format!("{}/{}", self.topic, self.partition))
+        })?;
+
+        self.verify_checkpoint_integrity(&cp, &entries)?;
+
+        Ok(AuditVerificationReport {
+            total_entries,
+            anchored_count: cp.record_count,
+            unanchored_entries: total_entries.saturating_sub(cp.record_count),
+            anchored_tail_hash: cp.tail_hash,
+            latest_checkpoint_sequence: cp.sequence,
+        })
+    }
+
+    fn verify_checkpoint_integrity(
+        &self,
+        cp: &AuditWitnessCheckpointData,
+        entries: &[AuditEntry],
+    ) -> Result<(), AuditError> {
+        let sig_bytes = hex::decode(&cp.signature_hex)
+            .map_err(|e| AuditError::WitnessSignatureError(e.to_string()))?;
+        let sig = Signature::from_slice(&sig_bytes)
+            .map_err(|e| AuditError::WitnessSignatureError(e.to_string()))?;
+        let digest = compute_checkpoint_signature_payload(
+            &self.topic,
+            self.partition,
+            cp.sequence,
+            &cp.tail_hash,
+            cp.record_count,
+            cp.timestamp_ns,
+        );
+        self.verifying_key
+            .verify(&digest, &sig)
+            .map_err(|e| AuditError::WitnessSignatureError(e.to_string()))?;
+
+        let total = entries.len() as u64;
+        if total < cp.record_count {
+            return Err(AuditError::TruncationDetected {
+                expected_min: cp.record_count,
+                found: total,
+            });
+        }
+
+        if cp.record_count > 0 {
+            let idx = (cp.record_count - 1) as usize;
+            if entries[idx].entry_hash != cp.tail_hash {
+                return Err(AuditError::CheckpointMismatch {
+                    sequence: cp.sequence,
+                    expected: cp.tail_hash.clone(),
+                    found: entries[idx].entry_hash.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn witness_unreachable_count(&self) -> u64 {
+        self.witness_unreachable_count.load(Ordering::SeqCst)
+    }
+
+    pub fn time_to_anchor_ms(&self) -> u64 {
+        self.time_to_anchor_ms.load(Ordering::SeqCst)
+    }
+
+    pub fn last_anchored_count(&self) -> u64 {
+        self.last_anchored_count.load(Ordering::SeqCst)
+    }
+
+    pub fn window_size(&self) -> usize {
+        self.window_size
+    }
+}
+
+static WITNESS_REGISTRY: Mutex<Option<HashMap<PathBuf, Arc<AuditWitness>>>> = Mutex::new(None);
+
 struct AuditLogInner {
     writer_failed: bool,
     file_path: Option<PathBuf>,
     last_hash: String,
     next_sequence: u64,
     in_memory_entries: Vec<AuditEntry>,
+    witness: Option<Arc<AuditWitness>>,
 }
 
 impl AuditLog {
@@ -188,6 +487,7 @@ impl AuditLog {
                 last_hash: hex::encode(GENESIS_PREV_HASH),
                 next_sequence: 0,
                 in_memory_entries: Vec::new(),
+                witness: None,
             })),
         }
     }
@@ -223,6 +523,16 @@ impl AuditLog {
                 .unwrap_or_else(|| Path::new(".")),
         )?
         .sync_all()?;
+        let canonical = path_buf.canonicalize().unwrap_or_else(|_| path_buf.clone());
+        let maybe_witness = {
+            let guard = WITNESS_REGISTRY.lock().unwrap();
+            guard.as_ref().and_then(|m| m.get(&canonical).cloned())
+        };
+
+        if let Some(ref witness) = maybe_witness {
+            witness.verify_open(&entries)?;
+        }
+
         Ok(Self {
             inner: Arc::new(Mutex::new(AuditLogInner {
                 writer_failed: false,
@@ -230,6 +540,7 @@ impl AuditLog {
                 last_hash,
                 next_sequence,
                 in_memory_entries: entries,
+                witness: maybe_witness,
             })),
         })
     }
@@ -240,7 +551,7 @@ impl AuditLog {
         Ok(Self::read_verified_entries(path.as_ref())?.len())
     }
 
-    fn read_verified_entries(path: &Path) -> Result<Vec<AuditEntry>, AuditError> {
+    pub fn read_verified_entries(path: &Path) -> Result<Vec<AuditEntry>, AuditError> {
         let reader = BufReader::new(File::open(path)?);
         let mut entries = Vec::new();
         let mut previous = hex::encode(GENESIS_PREV_HASH);
@@ -364,6 +675,27 @@ impl AuditLog {
         inner.next_sequence += 1;
         inner.in_memory_entries.push(entry.clone());
 
+        let to_trigger = if let Some(ref witness) = inner.witness {
+            let unanchored = inner
+                .next_sequence
+                .saturating_sub(witness.last_anchored_count());
+            if unanchored >= witness.window_size() as u64 {
+                Some((
+                    witness.clone(),
+                    inner.last_hash.clone(),
+                    inner.next_sequence,
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some((witness, hash, count)) = to_trigger {
+            let _ = witness.checkpoint(&hash, count);
+        }
+
         Ok(entry)
     }
 
@@ -424,6 +756,67 @@ impl AuditLog {
     /// Returns all audit entries.
     pub fn entries(&self) -> Vec<AuditEntry> {
         self.inner.lock().unwrap().in_memory_entries.clone()
+    }
+
+    /// Registers a witness for a given file path.
+    pub fn register_witness<P: AsRef<Path>>(path: P, witness: Arc<AuditWitness>) {
+        let mut guard = WITNESS_REGISTRY.lock().unwrap();
+        let map = guard.get_or_insert_with(HashMap::new);
+        let canonical = path
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| path.as_ref().to_path_buf());
+        map.insert(canonical, witness);
+    }
+
+    /// Unregisters the witness for a given file path.
+    pub fn unregister_witness<P: AsRef<Path>>(path: P) {
+        let mut guard = WITNESS_REGISTRY.lock().unwrap();
+        if let Some(map) = guard.as_mut() {
+            let canonical = path
+                .as_ref()
+                .canonicalize()
+                .unwrap_or_else(|_| path.as_ref().to_path_buf());
+            map.remove(&canonical);
+        }
+    }
+
+    /// Opens an audit log with an explicit witness.
+    pub fn open_with_witness<P: AsRef<Path>>(
+        path: P,
+        witness: Arc<AuditWitness>,
+    ) -> Result<Self, AuditError> {
+        Self::register_witness(&path, witness);
+        Self::open(&path)
+    }
+
+    /// Returns the hash of the latest recorded entry.
+    pub fn last_hash(&self) -> String {
+        self.inner.lock().unwrap().last_hash.clone()
+    }
+
+    /// Returns the total number of entries recorded.
+    pub fn entry_count(&self) -> u64 {
+        self.inner.lock().unwrap().next_sequence
+    }
+
+    /// Attaches an independent witness to this active audit log instance.
+    pub fn attach_witness(&self, witness: Arc<AuditWitness>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.witness = Some(witness);
+    }
+
+    /// Manually flushes and anchors the current log tail to the witness quorum.
+    pub fn flush_checkpoint(&self) -> Result<(), AuditError> {
+        let (witness, hash, count) = {
+            let inner = self.inner.lock().unwrap();
+            if let Some(ref w) = inner.witness {
+                (w.clone(), inner.last_hash.clone(), inner.next_sequence)
+            } else {
+                return Ok(());
+            }
+        };
+        witness.checkpoint(&hash, count)
     }
 }
 
@@ -501,6 +894,135 @@ mod tests {
         let reopened = AuditLog::open(&log_path).unwrap();
         assert_eq!(reopened.count(), 2);
         assert_eq!(reopened.verify_integrity().unwrap(), 2);
+    }
+
+    struct MockWitnessAuthority {
+        checkpoint: Mutex<Option<AuditWitnessCheckpointData>>,
+        fail_commits: std::sync::atomic::AtomicBool,
+    }
+
+    impl MockWitnessAuthority {
+        fn new() -> Self {
+            Self {
+                checkpoint: Mutex::new(None),
+                fail_commits: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+    }
+
+    impl AuditWitnessAuthority for MockWitnessAuthority {
+        #[allow(clippy::too_many_arguments)]
+        fn commit_checkpoint(
+            &self,
+            _stream_topic: &str,
+            _stream_partition: u32,
+            sequence: u64,
+            tail_hash: &str,
+            record_count: u64,
+            signature_hex: &str,
+            timestamp_ns: i64,
+        ) -> Result<(), AuditError> {
+            if self.fail_commits.load(Ordering::SeqCst) {
+                return Err(AuditError::WitnessError("Quorum unreachable".into()));
+            }
+            let mut guard = self.checkpoint.lock().unwrap();
+            *guard = Some(AuditWitnessCheckpointData {
+                sequence,
+                tail_hash: tail_hash.to_string(),
+                record_count,
+                signature_hex: signature_hex.to_string(),
+                timestamp_ns,
+            });
+            Ok(())
+        }
+
+        fn read_latest_checkpoint(
+            &self,
+            _stream_topic: &str,
+            _stream_partition: u32,
+        ) -> Result<Option<AuditWitnessCheckpointData>, AuditError> {
+            Ok(self.checkpoint.lock().unwrap().clone())
+        }
+    }
+
+    #[test]
+    fn test_audit_witness_lifecycle_and_truncation_detection() {
+        let auth = Arc::new(MockWitnessAuthority::new());
+        let signing_key = SigningKey::from_bytes(&[55u8; 32]);
+        let witness = Arc::new(AuditWitness::new(
+            auth.clone(),
+            "test-topic",
+            0,
+            signing_key,
+            128,
+        ));
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let log_path = temp_dir.path().join("witnessed_audit.log");
+
+        AuditLog::register_witness(&log_path, witness.clone());
+
+        {
+            let log = AuditLog::open(&log_path).unwrap();
+            log.record(
+                AuditAction::Ingress,
+                "class-1",
+                "reg-1",
+                "reg-1",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "entry_0",
+            )
+            .unwrap();
+            log.record(
+                AuditAction::BrokerAppend,
+                "class-1",
+                "reg-1",
+                "reg-1",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "entry_1",
+            )
+            .unwrap();
+
+            // Anchor checkpoint at 2 records
+            witness.checkpoint(&log.last_hash(), 2).unwrap();
+            assert_eq!(witness.last_anchored_count(), 2);
+        }
+
+        // Positive control: file reopens successfully with 2 records
+        assert!(AuditLog::open(&log_path).is_ok());
+
+        // Negative control: truncation detected if line 2 is removed
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        let first_line = content.lines().next().unwrap();
+        std::fs::write(
+            &log_path,
+            format!(
+                "{}
+",
+                first_line
+            ),
+        )
+        .unwrap();
+
+        // Reopening with registered witness MUST fail with TruncationDetected
+        let reopen_res = AuditLog::open(&log_path);
+        assert!(matches!(
+            reopen_res,
+            Err(AuditError::TruncationDetected {
+                expected_min: 2,
+                found: 1
+            })
+        ));
+
+        // Metric test: fail commit increments unreachable count
+        auth.fail_commits.store(true, Ordering::SeqCst);
+        let commit_err = witness.checkpoint("some_hash", 3);
+        assert!(commit_err.is_err());
+        assert_eq!(witness.witness_unreachable_count(), 1);
+
+        AuditLog::unregister_witness(&log_path);
     }
 
     #[test]

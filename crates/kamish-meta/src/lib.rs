@@ -597,7 +597,7 @@ pub struct TopicMeta {
 /// - `docs/CONTRACT.md` (§2.1, §2.2, §3.B, §3.C)
 /// - NFR-01: Metadata quorum is NOT consulted on the local write path.
 /// - The broker core depends ONLY on this trait abstraction.
-pub trait MetadataAuthority: Send + Sync {
+pub trait MetadataAuthority: kamish_audit::AuditWitnessAuthority + Send + Sync {
     /// Deployment mode of this metadata authority (SingleNodeCompatibility or MultiRegion).
     fn deployment_mode(&self) -> DeploymentMode;
 
@@ -658,6 +658,94 @@ pub trait MetadataAuthority: Send + Sync {
 
     /// Returns the locally verified/cached partition ownership without consulting quorum per write (NFR-01).
     fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership>;
+}
+
+impl kamish_audit::AuditWitnessAuthority for MetadataStore {
+    #[allow(clippy::too_many_arguments)]
+    fn commit_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+        sequence: u64,
+        tail_hash: &str,
+        record_count: u64,
+        signature_hex: &str,
+        timestamp_ns: i64,
+    ) -> Result<(), kamish_audit::AuditError> {
+        let cp = AuditCheckpoint {
+            stream: StreamId::new(stream_topic, stream_partition),
+            sequence,
+            tail_hash: tail_hash.to_string(),
+            record_count,
+            signature_hex: signature_hex.to_string(),
+            witness_timestamp_ns: timestamp_ns,
+        };
+        self.commit_audit_checkpoint(cp)
+            .map(|_| ())
+            .map_err(|e| kamish_audit::AuditError::WitnessError(e.to_string()))
+    }
+
+    fn read_latest_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+    ) -> Result<Option<kamish_audit::AuditWitnessCheckpointData>, kamish_audit::AuditError> {
+        let stream = StreamId::new(stream_topic, stream_partition);
+        let cp = self
+            .read_audit_checkpoint(&stream)
+            .map_err(|e| kamish_audit::AuditError::WitnessError(e.to_string()))?;
+        Ok(cp.map(|c| kamish_audit::AuditWitnessCheckpointData {
+            sequence: c.sequence,
+            tail_hash: c.tail_hash,
+            record_count: c.record_count,
+            signature_hex: c.signature_hex,
+            timestamp_ns: c.witness_timestamp_ns,
+        }))
+    }
+}
+
+impl kamish_audit::AuditWitnessAuthority for EtcdMetadataAuthority {
+    #[allow(clippy::too_many_arguments)]
+    fn commit_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+        sequence: u64,
+        tail_hash: &str,
+        record_count: u64,
+        signature_hex: &str,
+        timestamp_ns: i64,
+    ) -> Result<(), kamish_audit::AuditError> {
+        let cp = AuditCheckpoint {
+            stream: StreamId::new(stream_topic, stream_partition),
+            sequence,
+            tail_hash: tail_hash.to_string(),
+            record_count,
+            signature_hex: signature_hex.to_string(),
+            witness_timestamp_ns: timestamp_ns,
+        };
+        self.commit_audit_checkpoint(cp)
+            .map(|_| ())
+            .map_err(|e| kamish_audit::AuditError::WitnessError(e.to_string()))
+    }
+
+    fn read_latest_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+    ) -> Result<Option<kamish_audit::AuditWitnessCheckpointData>, kamish_audit::AuditError> {
+        let stream = StreamId::new(stream_topic, stream_partition);
+        let cp = self
+            .read_audit_checkpoint(&stream)
+            .map_err(|e| kamish_audit::AuditError::WitnessError(e.to_string()))?;
+        Ok(cp.map(|c| kamish_audit::AuditWitnessCheckpointData {
+            sequence: c.sequence,
+            tail_hash: c.tail_hash,
+            record_count: c.record_count,
+            signature_hex: c.signature_hex,
+            timestamp_ns: c.witness_timestamp_ns,
+        }))
+    }
 }
 
 /// Local state tracking for replication watermarks and outbox streams.

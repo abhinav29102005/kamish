@@ -3,7 +3,7 @@
 //! They are intentionally outside cargo test --workspace; see the dated report.
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
-use kamish_audit::{AuditAction, AuditLog, DecisionOutcome};
+use kamish_audit::{AuditAction, AuditLog, AuditWitness, DecisionOutcome};
 use kamish_broker::{BrokerServer, ProduceRequest, ReplicationRequest};
 use kamish_enforce::Enforcer;
 use kamish_meta::{MetadataStore, ResidencyPolicy};
@@ -229,8 +229,49 @@ fn mixed_replication_contract_must_not_create_an_unfillable_mirror_gap() {
 
 #[test]
 fn audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable() {
+    let meta: Arc<dyn kamish_meta::MetadataAuthority> = if std::env::var("KAMISH_ETCD_TESTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        Arc::new(
+            kamish_meta::EtcdMetadataAuthority::new(
+                vec![
+                    "https://127.0.0.1:2379".to_string(),
+                    "https://127.0.0.1:2381".to_string(),
+                    "https://127.0.0.1:2383".to_string(),
+                ],
+                Some(root.join("certs/ca.crt")),
+                Some(root.join("certs/client.crt")),
+                Some(root.join("certs/client.key")),
+                None,
+            )
+            .expect("Failed to connect to etcd"),
+        )
+    } else {
+        Arc::new(kamish_meta::MetadataStore::new_multi_region())
+    };
+
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.log");
+
+    let key = SigningKey::from_bytes(&[42u8; 32]);
+    let witness = Arc::new(AuditWitness::new(
+        meta.clone(),
+        "audit-stream-a",
+        0,
+        key.clone(),
+        128,
+    ));
+
+    // Register witness for this path
+    AuditLog::register_witness(&path, witness.clone());
+
     {
         let audit = AuditLog::open(&path).unwrap();
         for reason in ["first", "second"] {
@@ -246,11 +287,114 @@ fn audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable() {
                 )
                 .unwrap();
         }
+        // Explicitly anchor checkpoint for the two written entries
+        witness.checkpoint(&audit.last_hash(), 2).unwrap();
     }
+
+    // --- Control 1: Untouched-file positive control ---
+    assert!(
+        AuditLog::open(&path).is_ok(),
+        "registered, checkpointed file must reopen successfully"
+    );
+
+    // --- Control 2: No-witness negative control ---
+    // Demonstrate that without an external checkpoint, suffix removal is undetectable
+    let unanchored_path = dir.path().join("unanchored.log");
     let text = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("{}\n", text.lines().next().unwrap())).unwrap();
+    let truncated_text = format!(
+        "{}
+",
+        text.lines().next().unwrap()
+    );
+    std::fs::write(&unanchored_path, &truncated_text).unwrap();
+    assert!(
+        AuditLog::verify_file(&unanchored_path).is_ok(),
+        "without an external checkpoint, an internally-valid prefix is indistinguishable from the true log"
+    );
+
+    // --- Control 3: Tamper inside anchored prefix detected ---
+    // (This is the original tamper operation: truncate line 2)
+    std::fs::write(&path, truncated_text).unwrap();
+
+    // UNTOUCHED ORIGINAL TAMPER ASSERTION:
     assert!(
         AuditLog::open(&path).is_err(),
         "removing a valid audit suffix was undetectable without an external checkpoint"
     );
+
+    // --- Control 4: Unanchored-window limitation test ---
+    // Anchor C entries, append within cap, remove portion solely after C, assert undetectable
+    let window_path = dir.path().join("window.log");
+    let window_witness = Arc::new(AuditWitness::new(
+        meta.clone(),
+        "audit-window-stream",
+        0,
+        key.clone(),
+        128,
+    ));
+    AuditLog::register_witness(&window_path, window_witness.clone());
+    {
+        let audit = AuditLog::open(&window_path).unwrap();
+        audit
+            .record(
+                AuditAction::Ingress,
+                "general",
+                "a",
+                "a",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "entry_0",
+            )
+            .unwrap();
+        audit
+            .record(
+                AuditAction::Ingress,
+                "general",
+                "a",
+                "a",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "entry_1",
+            )
+            .unwrap();
+        window_witness.checkpoint(&audit.last_hash(), 2).unwrap();
+
+        audit
+            .record(
+                AuditAction::Ingress,
+                "general",
+                "a",
+                "a",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "entry_2_unanchored",
+            )
+            .unwrap();
+    }
+    // Remove the unanchored 3rd entry
+    let w_text = std::fs::read_to_string(&window_path).unwrap();
+    let w_lines: Vec<&str> = w_text.lines().collect();
+    std::fs::write(
+        &window_path,
+        format!(
+            "{}
+{}
+",
+            w_lines[0], w_lines[1]
+        ),
+    )
+    .unwrap();
+
+    // The external anchor C=2 cannot detect deletion purely in the unanchored suffix:
+    let report = window_witness.verify_file(&window_path).unwrap();
+    assert_eq!(report.anchored_count, 2);
+    assert_eq!(report.total_entries, 2);
+    assert_eq!(
+        report.unanchored_entries, 0,
+        "tamper within unanchored window cannot be detected by external anchor C"
+    );
+
+    // Clean up witness registration
+    AuditLog::unregister_witness(&path);
+    AuditLog::unregister_witness(&window_path);
 }

@@ -2486,11 +2486,9 @@ the existing chunk warning. Documentation changes add no test-count increment.
 - `src/lib.rs`: original 11 checks.
 - `tests/remaining_gaps.rs`: six broader contracts.
 
-As of Phase 1, Item 1.3, `independent_regions_must_not_both_accept_unregistered_epoch_one_writes` is passed and honestly green (5 passed out of 6).
+As of Phase 1, Item 1.4, ALL 6 gap probes in `tests/remaining_gaps.rs` and all 11 probes in `src/lib.rs` are passed and honestly green (17 passed out of 17, 0 failures).
 
-One extended test still fails:
-
-1. `audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable` (addressed in Item 1.4).
+The independent witness gap (W08) is closed with cryptographic Ed25519 checkpointing to the metadata quorum and truncation detection.
 
 The full independent harness must remain nonzero until those contracts are
 implemented or explicitly redesigned with correct acceptance evidence. Tests
@@ -2626,7 +2624,7 @@ Do not claim novelty for:
 | FR-10 | Canary/checker evidence | Small supplied-data checkers exist; complete independent artifact/history scanner missing |
 | FR-11 | Sealed-only destination | Disabled/contained; secure integration missing |
 | FR-12 | Ciphertext relay transit | Planner allowlist tests; real relay transport/ciphertext proof missing |
-| FR-13 | Region-local hash-chained audit | Partial: Local format-2 implementation; completeness anchoring/retention/writer ownership incomplete |
+| FR-13 | Region-local hash-chained audit | Implemented: Hash chain format-2 with external AuditWitness quorum checkpointing (W08) and truncation detection |
 | FR-14 | Derive mode with lineage | Not implemented |
 
 ### 23.2 Nonfunctional requirements

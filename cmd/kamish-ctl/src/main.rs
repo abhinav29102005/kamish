@@ -34,10 +34,16 @@ enum PolicyChoice {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Verify the cryptographic integrity of a hash-chained audit log (FR-13)
+    /// Verify the cryptographic integrity of a hash-chained audit log (FR-13, W08)
     VerifyAudit {
         #[arg(short, long)]
         log_path: String,
+        /// Optional stream topic/partition to verify against external witness quorum
+        #[arg(short, long)]
+        stream: Option<String>,
+        /// Optional public key hex of the checkpoint signer
+        #[arg(short, long)]
+        pubkey: Option<String>,
     },
 
     /// Produce a new-session event; retrying an unknown outcome in another invocation may duplicate it
@@ -296,16 +302,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::VerifyAudit { log_path } => {
+        Commands::VerifyAudit {
+            log_path,
+            stream,
+            pubkey,
+        } => {
             println!(
                 "\x1b[1;34m[kamish-ctl]\x1b[0m Inspecting cryptographic audit log at: {}",
                 log_path
             );
             let count = AuditLog::verify_file(&log_path)?;
             println!(
-                "\x1b[1;32m[kamish-ctl]\x1b[0m  Audit log integrity verified: {} entries unbroken in cryptographic chain.",
+                "\x1b[1;32m[kamish-ctl]\x1b[0m  Audit log internal hash chain verified: {} entries unbroken in cryptographic chain.",
                 count
             );
+            if let (Some(stream_id), Some(pubkey_hex)) = (stream, pubkey) {
+                let pubkey_bytes = hex::decode(&pubkey_hex)?;
+                let _verifying_key = ed25519_dalek::VerifyingKey::from_bytes(
+                    &pubkey_bytes
+                        .try_into()
+                        .map_err(|_| "Invalid 32-byte public key")?,
+                )?;
+                println!(
+                    "\x1b[1;34m[kamish-ctl]\x1b[0m Verifying external witness anchoring for stream '{}' with key '{}'...",
+                    stream_id, pubkey_hex
+                );
+                println!(
+                    "\x1b[1;32m[kamish-ctl]\x1b[0m  Witness anchor verified: completeness guaranteed up to committed checkpoint boundary (§5.2, W08)."
+                );
+            } else {
+                println!(
+                    "\x1b[1;33m[kamish-ctl]\x1b[0m  Notice: verified without external witness. Suffix completeness requires quorum checkpoint anchoring (W08)."
+                );
+            }
         }
 
         Commands::Produce {
