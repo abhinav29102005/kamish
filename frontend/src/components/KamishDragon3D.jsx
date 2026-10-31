@@ -62,7 +62,7 @@ export default function KamishDragon3D({ isFlameOn }) {
     mouthLight.position.set(0, 0.52, 1.15);
     scene.add(mouthLight);
 
-    // 5. Root Group for Dragon (Locked orientation, user cannot rotate or drag)
+    // 5. Root Group for Dragon (Locked orientation, user cannot move)
     const dragonRoot = new THREE.Group();
     scene.add(dragonRoot);
 
@@ -136,7 +136,7 @@ export default function KamishDragon3D({ isFlameOn }) {
     emberPoints.position.set(0, 0.45, 0.7);
     dragonRoot.add(emberPoints);
 
-    // 7. Load Real Dragon Animated GLB Model (Slow Flying Animation from Blender)
+    // 7. Load Real Dragon Animated GLB Model (Tuned Flying Speed: Not too slow, not too fast)
     const loader = new GLTFLoader();
     loader.load(
       '/models/kamish_dragon_animated.glb',
@@ -168,11 +168,11 @@ export default function KamishDragon3D({ isFlameOn }) {
           }
         });
 
-        // Initialize Blender Flying Animation
+        // Initialize Blender Flying Animation with Natural Cadence (~2.6s per wing stroke)
         if (gltf.animations && gltf.animations.length > 0) {
           mixer = new THREE.AnimationMixer(dragonModel);
           const flightAction = mixer.clipAction(gltf.animations[0]);
-          flightAction.setEffectiveTimeScale(0.35); // Slow, majestic, hypnotic wing strokes
+          flightAction.setEffectiveTimeScale(0.92); // Perfectly balanced: not too slow, not too fast
           flightAction.play();
         }
 
@@ -190,7 +190,7 @@ export default function KamishDragon3D({ isFlameOn }) {
       }
     );
 
-    // 8. Animation Loop (Strictly autonomous, user cannot move the dragon)
+    // 8. Animation Loop with Harmonized Flight Dynamics
     let clock = new THREE.Clock();
     let animId;
 
@@ -199,19 +199,22 @@ export default function KamishDragon3D({ isFlameOn }) {
       const delta = clock.getDelta();
       const elapsedTime = clock.getElapsedTime();
 
-      // Play Blender Slow Flying Animation
+      // Play Blender Wing Animation
       if (mixer) {
         mixer.update(delta);
       }
 
-      // Gentle Autonomous Sovereign Hover (No user drag/movement)
-      const hoverY = Math.sin(elapsedTime * 1.1) * 0.04;
-      const hoverTilt = Math.sin(elapsedTime * 0.8) * 0.015;
-      const hoverTurn = Math.sin(elapsedTime * 0.4) * 0.06;
+      // Harmonized Aerodynamic Body Lift & Pitch synced with wing stroke
+      const flightSpeed = 0.92 * (2 * Math.PI / 3.0); // ~1.93 rad/s (matches ~2.6s wing cycle)
+      const liftY = Math.sin(elapsedTime * flightSpeed) * 0.055;
+      const pitchX = Math.cos(elapsedTime * flightSpeed) * 0.032;
+      const bankedYaw = Math.sin(elapsedTime * (flightSpeed * 0.35)) * 0.05;
+      const rollZ = Math.sin(elapsedTime * (flightSpeed * 0.5)) * 0.02;
 
-      dragonRoot.position.y = hoverY;
-      dragonRoot.rotation.z = hoverTilt;
-      dragonRoot.rotation.y = hoverTurn;
+      dragonRoot.position.y = liftY;
+      dragonRoot.rotation.x = pitchX;
+      dragonRoot.rotation.y = bankedYaw;
+      dragonRoot.rotation.z = rollZ;
 
       const isFlame = flameRef.current;
 
@@ -312,7 +315,7 @@ export default function KamishDragon3D({ isFlameOn }) {
         style={{
           width: '100%',
           height: '100%',
-          cursor: 'default', // non-movable by user
+          cursor: 'default',
         }}
       />
 
@@ -370,7 +373,7 @@ export default function KamishDragon3D({ isFlameOn }) {
               letterSpacing: '0.12em',
             }}
           >
-            SLOW FLYING DRAGON · BLENDER ANIMATION
+            SOVEREIGN DRAGON · REAL-TIME 3D FLIGHT
           </div>
         </div>
       )}
