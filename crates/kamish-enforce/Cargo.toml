@@ -13,7 +13,10 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+kamish-seal = { path = "../kamish-seal" }
 rand = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 tempfile = "3.17"
+
+serde_json = { workspace = true }

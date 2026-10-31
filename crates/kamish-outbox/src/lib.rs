@@ -155,6 +155,15 @@ impl DestinationOutbox {
         self.inner.read().unwrap().queued_bytes
     }
 
+    pub fn has_capacity(&self, additional_bytes: usize) -> bool {
+        let inner = self.inner.read().unwrap();
+        inner.queued_bytes + additional_bytes <= self.max_bytes
+    }
+
+    pub fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
     pub fn durable_watermark(&self) -> u64 {
         self.inner.read().unwrap().durable_watermark
     }

@@ -110,6 +110,18 @@ pub struct PartitionLog {
     writer_lock: Arc<std::sync::Mutex<Option<File>>>,
 }
 
+impl std::fmt::Debug for PartitionLog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let inner = self.inner.read().unwrap();
+        f.debug_struct("PartitionLog")
+            .field("dir", &inner.dir)
+            .field("current_epoch", &inner.current_epoch)
+            .field("next_offset", &inner.next_offset)
+            .field("high_watermark", &inner.high_watermark)
+            .finish()
+    }
+}
+
 struct PartitionLogInner {
     dir: PathBuf,
     current_epoch: u64,
@@ -132,16 +144,30 @@ impl PartitionLog {
             let mut buf = Vec::new();
             file.read_to_end(&mut buf)?;
 
+            let total_len = buf.len() as u64;
             let mut cursor = std::io::Cursor::new(buf);
             let mut valid_file_len = 0u64;
+
             loop {
                 let start_pos = cursor.position();
+                if start_pos == total_len {
+                    // Clean end of file reached
+                    break;
+                }
+
                 match bincode_deserialize_envelope(&mut cursor) {
                     Ok(envelope) => {
-                        if !envelope.verify_checksum() {
+                        let computed = RecordEnvelope::compute_checksum(
+                            envelope.epoch,
+                            &envelope.class_id,
+                            envelope.policy_version,
+                            envelope.base_offset,
+                            &envelope.payload,
+                        );
+                        if computed != envelope.checksum {
                             return Err(LogError::ChecksumMismatch {
                                 offset: envelope.base_offset,
-                                computed: 0,
+                                computed,
                                 recorded: envelope.checksum,
                             });
                         }
@@ -155,16 +181,22 @@ impl PartitionLog {
                         records.push(envelope);
                         valid_file_len = cursor.position();
                     }
-                    Err(_) => {
-                        let total_len = cursor.get_ref().len() as u64;
-                        if start_pos < total_len {
-                            // Truncate trailing torn write at segment tail to last verified record
+                    Err(e) => {
+                        // Check if this error is due to an incomplete/torn write at the very tail of the file
+                        let current_pos = cursor.position();
+                        let is_eof_error = e.kind() == std::io::ErrorKind::UnexpectedEof;
+
+                        if is_eof_error && (current_pos == total_len || start_pos + 4 > total_len) {
+                            // Truncate trailing torn write at segment tail back to last verified record
                             drop(file);
                             let trunc_file = OpenOptions::new().write(true).open(&log_file)?;
                             trunc_file.set_len(valid_file_len)?;
                             trunc_file.sync_all()?;
+                            break;
+                        } else {
+                            // Middle-of-segment corruption or corrupt frame: must fail loudly!
+                            return Err(LogError::Io(e));
                         }
-                        break;
                     }
                 }
             }

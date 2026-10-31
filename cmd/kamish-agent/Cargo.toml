@@ -22,6 +22,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+kamish-log = { path = "../../crates/kamish-log" }
+kamish-own = { path = "../../crates/kamish-own" }
 tempfile = "3.17"
 chrono = { workspace = true }
 ed25519-dalek = { workspace = true }

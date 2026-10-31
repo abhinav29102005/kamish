@@ -326,6 +326,51 @@ impl BrokerServer {
             });
         }
 
+        // 3.5. Outbox Capacity Admission Control & Backpressure Pre-check (§3.2.4, INV-3)
+        let estimated_range_size = req.payload.len() + 64;
+        for peer in &self.known_peers {
+            let target_region_id = parse_region_id(peer);
+            #[allow(clippy::collapsible_if)]
+            if let Some(ref engine) = self.policy_engine {
+                if engine
+                    .validate_replication(&stream_event, &self.region_id, &target_region_id)
+                    .is_err()
+                {
+                    continue; // Prohibited from outbox egress by policy
+                }
+            }
+
+            let send_req = EnforcementRequest::new(
+                AuditAction::ReplicationSender,
+                &req.class_id,
+                &self.region,
+                peer,
+            );
+            let send_decision = self.enforcer.decide(send_req);
+            if send_decision.allowed {
+                let outbox = self.get_or_create_outbox(peer);
+                if !outbox.has_capacity(estimated_range_size) {
+                    tracing::warn!(
+                        topic = %req.topic,
+                        target = %peer,
+                        queued = outbox.queued_bytes(),
+                        max = outbox.max_bytes(),
+                        "Replication outbox capacity exceeded; rejecting write with backpressure"
+                    );
+                    return Ok(ProduceResponse {
+                        base_offset: 0,
+                        count: 0,
+                        committed_epoch: 0,
+                        sovereignty_allowed: false,
+                        denial_reason: format!(
+                            "Backpressure: destination outbox for '{}' full",
+                            peer
+                        ),
+                    });
+                }
+            }
+        }
+
         // 4. Append to persistent segmented commit log with fsync durability (INV-1, INV-2)
         let log = self.get_or_create_log(&req.topic, req.partition, epoch)?;
         let offset = log.append(
@@ -384,7 +429,13 @@ impl BrokerServer {
                     payload: req.payload.clone(),
                     is_sealed,
                 };
-                let _ = outbox.enqueue(range);
+                if let Err(e) = outbox.enqueue(range) {
+                    tracing::error!(
+                        target = %peer,
+                        error = %e,
+                        "Unexpected failure enqueuing to outbox after admission check"
+                    );
+                }
             }
         }
 
@@ -476,15 +527,27 @@ impl BrokerServer {
             });
         }
 
-        // Case 3: Gap detected (from_offset > local_next) -> Receiver reports current watermark
-        Ok(ReplicationResponse {
-            accepted: false,
-            applied_watermark: local_next,
-            reason: format!(
-                "offset_gap: expected {}, received {}",
-                local_next, req.from_offset
-            ),
-        })
+        // Case 3: Gap or partial overlap detected
+        if req.from_offset > local_next {
+            Ok(ReplicationResponse {
+                accepted: false,
+                applied_watermark: local_next,
+                reason: format!(
+                    "offset_gap: expected {}, received {}",
+                    local_next, req.from_offset
+                ),
+            })
+        } else {
+            // from_offset < local_next, but to_offset > local_next (partial overlap)
+            Ok(ReplicationResponse {
+                accepted: false,
+                applied_watermark: local_next,
+                reason: format!(
+                    "partial_overlap: local watermark is {}, please resume from {}",
+                    local_next, local_next
+                ),
+            })
+        }
     }
 
     /// Returns the durable watermark for a replicated stream from `source_region`.

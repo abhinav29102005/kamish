@@ -394,9 +394,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "\x1b[1;35m========================================================================\x1b[0m"
             );
 
-            let status = std::process::Command::new("bash")
-                .arg("scripts/run_demo.sh")
-                .status()?;
+            let status = if cfg!(windows) {
+                std::process::Command::new("powershell")
+                    .arg("-ExecutionPolicy")
+                    .arg("Bypass")
+                    .arg("-File")
+                    .arg("scripts/run_demo.ps1")
+                    .status()?
+            } else {
+                std::process::Command::new("bash")
+                    .arg("scripts/run_demo.sh")
+                    .status()?
+            };
 
             if !status.success() {
                 eprintln!("\x1b[1;31m[kamish-ctl] Demo suite encountered an error.\x1b[0m");

@@ -280,7 +280,7 @@ impl ReplicationAgent {
                 );
                 return Ok(true);
             } else {
-                if res.reason.contains("offset_gap") {
+                if res.reason.contains("offset_gap") || res.reason.contains("partial_overlap") {
                     if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
                         outbox.advance_watermark(res.applied_watermark);
                     }
@@ -326,7 +326,7 @@ impl ReplicationAgent {
                 );
                 return Ok(true);
             } else {
-                if res.reason.contains("offset_gap") {
+                if res.reason.contains("offset_gap") || res.reason.contains("partial_overlap") {
                     if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
                         outbox.advance_watermark(res.applied_watermark);
                     }
@@ -1117,5 +1117,200 @@ mod tests {
             assert_eq!(rec.base_offset, idx as u64);
             assert_eq!(rec.payload, format!("order-{}", idx).into_bytes());
         }
+    }
+
+    #[tokio::test]
+    async fn test_destination_persistence_followed_by_lost_ack() {
+        let (agent, broker_a, broker_b, _td_a, _td_b) = setup_agent_environment();
+
+        // 1. Ingest record at Broker A
+        let p_res = broker_a
+            .produce(ProduceRequest {
+                topic: "adversarial-stream".to_string(),
+                partition: 0,
+                producer_id: 101,
+                producer_epoch: 1,
+                sequence_base: 0,
+                class_id: "global-stream".to_string(),
+                payload: b"payload-0".to_vec(),
+                residency_rule: None,
+            })
+            .unwrap();
+        assert_eq!(p_res.base_offset, 0);
+
+        // 2. Broker B receives replication request directly and persists it
+        let req0 = ReplicationRequest {
+            topic: "adversarial-stream".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 0,
+            to_offset: 1,
+            payload: b"payload-0".to_vec(),
+            is_sealed: false,
+        };
+        let r_res = broker_b.handle_replication(req0.clone()).unwrap();
+        assert!(r_res.accepted);
+        assert_eq!(r_res.applied_watermark, 1);
+
+        // 3. Simulate lost ACK: Broker A's outbox watermark was NOT advanced
+        let outbox = broker_a.get_outbox("region-us").unwrap();
+        assert_eq!(outbox.durable_watermark(), 0);
+
+        // 4. Broker A retries the exact same range [0..1]
+        let retry_res = broker_b.handle_replication(req0).unwrap();
+        assert!(
+            retry_res.accepted,
+            "Idempotent duplicate retry must be accepted"
+        );
+        assert_eq!(retry_res.reason, "idempotent_duplicate_noop");
+        assert_eq!(retry_res.applied_watermark, 1);
+
+        // 5. Verify Receiver B has exactly 1 record on disk (zero duplicate writes)
+        let fetched = broker_b
+            .fetch(kamish_broker::FetchRequest {
+                topic: "adversarial-stream".to_string(),
+                partition: 0,
+                class_id: "global-stream".to_string(),
+                start_offset: 0,
+                max_records: 10,
+            })
+            .unwrap();
+        assert_eq!(fetched.records.len(), 1);
+        assert_eq!(fetched.records[0].base_offset, 0);
+        assert_eq!(fetched.records[0].payload, b"payload-0");
+
+        // 6. Sync cursor on Agent side
+        let synced = agent
+            .handshake_and_sync_cursor("region-us", "adversarial-stream", 0)
+            .await
+            .unwrap();
+        assert_eq!(synced, 1);
+        assert_eq!(outbox.durable_watermark(), 1);
+        assert_eq!(outbox.next_transfer_batch(10).len(), 0);
+    }
+
+    #[test]
+    fn test_missing_offset_range_gap_rejection() {
+        let (_agent, _broker_a, broker_b, _td_a, _td_b) = setup_agent_environment();
+
+        // Receiver B is at offset 0. Sender sends range starting at offset 5 (gap of 5 messages)
+        let gap_req = ReplicationRequest {
+            topic: "gap-stream".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 5,
+            to_offset: 6,
+            payload: b"premature-message".to_vec(),
+            is_sealed: false,
+        };
+
+        let res = broker_b.handle_replication(gap_req).unwrap();
+        assert!(
+            !res.accepted,
+            "Receiver must reject non-contiguous offset gap"
+        );
+        assert!(res.reason.contains("offset_gap"));
+        assert_eq!(res.applied_watermark, 0);
+
+        // Verify Receiver log remains empty
+        let fetched = broker_b
+            .fetch(kamish_broker::FetchRequest {
+                topic: "gap-stream".to_string(),
+                partition: 0,
+                class_id: "global-stream".to_string(),
+                start_offset: 0,
+                max_records: 10,
+            })
+            .unwrap();
+        assert_eq!(fetched.records.len(), 0);
+    }
+
+    #[test]
+    fn test_partial_overlap_resynchronization() {
+        let (_agent, _broker_a, broker_b, _td_a, _td_b) = setup_agent_environment();
+
+        // Ingest records 0 and 1 into Broker B
+        for i in 0..2 {
+            let req = ReplicationRequest {
+                topic: "overlap-stream".to_string(),
+                partition: 0,
+                source_region: "region-eu".to_string(),
+                target_region: "region-us".to_string(),
+                class_id: "global-stream".to_string(),
+                epoch: 1,
+                from_offset: i,
+                to_offset: i + 1,
+                payload: format!("msg-{}", i).into_bytes(),
+                is_sealed: false,
+            };
+            assert!(broker_b.handle_replication(req).unwrap().accepted);
+        }
+
+        // Now submit a partially overlapping range: from_offset: 1, to_offset: 3
+        let overlap_req = ReplicationRequest {
+            topic: "overlap-stream".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 1,
+            to_offset: 3,
+            payload: b"overlap-payload".to_vec(),
+            is_sealed: false,
+        };
+
+        let res = broker_b.handle_replication(overlap_req).unwrap();
+        assert!(!res.accepted);
+        assert!(res.reason.contains("partial_overlap"));
+        assert_eq!(res.applied_watermark, 2);
+    }
+
+    #[test]
+    fn test_stale_replication_worker_after_epoch_change() {
+        let (_agent, _broker_a, broker_b, _td_a, _td_b) = setup_agent_environment();
+
+        // Ingest initial record at epoch 2
+        let req_epoch2 = ReplicationRequest {
+            topic: "epoch-stream".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 2,
+            from_offset: 0,
+            to_offset: 1,
+            payload: b"epoch-2-record".to_vec(),
+            is_sealed: false,
+        };
+        assert!(broker_b.handle_replication(req_epoch2).unwrap().accepted);
+
+        // Stale worker tries to append with epoch 1
+        let req_stale = ReplicationRequest {
+            topic: "epoch-stream".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 1,
+            to_offset: 2,
+            payload: b"stale-write".to_vec(),
+            is_sealed: false,
+        };
+        let err = broker_b.handle_replication(req_stale).unwrap_err();
+        assert!(matches!(
+            err,
+            kamish_broker::BrokerError::Log(kamish_log::LogError::StaleEpoch {
+                current: 2,
+                requested: 1
+            })
+        ));
     }
 }
