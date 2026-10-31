@@ -385,24 +385,53 @@ impl BrokerServer {
         }
 
         let log = self.get_or_create_log(&req.topic, req.partition, req.epoch)?;
+        let local_next = log.next_offset();
 
-        // Append replicated record preserving source offset (INV-5)
-        let applied_offset = log.append(
-            req.epoch,
-            &req.class_id,
-            decision.policy_version,
-            req.payload,
-        )?;
+        // Deduplication upon reconnect (INV-5, INV-6):
+        // Case 1: Entire range is already committed locally -> Idempotent no-op ACK
+        if req.to_offset <= local_next {
+            return Ok(ReplicationResponse {
+                accepted: true,
+                applied_watermark: local_next,
+                reason: "idempotent_duplicate_noop".to_string(),
+            });
+        }
 
-        // Update local metadata watermark
-        let new_watermark = applied_offset + 1;
-        self.meta.update_watermark(&req.topic, req.partition, &req.source_region, new_watermark);
+        // Case 2: Exact next contiguous offset -> Append and advance watermark (INV-5)
+        if req.from_offset == local_next {
+            let applied_offset = log.append(
+                req.epoch,
+                &req.class_id,
+                decision.policy_version,
+                req.payload,
+            )?;
+            let new_watermark = applied_offset + 1;
+            self.meta.update_watermark(&req.topic, req.partition, &req.source_region, new_watermark);
 
+            return Ok(ReplicationResponse {
+                accepted: true,
+                applied_watermark: new_watermark,
+                reason: "ok".to_string(),
+            });
+        }
+
+        // Case 3: Gap detected (from_offset > local_next) -> Receiver reports current watermark
         Ok(ReplicationResponse {
-            accepted: true,
-            applied_watermark: new_watermark,
-            reason: "ok".to_string(),
+            accepted: false,
+            applied_watermark: local_next,
+            reason: format!("offset_gap: expected {}, received {}", local_next, req.from_offset),
         })
+    }
+
+    /// Returns the durable watermark for a replicated stream from `source_region`.
+    pub fn get_watermark(&self, topic: &str, partition: u32, source_region: &str) -> u64 {
+        let meta_wm = self.meta.get_watermark(topic, partition, source_region);
+        let log_wm = {
+            let key = (topic.to_string(), partition);
+            let logs = self.logs.read().unwrap();
+            logs.get(&key).map(|l| l.next_offset()).unwrap_or(0)
+        };
+        std::cmp::max(meta_wm, log_wm)
     }
 
     /// Retrieves the durable outbox for a destination region.
@@ -469,7 +498,7 @@ impl BrokerServer {
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
             BrokerRequest::GetWatermark { topic, partition, source_region } => {
-                let wm = self.meta.get_watermark(&topic, partition, &source_region);
+                let wm = self.get_watermark(&topic, partition, &source_region);
                 BrokerResponse::Watermark { durable_watermark: wm }
             }
             BrokerRequest::Ping => BrokerResponse::Pong,
@@ -584,6 +613,30 @@ impl BrokerClient {
             BrokerResponse::Replicate(r) => Ok(r),
             BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
             other => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unexpected response: {:?}", other)).into()),
+        }
+    }
+
+    pub async fn get_watermark(
+        &mut self,
+        topic: &str,
+        partition: u32,
+        source_region: &str,
+    ) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
+        match self
+            .send_request(BrokerRequest::GetWatermark {
+                topic: topic.to_string(),
+                partition,
+                source_region: source_region.to_string(),
+            })
+            .await?
+        {
+            BrokerResponse::Watermark { durable_watermark } => Ok(durable_watermark),
+            BrokerResponse::Error(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e).into()),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unexpected response: {:?}", other),
+            )
+            .into()),
         }
     }
 

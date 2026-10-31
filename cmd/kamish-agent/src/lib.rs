@@ -12,6 +12,7 @@
 
 use kamish_broker::{BrokerClient, BrokerServer, ReplicationRequest};
 use kamish_meta::MetadataStore;
+use kamish_outbox::OutboxRange;
 use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -29,6 +30,43 @@ pub enum AgentError {
 
     #[error("No legal route available for class '{class_id}' to target '{target}'")]
     NoLegalRoute { class_id: String, target: String },
+
+    #[error("Bounded replication queue capacity exceeded (limit: {0})")]
+    QueueCapacityExceeded(usize),
+
+    #[error("Replication channel closed")]
+    QueueClosed,
+
+    #[error("Replication transfer failed: {0}")]
+    TransferFailed(String),
+}
+
+/// A replication unit submitted to the bounded async queue (§2.2, §3.3.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReplicationTask {
+    pub target_region: String,
+    pub range: OutboxRange,
+    pub attempt: u32,
+    pub max_retries: u32,
+    pub backoff_ms: u64,
+}
+
+impl ReplicationTask {
+    pub fn new(target_region: impl Into<String>, range: OutboxRange) -> Self {
+        Self {
+            target_region: target_region.into(),
+            range,
+            attempt: 0,
+            max_retries: 3,
+            backoff_ms: 50,
+        }
+    }
+
+    pub fn with_retries(mut self, max_retries: u32, backoff_ms: u64) -> Self {
+        self.max_retries = max_retries;
+        self.backoff_ms = backoff_ms;
+        self
+    }
 }
 
 /// Real-time replication metrics exposed for observability (§4.4).
@@ -61,6 +99,9 @@ pub struct ReplicationAgent {
     peer_brokers: Arc<RwLock<HashMap<String, Arc<BrokerServer>>>>,
     peer_addresses: Arc<RwLock<HashMap<String, String>>>,
     link_metrics: Arc<RwLock<HashMap<String, LinkMetrics>>>,
+    task_tx: tokio::sync::mpsc::Sender<ReplicationTask>,
+    task_rx: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<ReplicationTask>>>>,
+    queue_capacity: usize,
 }
 
 impl ReplicationAgent {
@@ -70,6 +111,17 @@ impl ReplicationAgent {
         meta: Arc<MetadataStore>,
         router: RouteSelector,
     ) -> Self {
+        Self::with_queue_capacity(local_region, local_broker, meta, router, 1024)
+    }
+
+    pub fn with_queue_capacity(
+        local_region: impl Into<String>,
+        local_broker: Arc<BrokerServer>,
+        meta: Arc<MetadataStore>,
+        router: RouteSelector,
+        capacity: usize,
+    ) -> Self {
+        let (tx, rx) = tokio::sync::mpsc::channel(capacity);
         Self {
             local_region: local_region.into(),
             local_broker,
@@ -78,6 +130,9 @@ impl ReplicationAgent {
             peer_brokers: Arc::new(RwLock::new(HashMap::new())),
             peer_addresses: Arc::new(RwLock::new(HashMap::new())),
             link_metrics: Arc::new(RwLock::new(HashMap::new())),
+            task_tx: tx,
+            task_rx: Arc::new(tokio::sync::Mutex::new(Some(rx))),
+            queue_capacity: capacity,
         }
     }
 
@@ -98,6 +153,303 @@ impl ReplicationAgent {
     /// Sets simulated link metrics (RTT, packet loss) for slow-link testing (§4.2).
     pub fn set_link_metrics(&self, target_region: &str, metrics: LinkMetrics) {
         self.link_metrics.write().unwrap().insert(target_region.to_string(), metrics);
+    }
+
+    /// Enqueues a replication task into the bounded async queue, applying non-blocking backpressure if full.
+    pub fn try_submit_task(&self, task: ReplicationTask) -> Result<(), AgentError> {
+        self.task_tx.try_send(task).map_err(|e| match e {
+            tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                AgentError::QueueCapacityExceeded(self.queue_capacity)
+            }
+            tokio::sync::mpsc::error::TrySendError::Closed(_) => AgentError::QueueClosed,
+        })
+    }
+
+    /// Enqueues a replication task into the bounded async queue, awaiting when capacity is saturated.
+    pub async fn submit_task(&self, task: ReplicationTask) -> Result<(), AgentError> {
+        self.task_tx
+            .send(task)
+            .await
+            .map_err(|_| AgentError::QueueClosed)
+    }
+
+    /// Pulls up to `max_ranges` pending from local outbox and stages them into the bounded async queue.
+    pub fn enqueue_pending_outbox_tasks(
+        &self,
+        target_region: &str,
+        max_ranges: usize,
+    ) -> Result<usize, AgentError> {
+        let outbox = match self.local_broker.get_outbox(target_region) {
+            Some(o) => o,
+            None => return Ok(0),
+        };
+        let pending = outbox.next_transfer_batch(max_ranges);
+        let mut count = 0;
+        for range in pending {
+            let task = ReplicationTask::new(target_region, range);
+            self.try_submit_task(task)?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    /// Dispatches a single replication task against the target peer (TCP or in-memory) with route validation.
+    pub async fn execute_task(&self, task: &ReplicationTask) -> Result<bool, AgentError> {
+        let metrics = self
+            .link_metrics
+            .read()
+            .unwrap()
+            .get(&task.target_region)
+            .copied()
+            .unwrap_or_default();
+
+        let candidate = PathCandidate {
+            target_region: task.target_region.clone(),
+            relay_region: None,
+            metrics,
+        };
+
+        let picked_path = self.router.pick_path(
+            &task.target_region,
+            &task.range.class_id,
+            &[candidate],
+        );
+
+        if picked_path.is_none() {
+            return Err(AgentError::NoLegalRoute {
+                class_id: task.range.class_id.clone(),
+                target: task.target_region.clone(),
+            });
+        }
+
+        let rep_req = ReplicationRequest {
+            topic: task.range.topic.clone(),
+            partition: task.range.partition,
+            source_region: self.local_region.clone(),
+            target_region: task.target_region.clone(),
+            class_id: task.range.class_id.clone(),
+            epoch: task.range.epoch,
+            from_offset: task.range.start_offset,
+            to_offset: task.range.end_offset,
+            payload: task.range.payload.clone(),
+            is_sealed: task.range.is_sealed,
+        };
+
+        // Prefer TCP peer if address is registered
+        let tcp_addr = {
+            self.peer_addresses
+                .read()
+                .unwrap()
+                .get(&task.target_region)
+                .cloned()
+        };
+
+        if let Some(addr) = tcp_addr {
+            let mut client = BrokerClient::connect(&addr).await.map_err(|e| {
+                AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e))
+            })?;
+            let res = client
+                .replicate(rep_req)
+                .await
+                .map_err(|e| AgentError::TransferFailed(e.to_string()))?;
+
+            if res.accepted {
+                if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
+                    outbox.advance_watermark(res.applied_watermark);
+                }
+                self.meta.update_watermark(
+                    &task.range.topic,
+                    task.range.partition,
+                    &task.target_region,
+                    res.applied_watermark,
+                );
+                return Ok(true);
+            } else {
+                if res.reason.contains("offset_gap") {
+                    if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
+                        outbox.advance_watermark(res.applied_watermark);
+                    }
+                    self.meta.update_watermark(
+                        &task.range.topic,
+                        task.range.partition,
+                        &task.target_region,
+                        res.applied_watermark,
+                    );
+                }
+                warn!(
+                    target = %task.target_region,
+                    reason = %res.reason,
+                    watermark = res.applied_watermark,
+                    "Remote broker did not accept replication"
+                );
+                return Ok(false);
+            }
+        }
+
+        // Fall back to in-memory peer broker
+        let in_mem_peer = {
+            self.peer_brokers
+                .read()
+                .unwrap()
+                .get(&task.target_region)
+                .cloned()
+        };
+
+        if let Some(peer) = in_mem_peer {
+            let res = peer.handle_replication(rep_req)?;
+            if res.accepted {
+                if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
+                    outbox.advance_watermark(res.applied_watermark);
+                }
+                self.meta.update_watermark(
+                    &task.range.topic,
+                    task.range.partition,
+                    &task.target_region,
+                    res.applied_watermark,
+                );
+                return Ok(true);
+            } else {
+                if res.reason.contains("offset_gap") {
+                    if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
+                        outbox.advance_watermark(res.applied_watermark);
+                    }
+                    self.meta.update_watermark(
+                        &task.range.topic,
+                        task.range.partition,
+                        &task.target_region,
+                        res.applied_watermark,
+                    );
+                }
+                warn!(
+                    target = %task.target_region,
+                    reason = %res.reason,
+                    "In-memory peer broker rejected replication"
+                );
+                return Ok(false);
+            }
+        }
+
+        Err(AgentError::TargetNotRegistered(task.target_region.clone()))
+    }
+
+    /// Spawns the background retry worker processing tasks from the bounded async queue.
+    /// Handles exponential backoff and retries, preserving un-acked ranges in the outbox on persistent failure.
+    pub async fn spawn_retry_worker(self: Arc<Self>) -> Option<tokio::task::JoinHandle<()>> {
+        let mut rx = {
+            let mut guard = self.task_rx.lock().await;
+            guard.take()?
+        };
+
+        let handle = tokio::spawn(async move {
+            info!("Replication retry worker started");
+            while let Some(mut task) = rx.recv().await {
+                let mut completed = false;
+                while task.attempt <= task.max_retries {
+                    match self.execute_task(&task).await {
+                        Ok(true) => {
+                            completed = true;
+                            break;
+                        }
+                        Ok(false) => {
+                            task.attempt += 1;
+                            if task.attempt <= task.max_retries {
+                                let delay = task.backoff_ms * (1 << (task.attempt - 1));
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                            }
+                        }
+                        Err(e) => {
+                            task.attempt += 1;
+                            if task.attempt <= task.max_retries {
+                                let delay = task.backoff_ms * (1 << (task.attempt - 1));
+                                warn!(
+                                    target = %task.target_region,
+                                    attempt = task.attempt,
+                                    delay_ms = delay,
+                                    error = %e,
+                                    "Replication task failed, retrying with backoff"
+                                );
+                                tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                            } else {
+                                warn!(
+                                    target = %task.target_region,
+                                    error = %e,
+                                    "Replication task exhausted max retries; remaining durable in outbox"
+                                );
+                            }
+                        }
+                    }
+                }
+                if !completed {
+                    warn!(
+                        target = %task.target_region,
+                        topic = %task.range.topic,
+                        partition = task.range.partition,
+                        start_offset = task.range.start_offset,
+                        "Replication task not acknowledged; outbox retains range for resume"
+                    );
+                }
+            }
+            info!("Replication retry worker stopped");
+        });
+
+        Some(handle)
+    }
+
+    /// Performs replication handshake with the target broker to synchronize offset cursors upon reconnect.
+    /// Inquires the remote durable watermark and advances the local outbox cursor to avoid redundant transfers (INV-5, INV-6).
+    pub async fn handshake_and_sync_cursor(
+        &self,
+        target_region: &str,
+        topic: &str,
+        partition: u32,
+    ) -> Result<u64, AgentError> {
+        let tcp_addr = {
+            self.peer_addresses
+                .read()
+                .unwrap()
+                .get(target_region)
+                .cloned()
+        };
+
+        let remote_watermark = if let Some(addr) = tcp_addr {
+            let mut client = BrokerClient::connect(&addr).await.map_err(|e| {
+                AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e))
+            })?;
+            client
+                .get_watermark(topic, partition, &self.local_region)
+                .await
+                .map_err(|e| AgentError::TransferFailed(e.to_string()))?
+        } else {
+            let in_mem = {
+                self.peer_brokers
+                    .read()
+                    .unwrap()
+                    .get(target_region)
+                    .cloned()
+            };
+            if let Some(peer) = in_mem {
+                peer.get_watermark(topic, partition, &self.local_region)
+            } else {
+                return Err(AgentError::TargetNotRegistered(target_region.to_string()));
+            }
+        };
+
+        // Advance local outbox cursor and trim ranges completely committed remotely (INV-5, INV-6)
+        if let Some(outbox) = self.local_broker.get_outbox(target_region) {
+            outbox.advance_watermark(remote_watermark);
+        }
+        self.meta
+            .update_watermark(topic, partition, target_region, remote_watermark);
+
+        info!(
+            target = %target_region,
+            topic = %topic,
+            partition = partition,
+            remote_watermark = remote_watermark,
+            "Handshake completed: synchronized cursor with remote broker"
+        );
+
+        Ok(remote_watermark)
     }
 
     /// Performs a single replication drain pass for a target region (§2.7.3, §3.4.5).
@@ -184,6 +536,14 @@ impl ReplicationAgent {
                 summary.ranges_transferred += 1;
                 summary.bytes_transferred += range.byte_size();
                 summary.advanced_watermark = rep_res.applied_watermark;
+            } else if rep_res.reason.contains("offset_gap") {
+                outbox.advance_watermark(rep_res.applied_watermark);
+                self.meta.update_watermark(
+                    &range.topic,
+                    range.partition,
+                    target_region,
+                    rep_res.applied_watermark,
+                );
             }
         }
 
@@ -284,6 +644,14 @@ impl ReplicationAgent {
                 summary.ranges_transferred += 1;
                 summary.bytes_transferred += range.byte_size();
                 summary.advanced_watermark = rep_res.applied_watermark;
+            } else if rep_res.reason.contains("offset_gap") {
+                outbox.advance_watermark(rep_res.applied_watermark);
+                self.meta.update_watermark(
+                    &range.topic,
+                    range.partition,
+                    target_region,
+                    rep_res.applied_watermark,
+                );
             }
         }
 
@@ -478,6 +846,215 @@ mod tests {
         let lag = agent.get_replication_lag("region-us", "events", 0, 1);
         assert_eq!(lag.lag_records, 1);
         assert_eq!(lag.link_rtt_ms, 350.0);
+    }
+
+    #[tokio::test]
+    async fn test_bounded_replication_queue_and_backpressure() {
+        let (agent, _broker_a, _broker_b, _td_a, _td_b) = setup_agent_environment();
+        // Create an agent with capacity of 2
+        let agent = Arc::new(ReplicationAgent::with_queue_capacity(
+            agent.local_region.clone(),
+            agent.local_broker.clone(),
+            agent.meta.clone(),
+            agent.router.clone(),
+            2,
+        ));
+
+        let task1 = ReplicationTask::new(
+            "region-us",
+            OutboxRange {
+                topic: "t1".to_string(),
+                partition: 0,
+                epoch: 1,
+                start_offset: 0,
+                end_offset: 1,
+                class_id: "global-stream".to_string(),
+                payload: b"p1".to_vec(),
+                is_sealed: false,
+            },
+        );
+        let task2 = ReplicationTask::new(
+            "region-us",
+            OutboxRange {
+                topic: "t1".to_string(),
+                partition: 0,
+                epoch: 1,
+                start_offset: 1,
+                end_offset: 2,
+                class_id: "global-stream".to_string(),
+                payload: b"p2".to_vec(),
+                is_sealed: false,
+            },
+        );
+        let task3 = ReplicationTask::new(
+            "region-us",
+            OutboxRange {
+                topic: "t1".to_string(),
+                partition: 0,
+                epoch: 1,
+                start_offset: 2,
+                end_offset: 3,
+                class_id: "global-stream".to_string(),
+                payload: b"p3".to_vec(),
+                is_sealed: false,
+            },
+        );
+
+        // First 2 succeed
+        assert!(agent.try_submit_task(task1).is_ok());
+        assert!(agent.try_submit_task(task2).is_ok());
+
+        // 3rd task exceeds bounded capacity -> returns QueueCapacityExceeded(2)
+        let err = agent.try_submit_task(task3).unwrap_err();
+        match err {
+            AgentError::QueueCapacityExceeded(cap) => assert_eq!(cap, 2),
+            other => panic!("Expected QueueCapacityExceeded, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retry_worker_with_backoff_and_recovery() {
+        let (agent, broker_a, broker_b, _td_a, _td_b) = setup_agent_environment();
+        let agent = Arc::new(agent);
+
+        // Ingest into Broker A
+        broker_a.produce(ProduceRequest {
+            topic: "events".to_string(),
+            partition: 0,
+            producer_id: 100,
+            producer_epoch: 1,
+            sequence_base: 0,
+            class_id: "global-stream".to_string(),
+            payload: b"first-event".to_vec(),
+            residency_rule: None,
+        }).unwrap();
+
+        // Enqueue from outbox to async bounded queue
+        let enqueued = agent.enqueue_pending_outbox_tasks("region-us", 10).unwrap();
+        assert_eq!(enqueued, 1);
+
+        // Spawn retry worker
+        let worker_handle = agent.clone().spawn_retry_worker().await.unwrap();
+
+        // Allow retry worker to process the task
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
+        // Verify watermark advanced to 1 and records exist in broker B
+        let outbox = broker_a.get_outbox("region-us").unwrap();
+        assert_eq!(outbox.durable_watermark(), 1);
+
+        let fetch = broker_b.fetch(kamish_broker::FetchRequest {
+            topic: "events".to_string(),
+            partition: 0,
+            class_id: "global-stream".to_string(),
+            start_offset: 0,
+            max_records: 5,
+        }).unwrap();
+        assert_eq!(fetch.records.len(), 1);
+        assert_eq!(fetch.records[0].payload, b"first-event");
+
+        worker_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_offset_cursor_synchronization_and_deduplication_on_reconnect() {
+        let (agent, broker_a, broker_b, _td_a, _td_b) = setup_agent_environment();
+
+        // 1. Ingest 4 records [0, 1, 2, 3] into Broker A
+        for i in 0..4 {
+            broker_a.produce(ProduceRequest {
+                topic: "orders".to_string(),
+                partition: 0,
+                producer_id: 200,
+                producer_epoch: 1,
+                sequence_base: i,
+                class_id: "global-stream".to_string(),
+                payload: format!("order-{}", i).into_bytes(),
+                residency_rule: None,
+            }).unwrap();
+        }
+
+        // 2. Broker B manually receives records 0 and 1 (simulating transfer before partition)
+        // Broker B now has watermark 2
+        let rep0 = ReplicationRequest {
+            topic: "orders".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 0,
+            to_offset: 1,
+            payload: b"order-0".to_vec(),
+            is_sealed: false,
+        };
+        let rep1 = ReplicationRequest {
+            topic: "orders".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 1,
+            to_offset: 2,
+            payload: b"order-1".to_vec(),
+            is_sealed: false,
+        };
+        assert!(broker_b.handle_replication(rep0).unwrap().accepted);
+        assert!(broker_b.handle_replication(rep1).unwrap().accepted);
+
+        // But broker A's outbox watermark is still 0 (e.g. ACKs dropped in WAN partition)
+        let outbox = broker_a.get_outbox("region-us").unwrap();
+        assert_eq!(outbox.durable_watermark(), 0);
+
+        // 3. Reconnect! ReplicationAgent runs handshake_and_sync_cursor
+        let synced_watermark = agent.handshake_and_sync_cursor("region-us", "orders", 0).await.unwrap();
+        assert_eq!(synced_watermark, 2);
+
+        // Local outbox cursor is now synchronized to 2, and records 0..2 are trimmed!
+        assert_eq!(outbox.durable_watermark(), 2);
+        let pending = outbox.next_transfer_batch(10);
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[0].start_offset, 2);
+        assert_eq!(pending[1].start_offset, 3);
+
+        // 4. Test deduplication on reconnect (INV-6):
+        // If sender accidentally retransmits already-committed range [0..2], receiver must return idempotent duplicate no-op
+        let dup_req = ReplicationRequest {
+            topic: "orders".to_string(),
+            partition: 0,
+            source_region: "region-eu".to_string(),
+            target_region: "region-us".to_string(),
+            class_id: "global-stream".to_string(),
+            epoch: 1,
+            from_offset: 0,
+            to_offset: 2,
+            payload: b"order-0".to_vec(),
+            is_sealed: false,
+        };
+        let dup_res = broker_b.handle_replication(dup_req).unwrap();
+        assert!(dup_res.accepted);
+        assert_eq!(dup_res.reason, "idempotent_duplicate_noop");
+        assert_eq!(dup_res.applied_watermark, 2);
+
+        // 5. Transfer remaining records [2, 3]
+        let summary = agent.step_replication("region-us").unwrap();
+        assert_eq!(summary.ranges_transferred, 2);
+        assert_eq!(summary.advanced_watermark, 4);
+
+        // 6. Broker B has all 4 records with dense continuous monotonic offsets [0, 1, 2, 3] and 0 duplicate writes!
+        let fetched = broker_b.fetch(kamish_broker::FetchRequest {
+            topic: "orders".to_string(),
+            partition: 0,
+            class_id: "global-stream".to_string(),
+            start_offset: 0,
+            max_records: 10,
+        }).unwrap();
+        assert_eq!(fetched.records.len(), 4);
+        for (idx, rec) in fetched.records.iter().enumerate() {
+            assert_eq!(rec.base_offset, idx as u64);
+            assert_eq!(rec.payload, format!("order-{}", idx).into_bytes());
+        }
     }
 }
 

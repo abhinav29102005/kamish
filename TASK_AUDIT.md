@@ -333,3 +333,35 @@ This ledger records every engineering task, cross-referencing requirements, comp
      - Performs degraded link comparison by injecting 300ms WAN delay via `SyntheticChaosInjector` and confirms local produce latency remains sub-millisecond (p50 ~60µs, p99 ~240µs) and fully decoupled from replication backpressure.
 * **Verification:** `cargo run -p kamish-ctl -- benchmark --count 500` executed successfully yielding 12,479+ msg/s sustained throughput.
 * **Status:** PASS
+
+
+### TASK-0022: Bounded Async Replication Queue, Exponential Backoff Retry Worker & Reconnect Cursor Deduplication
+* **Timestamp:** 2026-10-31 18:25 UTC
+* **Components:** `cmd/kamish-agent`, `cmd/kamish-broker`
+* **Project.md References:** §2.2, §2.4, §2.7.3, §3.1.2, §3.3.2, §3.4.5, INV-1, INV-5, INV-6, INV-8
+* **Invariants Checked:**
+  - `INV-1`: Dense monotonic 0-based offset sequences maintained across all partitions.
+  - `INV-5`: Destination partition log is strictly an exact prefix of the source partition log; offset indices match exactly.
+  - `INV-6`: Retrying an already applied replication range is an idempotent no-op returning receiver watermark without duplicating records.
+  - `INV-8`: Egress residency restrictions verified before queuing or dispatching cross-region WAN transfers.
+* **Actions Taken:**
+  1. **Bounded Async Replication Queue (`tokio::sync::mpsc`)**:
+     - Introduced `ReplicationTask` containing target region, `OutboxRange`, attempt counter, max retries, and backoff delay.
+     - Configured `ReplicationAgent` with a bounded `tokio::sync::mpsc` queue (default capacity: 1024), providing non-blocking `try_submit_task(&self, task)` which returns `AgentError::QueueCapacityExceeded` when saturated, enforcing transparent backpressure to the pipeline.
+     - Implemented `enqueue_pending_outbox_tasks(&self, target_region, max_ranges)` to pull batches from the durable outbox and stage them into the async bounded queue.
+  2. **Exponential Backoff Retry Worker (`spawn_retry_worker`)**:
+     - Implemented background retry worker consuming tasks from the bounded queue.
+     - Automatically handles transient transmission failures with exponential backoff: `backoff_ms * (1 << (attempt - 1))`.
+     - Preserves unacknowledged records in the durable outbox upon exhausting `max_retries` without dropping messages or corrupting cursor state.
+  3. **Replication Handshake & Offset Cursor Synchronization (`handshake_and_sync_cursor`)**:
+     - Enabled bidirectional watermark synchronization upon reconnect: queries the remote broker's durable watermark over TCP wire protocol (`BrokerRequest::GetWatermark`) or in-memory peer.
+     - Automatically advances local outbox watermark via `outbox.advance_watermark(remote_watermark)` and trims already-committed ranges from memory.
+  4. **Deduplication Logic on Reconnect**:
+     - Remote broker's `handle_replication` checks `req.to_offset <= local_next` and issues an idempotent duplicate acknowledgment (`"idempotent_duplicate_noop"`) returning `local_next` without appending duplicate entries.
+     - Detects offset gaps (`req.from_offset > local_next`), returns current durable watermark, and prompts sender outbox cursor resynchronization.
+* **Verification:**
+  - `test_bounded_replication_queue_and_backpressure`: verified capacity limit backpressure rejection.
+  - `test_retry_worker_with_backoff_and_recovery`: verified async queuing, worker processing, and watermark progression.
+  - `test_offset_cursor_synchronization_and_deduplication_on_reconnect`: simulated WAN partition, retransmission of ranges, verified idempotent duplicate no-op acknowledgment and 0 duplicate records.
+  - Full workspace test suite: 35 passed, 0 failed (`cargo test --workspace`).
+* **Status:** PASS
