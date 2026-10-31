@@ -13,6 +13,7 @@ All engineering decisions in this repository are recorded here and continuously 
 | **ADR-0003** | 2026-10-31 | Task Audit Ledger & Continuous Spec Checking | Accepted | §1.4.1 (FR-10, FR-13), §3.5.3 (Invariants), §4.11 |
 | **ADR-0004** | 2026-10-31 | Hash-Chained Audit Log Design (`hydra-audit`) | Accepted | §1.4.1 (FR-13), §2.6, §2.7.5, §3.4.1, §4.7.1 |
 | **ADR-0015** | 2026-11-01 | Phase 0 contract and approval gates | **Approved with amendments; parameters/consensus pick pending** | §1.3–1.4, §2.4–2.6, §3.5.3; W01–W08/W11/W12/W28 |
+| **ADR-0016** | 2026-11-01 | Phase 1 consensus candidate review | **Pending maintainer pick** | W01/W02/W05/W08; FR-07/08/13; NFR-01; INV-7 |
 
 ---
 
@@ -414,3 +415,31 @@ Implement W01/W02/W05 before W08; option 1 payload quorum follows Phase 1.
 The audit fixture remains untouched until the witness implementation commit.
 No W item or FR/NFR/INV behavior is closed by these documents. Both probes still
 have their recorded failures; NFR-01 and INV-2/INV-3 remain open.
+
+---
+
+## ADR-0016: Phase 1 consensus candidate review
+
+**Status:** Pending maintainer pick. **Reviewed:** 1 November 2026.
+
+The [candidate comparison](docs/CONSENSUS_CANDIDATES.md) records primary-source
+license, maintenance and integration evidence for:
+
+1. **OpenRaft 0.9.25 — recommended:** MIT OR Apache-2.0, Tokio-native integration;
+   0.9 bug-fix line and separate active 0.10 alpha. Application storage/network/
+   lease/witness implementation remains necessary.
+2. **External etcd 3.7.3:** Apache-2.0, recent maintained release, existing persisted
+   KV/transaction/watch/lease service; additional service operations and Rust
+   client review. Watch notifications have no finite delivery-delay bound.
+3. **raft-rs 0.7.0:** Apache-2.0, published in 2023 with subsequent repository fixes
+   observed in 2026; lower-level core and greater integration burden. Adoption of
+   master instead would require an explicitly reviewed exact Git revision.
+
+These are candidate pins, not installed dependencies. No library/service was
+selected, no third-party tests were run and no Kamish runtime/probe changed.
+Version/maintenance observations are dated; code/adapter correctness, artifact
+digests and transitive dependency review remain adoption work.
+
+**Decision request:** maintainer selects the candidate before implementation.
+Separately resolve ADR-0015's lease parameters, audit cap and revocation boundary.
+The order remains W01/W02/W05, then W08; payload quorum comes after Phase 1.

@@ -423,6 +423,8 @@ trusted audit-completeness probes remain failing.
 | `3466821` | Replication/CLI fixes and truthful frontend demonstration |
 | `170de8e` | PowerShell degraded-demo latency wording clarification |
 | `77bb051` | Frontend logo integration; exact revision used for the fresh Phase 0 baseline |
+| `9955f77` | Initial Phase 0 contract proposal, handover and baseline evidence |
+| `c516321` | Approved contract amendments: lease authority, audit coverage/controls and revocation decision gates |
 
 Earlier milestone reports and task entries provide additional history. Some
 task IDs in the historical ledger repeat; use commit, file, date and test names
@@ -469,6 +471,19 @@ rather than assuming task numbers alone uniquely identify every change.
   unanchored-window controls. No probe changed in the documentation amendments.
 - Phase 1 preparation may compare consensus candidates. Wait for the maintainer's
   library/service pick and relevant lease/consistency decisions before implementation.
+
+### 3.14 Phase 1 preparation — consensus comparison, selection pending
+
+- [Candidate review](docs/CONSENSUS_CANDIDATES.md) and
+  [ADR-0016](decisions.md#adr-0016-phase-1-consensus-candidate-review) compare
+  OpenRaft 0.9.25, external etcd 3.7.3 and raft-rs 0.7.0 using dated primary sources.
+- OpenRaft's Tokio integration is the recommendation, not a dependency selection.
+  Library storage/transport adapters and application leases remain necessary.
+  etcd watch delivery is not a bounded revocation channel; raft-rs has newer
+  repository fixes than its published crate.
+- No dependency, authority code, audit fixture or runtime test was changed.
+  Recorded counts and both failing contracts retain their last baseline status.
+  Wait for the maintainer's candidate pick and relevant consistency parameters.
 
 ---
 

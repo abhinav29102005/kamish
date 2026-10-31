@@ -1,0 +1,2 @@
+PASS: 6 Markdown files (local links, anchors, fences, whitespace).
+PASS: entire remaining_gaps.rs is byte-identical to 9955f77 (tamper assertion included).
