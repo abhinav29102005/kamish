@@ -9,3 +9,15 @@ model/*.obj
 # Local Environment & Secrets
 .env
 .env.*
+
+# Local binaries & etcd
+bin/
+data/etcd/
+*.tar.gz
+
+# TLS secrets & certificates (No secrets committed)
+certs/
+*.crt
+*.key
+*.csr
+*.pem

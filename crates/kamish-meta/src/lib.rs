@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, RwLock};
+
+pub mod etcd;
+pub use etcd::EtcdMetadataAuthority;
 use std::time::Duration;
 use thiserror::Error;
 
