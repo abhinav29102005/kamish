@@ -10,9 +10,19 @@ kamish-audit = { path = "../../crates/kamish-audit" }
 kamish-policy = { path = "../../crates/kamish-policy" }
 kamish-enforce = { path = "../../crates/kamish-enforce" }
 kamish-log = { path = "../../crates/kamish-log" }
+kamish-meta = { path = "../../crates/kamish-meta" }
+kamish-outbox = { path = "../../crates/kamish-outbox" }
+thiserror = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"
+chrono = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }

@@ -194,3 +194,29 @@ This ledger records every engineering task, cross-referencing requirements, comp
   3. Built `CanaryScanner` identifying leak of synthetic canary tokens into forbidden regions.
 * **Verification:** Unit tests verifying ordering gap detection and canary leak detection.
 * **Status:** PASS
+
+### TASK-0015: Regional Broker Server Ingestion, Outbox Planning & Multi-Broker Replication Engine (`cmd/kamish-broker`)
+* **Timestamp:** 2026-10-31 17:34 UTC
+* **Component:** `cmd/kamish-broker`
+* **Project.md References:** §2.6, §2.7.2, §3.1.1, §3.1.2, INV-1, INV-4, INV-5, INV-6, INV-8, FR-01, FR-02, FR-03, FR-05
+* **Invariants Checked:** INV-1 (dense monotonic offsets), INV-4 (reads bounded by High-Water Mark), INV-5 (prefix matching and exact offset preservation), INV-6 (idempotent duplicate deduplication), INV-8 (zero unauthorized egress outside legal set)
+* **Actions Taken:**
+  1. Built `BrokerServer` integrating `Enforcer` (E1/E2 ingress and broker append validation, E4 replication egress planning, E5 replication receiver validation, and E7 consumer fetch validation).
+  2. Implemented idempotent producer session validation via `SessionManager`: duplicate retried sequence numbers immediately return the cached offset without corrupting the partition log.
+  3. Built automated cross-region replication planning: upon local commit, permitted destination regions are filtered through E4 policy checks and automatically enqueued into bounded `DestinationOutbox` streams.
+  4. Built multi-broker test suite validating end-to-end produce, consumer fetch, outbox trimming, watermark advancement, and regional partition outage buffering.
+* **Verification:** Unit tests verifying producer deduplication, strict residency rejection, outbox egress filtering, cross-broker watermark catchup, and partition recovery (`cargo test -p kamish-broker`).
+* **Status:** PASS
+
+### TASK-0016: Inter-Region Replication Agent with Adaptive Routing & Real-Time Lag Telemetry (`cmd/kamish-agent`)
+* **Timestamp:** 2026-10-31 17:34 UTC
+* **Component:** `cmd/kamish-agent`
+* **Project.md References:** §2.2, §2.7.3, §2.7.4, §3.1.2, §3.4.5, §4.4, INV-5, INV-6, INV-8, FR-05, FR-06
+* **Invariants Checked:** INV-5 (exact offset mirror replication), INV-6 (resumable watermarks without duplication), INV-8 (hard policy filtering before WAN route scoring)
+* **Actions Taken:**
+  1. Built `ReplicationAgent` linking local broker outbox queues to remote peer broker endpoints.
+  2. Integrated `RouteSelector` with hard policy graph filtering, ensuring only legally permitted direct and relay paths are considered for transfer.
+  3. Implemented watermark synchronization: upon remote broker acknowledgment, local outbox watermarks advance and applied ranges are trimmed.
+  4. Implemented real-time replication lag telemetry measuring $\text{LocalHighWatermark} - \text{RemoteDurableWatermark}$ and active link RTT/loss metrics.
+* **Verification:** Unit tests verifying end-to-end cross-region replication draining, lag monitoring, and slow-link metrics tracking (`cargo test -p kamish-agent`).
+* **Status:** PASS

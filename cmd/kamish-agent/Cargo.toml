@@ -9,7 +9,21 @@ authors.workspace = true
 kamish-audit = { path = "../../crates/kamish-audit" }
 kamish-policy = { path = "../../crates/kamish-policy" }
 kamish-enforce = { path = "../../crates/kamish-enforce" }
+kamish-outbox = { path = "../../crates/kamish-outbox" }
+kamish-route = { path = "../../crates/kamish-route" }
+kamish-meta = { path = "../../crates/kamish-meta" }
+kamish-broker = { path = "../kamish-broker" }
+thiserror = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"
+chrono = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+hex = { workspace = true }
