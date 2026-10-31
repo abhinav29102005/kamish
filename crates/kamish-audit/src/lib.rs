@@ -1,8 +1,9 @@
-//! Hash-chained, region-local decision log for Hydra Stream.
+//! Hash-chained, region-local decision log for Kamish.
 //!
 //! Complies with `project.md`:
 //! - FR-13: Hash-chained, region-local decision log.
-//! - §2.6 & §2.7.5: Audit sink D5 receiving decision events from enforcement point P26.
+//! - §2.6: Enforcement Points Map (E1 to E10).
+//! - §2.7.5: Level 3 Process 2.0 Policy Decision Sink D5.
 //! - §4.7.1: Zero-payload threat mitigation — stores decisions and versions, NEVER payload.
 
 use chrono::Utc;
@@ -47,15 +48,31 @@ pub enum AuditError {
     },
 }
 
-/// Operations subject to policy enforcement and auditing.
+/// Operations subject to policy enforcement and auditing across all 10 enforcement points (§2.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuditAction {
-    Produce,
-    SendRegion,
-    PersistRemote,
+    /// E1: Ingress gateway (PERSIST_LOCAL)
+    Ingress,
+    /// E2: Broker append (PERSIST_LOCAL)
+    BrokerAppend,
+    /// E3: In-region replica sync (PERSIST_REPLICA)
+    InRegionReplica,
+    /// E4: Cross-region replication sender (SEND_REGION)
+    ReplicationSender,
+    /// E5: Cross-region replication receiver (PERSIST_REMOTE)
+    ReplicationReceiver,
+    /// E6: Backup and tiered export (EXPORT_BACKUP)
+    BackupExport,
+    /// E7: Consumer fetch service (SERVE_FETCH)
+    ConsumerFetch,
+    /// E8: Failover partition promotion (PROMOTE)
     Promote,
-    Fetch,
-    Replay,
+    /// E8-Alt: Telemetry collector export (EXPORT_TELEMETRY)
+    TelemetryExport,
+    /// E9: Admin / replay tools (ADMIN_READ, REPLAY)
+    AdminReplay,
+    /// E10: Relay hop intermediate transit (TRANSIT)
+    RelayTransit,
 }
 
 /// Enforcement decision outcome.
@@ -365,7 +382,7 @@ mod tests {
 
         let e0 = log
             .record(
-                AuditAction::Produce,
+                AuditAction::Ingress,
                 "EU-restricted",
                 "eu-central",
                 "eu-central",
@@ -380,7 +397,7 @@ mod tests {
 
         let e1 = log
             .record(
-                AuditAction::SendRegion,
+                AuditAction::ReplicationSender,
                 "EU-restricted",
                 "eu-central",
                 "us-east",
@@ -404,7 +421,7 @@ mod tests {
         {
             let log = AuditLog::open(&log_path).unwrap();
             log.record(
-                AuditAction::Produce,
+                AuditAction::BrokerAppend,
                 "Class-A",
                 "reg-1",
                 "reg-1",
@@ -414,7 +431,7 @@ mod tests {
             )
             .unwrap();
             log.record(
-                AuditAction::SendRegion,
+                AuditAction::ReplicationSender,
                 "Class-A",
                 "reg-1",
                 "reg-2",
@@ -439,7 +456,7 @@ mod tests {
         {
             let log = AuditLog::open(&log_path).unwrap();
             log.record(
-                AuditAction::Produce,
+                AuditAction::Ingress,
                 "Class-X",
                 "reg-1",
                 "reg-1",

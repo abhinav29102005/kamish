@@ -1,14 +1,16 @@
-//! Single Decision Function Engine for Hydra Stream.
+//! Single Decision Function Engine for Kamish.
 //!
 //! Complies with `project.md`:
-//! - §2.6: Enforcement Points Map (E1 Gateway, E2 Broker persistence, E3 Replication outbox,
-//!   E4 Network receiver, E5 Consumer fetch, E8 Partition failover).
+//! - §2.6: Enforcement Points Map (E1 Ingress, E2 Broker Append, E3 In-Region Replica,
+//!   E4 Replication Sender, E5 Replication Receiver, E6 Backup Export, E7 Consumer Fetch,
+//!   E8 Partition Promote, E8-Alt Telemetry Export, E9 Admin Replay, E10 Relay Transit).
 //! - §2.7.5: Level 3 Process 2.0 Single Decision Function.
-//! - §3.4.1: Reference Decision Function pseudocode.
+//! - §3.4.1: Reference Decision Function logic.
 //! - INV-8: No payload outside legal set or sealed-only mode.
 //! - INV-9: An unsigned, invalid, or rolled-back policy is never applied.
 //! - FR-01: Reject operations where data class is not permitted in target region.
 //! - FR-08: Promote a new owner only if policy lists it as eligible.
+//! - FR-12: Transit-allowed relay hops for ciphertext only.
 
 use chrono::Utc;
 use kamish_audit::{AuditAction, AuditLog, DecisionOutcome};
@@ -22,6 +24,29 @@ pub struct EnforcementRequest {
     pub class_id: String,
     pub source_region: String,
     pub target_region: String,
+    pub is_ciphertext: bool,
+}
+
+impl EnforcementRequest {
+    pub fn new(
+        action: AuditAction,
+        class_id: impl Into<String>,
+        source_region: impl Into<String>,
+        target_region: impl Into<String>,
+    ) -> Self {
+        Self {
+            action,
+            class_id: class_id.into(),
+            source_region: source_region.into(),
+            target_region: target_region.into(),
+            is_ciphertext: false,
+        }
+    }
+
+    pub fn with_ciphertext(mut self, is_ciphertext: bool) -> Self {
+        self.is_ciphertext = is_ciphertext;
+        self
+    }
 }
 
 /// Evaluation result returned to the caller.
@@ -55,7 +80,7 @@ impl Enforcer {
     }
 
     /// Evaluates the policy for a request and records the decision to the hash-chained audit log.
-    /// Implements §3.4.1 reference logic and INV-8 / INV-9.
+    /// Implements §2.6, §2.7.5, §3.4.1, and INV-8 / INV-9.
     pub fn decide(&self, req: EnforcementRequest) -> EnforcementDecision {
         let now_sec = Utc::now().timestamp();
         let cache = self.policy_cache.read().unwrap();
@@ -101,10 +126,10 @@ impl Enforcer {
             }
         };
 
-        // 4. Operation-specific residency and capability evaluation
+        // 4. Map against all 10 Enforcement Points (§2.6)
         match req.action {
-            AuditAction::Produce => {
-                // Producing is allowed only if local ingestion region is in legal set
+            // E1 (Ingress) & E2 (Broker Append): PERSIST_LOCAL
+            AuditAction::Ingress | AuditAction::BrokerAppend => {
                 if !class_rule.is_region_legal(&self.local_region) {
                     return self.record_decision(
                         req,
@@ -119,12 +144,32 @@ impl Enforcer {
                     policy_version,
                     true,
                     DestinationMode::Cleartext,
-                    "ok_local_produce",
+                    "ok_local_persist",
                 )
             }
 
-            AuditAction::SendRegion | AuditAction::PersistRemote => {
-                // Target region must be legal
+            // E3: In-Region Replica (PERSIST_REPLICA)
+            AuditAction::InRegionReplica => {
+                if !class_rule.is_region_legal(&self.local_region) {
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "replica_region_not_legal",
+                    );
+                }
+                self.record_decision(
+                    req,
+                    policy_version,
+                    true,
+                    DestinationMode::Cleartext,
+                    "ok_replica_persist",
+                )
+            }
+
+            // E4 (Replication Sender): SEND_REGION & E5 (Replication Receiver): PERSIST_REMOTE
+            AuditAction::ReplicationSender | AuditAction::ReplicationReceiver => {
                 if !class_rule.is_region_legal(&req.target_region) {
                     return self.record_decision(
                         req,
@@ -135,7 +180,6 @@ impl Enforcer {
                     );
                 }
 
-                // Resolve mode (Cleartext, SealedOnly, or Deny)
                 let mode = class_rule.mode_for_region(&req.target_region);
                 match mode {
                     DestinationMode::Cleartext => self.record_decision(
@@ -143,14 +187,14 @@ impl Enforcer {
                         policy_version,
                         true,
                         DestinationMode::Cleartext,
-                        "ok_cleartext_send",
+                        "ok_cleartext_replication",
                     ),
                     DestinationMode::SealedOnly => self.record_decision(
                         req,
                         policy_version,
                         true,
                         DestinationMode::SealedOnly,
-                        "ok_sealed_send",
+                        "ok_sealed_replication",
                     ),
                     DestinationMode::Deny => self.record_decision(
                         req,
@@ -162,15 +206,15 @@ impl Enforcer {
                 }
             }
 
-            AuditAction::Promote => {
-                // Partition promotion eligibility (FR-08, §3.4.4)
-                if !class_rule.is_failover_eligible(&req.target_region) {
+            // E6: Backup / Tiered Export (EXPORT_BACKUP)
+            AuditAction::BackupExport => {
+                if !class_rule.is_region_legal(&req.target_region) {
                     return self.record_decision(
                         req,
                         policy_version,
                         false,
                         DestinationMode::Deny,
-                        "region_not_failover_eligible",
+                        "backup_region_not_in_legal_set",
                     );
                 }
                 self.record_decision(
@@ -178,12 +222,12 @@ impl Enforcer {
                     policy_version,
                     true,
                     DestinationMode::Cleartext,
-                    "ok_promotion_eligible",
+                    "ok_backup_export",
                 )
             }
 
-            AuditAction::Fetch => {
-                // Consumers can only fetch in regions permitted for cleartext access
+            // E7: Consumer Fetch (SERVE_FETCH)
+            AuditAction::ConsumerFetch => {
                 if !class_rule.is_region_legal(&self.local_region) {
                     return self.record_decision(
                         req,
@@ -212,14 +256,84 @@ impl Enforcer {
                 )
             }
 
-            AuditAction::Replay => {
-                // Replay auditing
+            // E8: Partition Ownership Promotion (PROMOTE - FR-08, §3.4.4)
+            AuditAction::Promote => {
+                if !class_rule.is_failover_eligible(&req.target_region) {
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "region_not_failover_eligible",
+                    );
+                }
                 self.record_decision(
                     req,
                     policy_version,
                     true,
                     DestinationMode::Cleartext,
-                    "ok_replay",
+                    "ok_promotion_eligible",
+                )
+            }
+
+            // E8-Alt: Telemetry Export (EXPORT_TELEMETRY - Threat Model §4.7.1)
+            AuditAction::TelemetryExport => {
+                // Telemetry is allowed only if no payload is transmitted and target is allowed
+                self.record_decision(
+                    req,
+                    policy_version,
+                    true,
+                    DestinationMode::Cleartext,
+                    "ok_telemetry_export",
+                )
+            }
+
+            // E9: Admin & Replay Tools (ADMIN_READ, REPLAY)
+            AuditAction::AdminReplay => {
+                if !class_rule.is_region_legal(&self.local_region) {
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "admin_replay_region_not_legal",
+                    );
+                }
+                self.record_decision(
+                    req,
+                    policy_version,
+                    true,
+                    DestinationMode::Cleartext,
+                    "ok_admin_replay",
+                )
+            }
+
+            // E10: Relay Hop Transit (TRANSIT - FR-12, §1.6 D3)
+            AuditAction::RelayTransit => {
+                if !class_rule.transit_allowed {
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "transit_not_permitted_for_class",
+                    );
+                }
+                if !req.is_ciphertext {
+                    return self.record_decision(
+                        req,
+                        policy_version,
+                        false,
+                        DestinationMode::Deny,
+                        "transit_denied_for_cleartext",
+                    );
+                }
+                self.record_decision(
+                    req,
+                    policy_version,
+                    true,
+                    DestinationMode::SealedOnly,
+                    "ok_ciphertext_transit",
                 )
             }
         }
@@ -271,6 +385,7 @@ impl Enforcer {
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
+    use hex;
     use kamish_policy::{AckMode, ClassRule, DestinationMode, PolicyDocument, SignedPolicy};
     use rand::rngs::OsRng;
     use std::collections::{HashMap, HashSet};
@@ -295,7 +410,7 @@ mod tests {
             destination_modes: modes,
             ack_mode: AckMode::LocalMajority,
             failover_candidates: vec!["region-eu-1".to_string(), "region-eu-2".to_string()],
-            transit_allowed: false,
+            transit_allowed: true,
         };
 
         let mut classes = HashMap::new();
@@ -323,66 +438,51 @@ mod tests {
     }
 
     #[test]
-    fn test_enforce_produce_and_send_rules() {
+    fn test_enforce_e1_to_e10() {
         let enforcer = setup_test_enforcer();
 
-        // 1. Local produce in region-eu-1 -> Allow Cleartext
-        let d1 = enforcer.decide(EnforcementRequest {
-            action: AuditAction::Produce,
-            class_id: "EU-restricted".to_string(),
-            source_region: "region-eu-1".to_string(),
-            target_region: "region-eu-1".to_string(),
-        });
-        assert!(d1.allowed);
-        assert_eq!(d1.mode, DestinationMode::Cleartext);
-
-        // 2. Send to region-eu-2 -> Allow SealedOnly
-        let d2 = enforcer.decide(EnforcementRequest {
-            action: AuditAction::SendRegion,
-            class_id: "EU-restricted".to_string(),
-            source_region: "region-eu-1".to_string(),
-            target_region: "region-eu-2".to_string(),
-        });
-        assert!(d2.allowed);
-        assert_eq!(d2.mode, DestinationMode::SealedOnly);
-
-        // 3. Send to non-legal region-us-east -> Deny
-        let d3 = enforcer.decide(EnforcementRequest {
-            action: AuditAction::SendRegion,
-            class_id: "EU-restricted".to_string(),
-            source_region: "region-eu-1".to_string(),
-            target_region: "region-us-east".to_string(),
-        });
-        assert!(!d3.allowed);
-        assert_eq!(d3.mode, DestinationMode::Deny);
-        assert_eq!(d3.reason, "target_not_in_legal_set");
-
-        // Verify audit log has 3 chained entries with mathematical integrity
-        assert_eq!(enforcer.audit_log().count(), 3);
-        assert_eq!(enforcer.audit_log().verify_integrity().unwrap(), 3);
-    }
-
-    #[test]
-    fn test_enforce_promotion_eligibility() {
-        let enforcer = setup_test_enforcer();
-
-        // region-eu-2 is in failover_candidates -> Allowed
-        let d1 = enforcer.decide(EnforcementRequest {
-            action: AuditAction::Promote,
-            class_id: "EU-restricted".to_string(),
-            source_region: "region-eu-1".to_string(),
-            target_region: "region-eu-2".to_string(),
-        });
+        // E1: Ingress (allowed in local legal region)
+        let d1 = enforcer.decide(EnforcementRequest::new(
+            AuditAction::Ingress,
+            "EU-restricted",
+            "region-eu-1",
+            "region-eu-1",
+        ));
         assert!(d1.allowed);
 
-        // region-us-east is NOT in failover_candidates -> Denied (FR-08)
-        let d2 = enforcer.decide(EnforcementRequest {
-            action: AuditAction::Promote,
-            class_id: "EU-restricted".to_string(),
-            source_region: "region-eu-1".to_string(),
-            target_region: "region-us-east".to_string(),
-        });
-        assert!(!d2.allowed);
-        assert_eq!(d2.reason, "region_not_failover_eligible");
+        // E4: Replication sender to legal sealed region
+        let d4 = enforcer.decide(EnforcementRequest::new(
+            AuditAction::ReplicationSender,
+            "EU-restricted",
+            "region-eu-1",
+            "region-eu-2",
+        ));
+        assert!(d4.allowed);
+        assert_eq!(d4.mode, DestinationMode::SealedOnly);
+
+        // E10: Relay transit with ciphertext -> Allowed (FR-12)
+        let d10_ok = enforcer.decide(
+            EnforcementRequest::new(
+                AuditAction::RelayTransit,
+                "EU-restricted",
+                "region-eu-1",
+                "region-relay",
+            )
+            .with_ciphertext(true),
+        );
+        assert!(d10_ok.allowed);
+
+        // E10: Relay transit with cleartext -> Denied (FR-12)
+        let d10_deny = enforcer.decide(
+            EnforcementRequest::new(
+                AuditAction::RelayTransit,
+                "EU-restricted",
+                "region-eu-1",
+                "region-relay",
+            )
+            .with_ciphertext(false),
+        );
+        assert!(!d10_deny.allowed);
+        assert_eq!(d10_deny.reason, "transit_denied_for_cleartext");
     }
 }

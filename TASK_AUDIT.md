@@ -98,3 +98,50 @@ This ledger records every engineering task, cross-referencing requirements, comp
   3. Added ADR-0005 in `decisions.md`.
 * **Verification:** Full workspace build and test pass (`cargo test --workspace`).
 * **Status:** PASS
+
+### TASK-0007: Comprehensive Enforcement Points E1-E10 Mapping
+* **Timestamp:** 2026-10-31 16:56 UTC
+* **Components:** `crates/kamish-audit`, `crates/kamish-enforce`
+* **Project.md References:** §2.6, §2.7.5, Table 2.6, INV-8, FR-12
+* **Invariants Checked:** INV-8 (no payload outside legal set/sealed mode), FR-12 (transit relay for ciphertext only)
+* **Actions Taken:**
+  1. Extended `AuditAction` to cover E1 through E10 (Ingress, BrokerAppend, InRegionReplica, ReplicationSender, ReplicationReceiver, BackupExport, ConsumerFetch, Promote, TelemetryExport, AdminReplay, RelayTransit).
+  2. Implemented strict ciphertext enforcement for relay transit (E10): cleartext transit attempts are rejected with `transit_denied_for_cleartext`.
+* **Verification:** Unit tests covering E1, E4, and E10 cleartext rejection.
+* **Status:** PASS
+
+### TASK-0008: Metadata Entity Store (`kamish-meta`)
+* **Timestamp:** 2026-10-31 16:56 UTC
+* **Component:** `crates/kamish-meta`
+* **Project.md References:** §2.5, §2.2, INV-7
+* **Invariants Checked:** INV-7 (no two regions commit writes for same partition and epoch)
+* **Actions Taken:**
+  1. Built thread-safe metadata store holding topics, partitions, ownership, and replicas.
+  2. Implemented CAS epoch promotion: bumping partition epoch monotonically upon verified failover.
+  3. Built durable watermark tracking per remote replica.
+* **Verification:** Unit tests verifying epoch fencing CAS and watermark monotonicity.
+* **Status:** PASS
+
+### TASK-0009: Durable Outbox & Watermark Trimming (`kamish-outbox`)
+* **Timestamp:** 2026-10-31 16:57 UTC
+* **Component:** `crates/kamish-outbox`
+* **Project.md References:** §2.2, §2.7.3, §3.3.2, INV-5, INV-6
+* **Invariants Checked:** INV-5 (prefix matching), INV-6 (idempotent duplicate retry)
+* **Actions Taken:**
+  1. Implemented bounded queues per destination region with backpressure rules (Block, Reject, DegradeLocal).
+  2. Implemented watermark advancement: ranges strictly below durable watermark are trimmed from the queue.
+  3. Handled duplicate acks idempotently without state corruption.
+* **Verification:** Unit tests for bounded queue limits, watermark advancement, and duplicate no-op acks.
+* **Status:** PASS
+
+### TASK-0010: WAN-Adaptive Route Selector (`kamish-route`)
+* **Timestamp:** 2026-10-31 16:57 UTC
+* **Component:** `crates/kamish-route`
+* **Project.md References:** §2.2, §2.7.4, §3.3.4, §3.4.3, NFR-04
+* **Invariants Checked:** INV-8 (hard policy filter before routing), NFR-04 (hysteresis & dwell time)
+* **Actions Taken:**
+  1. Implemented two-stage route picker: hard policy filtering FIRST across all hops, followed by candidate path scoring.
+  2. Implemented §3.4.3 cost calculation (`W1*RTT + W2*Loss + W3*QueueDelay + W4*Cost + W5*CongestionRisk`).
+  3. Integrated 15% hysteresis margin and 5000ms dwell window to prevent routing oscillations.
+* **Verification:** Unit tests verifying illegal fast paths are rejected in favor of legal permitted paths.
+* **Status:** PASS

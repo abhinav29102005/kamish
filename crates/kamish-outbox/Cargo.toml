@@ -1,0 +1,18 @@
+[package]
+name = "kamish-outbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kamish-audit = { path = "../kamish-audit" }
+kamish-policy = { path = "../kamish-policy" }
+kamish-enforce = { path = "../kamish-enforce" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.17"

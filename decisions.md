@@ -135,3 +135,38 @@ Requirement **FR-13 (P1)** and §2.6 / §2.7.5 specify a hash-chained, region-lo
 ### Compliance with `project.md`
 - **§2.6 (Enforcement Points Map):** E1 (Gateway) and E2 (Broker append) map to `Produce`, E3/E4 map to `TransferReplicationRange`, E5 maps to `Fetch`, E8 maps to `PromotePartitionOwner`.
 - **§3.5.1:** Protobuf definitions use explicit domain semantics rather than generic paths.
+
+---
+
+## ADR-0006: Metadata Store & Comprehensive Enforcement Points E1-E10
+
+### Context
+`project.md` Part 2 details:
+1. §2.5 Metadata Entity-Relationship Model (Topic, Partition, Ownership, Replica, OutboxStream) with monotonic epochs and lease bounds.
+2. §2.6 Enforcement Points Map: Every byte movement boundary must call `enforce()` across all 10 operations:
+   - E1 (Ingress), E2 (BrokerAppend), E3 (InRegionReplica), E4 (ReplicationSender), E5 (ReplicationReceiver), E6 (BackupExport), E7 (ConsumerFetch), E8 (Promote), E8-Alt (TelemetryExport), E9 (AdminReplay), E10 (RelayTransit).
+
+### Decision
+1. Implement `kamish-meta` providing thread-safe, compare-and-swap epoch promotion and durable watermark tracking.
+2. Extend `kamish-enforce` and `kamish-audit` to evaluate and audit all 10 operations mapped in §2.6.
+
+### Compliance with `project.md`
+- **§2.5 & §2.6:** Exact contract alignment.
+- **INV-7 & INV-8:** Fenced ownership and complete movement boundary checking.
+
+---
+
+## ADR-0007: Durable Outbox & Permitted-Graph Route Scoring
+
+### Context
+`project.md` §2.2, §2.7.3, §2.7.4, and §3.4.3 specify:
+1. Per-destination bounded durable outbox queues with backpressure rules (`Block`, `Reject`, `DegradeLocal`) and resumable watermarks.
+2. Route selector filtering to the policy-permitted graph first, then optimizing inside it using the cost scoring function with hysteresis margin and circuit breaker protection.
+
+### Decision
+1. Implement `kamish-outbox` managing bounded queues per destination region with watermark advancement and automatic trimming.
+2. Implement `kamish-route` executing `enforce()` against all direct and relay paths before scoring.
+
+### Compliance with `project.md`
+- **§2.2, §2.7.3, §2.7.4, §3.4.3:** Direct realization of replication planning and routing.
+- **INV-5 & INV-6:** Prefix ordering, exact offset preservation, and idempotent range re-transfers.
