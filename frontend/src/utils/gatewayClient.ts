@@ -134,19 +134,33 @@ export function resolveGatewayConfig(): { baseUrl: string; configError: string |
     : "";
 
   if (envUrl) {
-    // Validate protocol if explicitly set
-    if (!/^https?:\/\//i.test(envUrl)) {
+    // Parse the complete URL rather than trusting a scheme-only regular expression.
+    try {
+      const parsed = new URL(envUrl);
+      if (
+        (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+        !parsed.hostname ||
+        parsed.username ||
+        parsed.password ||
+        parsed.search ||
+        parsed.hash
+      ) {
+        throw new Error("URL must use HTTP(S), include a host, and contain no credentials, query, or fragment");
+      }
+      const pathPrefix = parsed.pathname.replace(/\/+$/, "");
+      return {
+        baseUrl: `${parsed.origin}${pathPrefix === "/" ? "" : pathPrefix}`,
+        configError: null,
+        topologyMode: "separate-origin",
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "invalid URL";
       return {
         baseUrl: "",
-        configError: `Invalid VITE_KAMISH_GATEWAY_URL '${envUrl}': must start with http:// or https://`,
+        configError: `Invalid VITE_KAMISH_GATEWAY_URL '${envUrl}': ${detail}`,
         topologyMode: "separate-origin",
       };
     }
-    return {
-      baseUrl: envUrl.replace(/\/+$/, ""),
-      configError: null,
-      topologyMode: "separate-origin",
-    };
   }
 
   // Development fallback: when Vite dev server is on port 5173, point directly to standard gateway port 3001
@@ -468,8 +482,18 @@ class GatewayClient {
     return this.request<RetentionStatusResponse>("/api/retention");
   }
 
-  public async triggerReconciliation(targetRegion?: string): Promise<{ status: string; total_gaps_scheduled: number; scheduled_records: number }> {
-    return this.request<{ status: string; total_gaps_scheduled: number; scheduled_records: number }>("/api/reconciliation/run", {
+  public async triggerReconciliation(targetRegion?: string): Promise<{
+    status: string;
+    targets_reconciled: string[];
+    gaps_discovered: number;
+    records_scheduled_into_outbox: number;
+  }> {
+    return this.request<{
+      status: string;
+      targets_reconciled: string[];
+      gaps_discovered: number;
+      records_scheduled_into_outbox: number;
+    }>("/api/reconciliation/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ target_region: targetRegion || null }),
