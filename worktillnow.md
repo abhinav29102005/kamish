@@ -3423,3 +3423,20 @@ Milestone FN-03 closes the replication metadata and context preservation gap ide
 - **Implementation (`crates/kamish-own/src/lib.rs`, `crates/kamish-seal/src/lib.rs`):**
   - Enforced a hard upper bound of 100,000 records on `QuarantineStore::quarantine_records`, safely draining oldest records if runaway divergence occurs, preventing disk space exhaustion.
   - Updated `crates/kamish-seal/src/lib.rs` documentation to remove misleading claims regarding XOR prototype confidentiality, defining the required AEAD ciphersuite (ChaCha20-Poly1305 / AES-256-GCM, 96-bit random nonce, topic/partition/epoch AAD binding) and external KMS/HSM key custody boundary.
+
+
+## 35. Deep Reconnaissance & Implementation Reality Audit (2026-11-01)
+- **Scope & Method:**
+  - Conducted a static source, git commit history, and artifact reality audit across the entire workspace at commit `6a5ef4a4802e613441cdc8a3ce5e225add236a2c` on branch `main`.
+  - Strictly executed in read-only mode without code modifications, tests, test commands, benchmarks, or deployments.
+  - Reconciled all previous milestone claims and backlog items against direct source evidence, separating working implementations from unintegrated abstractions, educational mocks, and unverified runtime claims.
+- **Key Realities Established:**
+  - **Durability Guarantee:** Single-node persistent `LeaderFsync` is fully operational and crash-durable. In-region multi-replica quorum durability (`AckLevel::InRegionQuorum`) is **not** supported by the live `BrokerServer` runtime (unit test prototype only).
+  - **Sealed Replication:** `crates/kamish-seal` XOR prototype is an educational mock; `BrokerServer` deliberately fails closed with `"sealed_replication_not_configured"`. Production AEAD and cloud KMS key custody remain open dependencies.
+  - **Replication Pipeline:** End-to-end replication is fully connected, incorporating `AdaptiveRouteSelector`, circuit breakers, provenance-aware watermark advancement (`advance_partition_watermark_with_provenance`), and bounded quarantine routing (100k cap).
+  - **Security & Authorization:** Wire-level RBAC is active on all broker TCP commands, with tenant authorization enforced on consumer offset checkpoints (`f.sync_all()` durability).
+  - **Audit Trails:** Rolling SHA-256 hash chains and Ed25519 witness signing are implemented, but autonomous background witness publication to an external authority is not yet scheduled.
+- **Deliverables Produced:**
+  - `DEEP_RECONNAISSANCE_REPORT.md`: Comprehensive 15-section audit report with architectural reconstructions, path traces, and evidence assessments.
+  - `IMPLEMENTATION_INVENTORY.md`: Granular status matrix covering 40+ capabilities classified under strict audit labels.
+  - `REMAINING_WORK_BACKLOG.md`: Authoritative engineering backlog organized from P0 to P3, purging previously resolved backlog items.
