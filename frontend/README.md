@@ -9,8 +9,9 @@ The React/Vite frontend contains a **hybrid** architecture supporting both live 
 - Interacts with real broker endpoints:
   - Session authentication with PBKDF2-HMAC-SHA256 and CSRF tokens (`/api/auth/*`).
   - Real record produce and offset fetch (`/api/records/produce`, `/api/records/fetch`).
-  - Real regional cluster health, authority epochs, and partition leases (`/api/status`, `/api/authority`).
+  - Real regional gateway health and authority state (`/api/status`, `/api/authority`).
   - Real bounded destination outbox queue depth and replication lags (`/api/streams`).
+  - Aggregate accepted/denied decision counts, broker throughput, and p99 latency are **not currently exposed by the gateway API**; the dashboard displays `N/A` instead of substituting demo values.
   - Live cryptographic audit log verification (`/api/audit/verify`, `/api/audit`).
   - Reactive server-sent events (`/api/events`).
 - Live cluster badge dynamically displays true gateway connection state (`CONNECTED`, `CONNECTING`, `AUTH REQUIRED`, `GATEWAY UNAVAILABLE`, or `CONFIG ERROR`), eliminating false-green indicators when the backend is offline.
@@ -45,7 +46,7 @@ The frontend static SPA build (`dist/`) and the Rust gateway (`kamish-gateway` o
 - See [`nginx.conf.example`](./nginx.conf.example) for a production Nginx configuration including SSE streaming headers and SPA fallback routing.
 
 ### Topology B: Local Development Server with Proxy
-During local development, the Vite dev server runs on port 5173 and automatically proxies `/api` and `/metrics` requests to `http://127.0.0.1:3001` (configured in `vite.config.ts`).
+During local development, the Vite dev server runs on port 5173 and automatically proxies same-origin `/api` and `/metrics` requests to `http://127.0.0.1:3001` (configured in `vite.config.ts`). The browser client uses relative URLs by default, so this topology does not depend on an implicit loopback CORS exception.
 
 ```bash
 # Terminal 1: Run Rust Gateway (dev mode with loopback binding)
@@ -66,7 +67,7 @@ If the frontend and gateway are hosted on distinct domains (e.g., `https://conso
    # or via environment variable:
    export KAMISH_GATEWAY_ALLOWED_ORIGINS="https://console.example.com"
    ```
-3. The gateway strictly validates the `Origin` header against this whitelist, emits `Access-Control-Allow-Origin` matching the requested origin, and enables `Access-Control-Allow-Credentials: true`. Wildcard origins (`*`) are strictly prohibited with credentials.
+3. The gateway strictly validates the `Origin` header against this exact whitelist, emits `Access-Control-Allow-Origin` only for an exact configured match, and enables `Access-Control-Allow-Credentials: true`. No implicit loopback-origin exception or wildcard origin is used. Wildcard origins (`*`) are prohibited with credentials.
 
 ---
 
