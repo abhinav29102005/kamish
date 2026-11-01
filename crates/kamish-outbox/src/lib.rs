@@ -305,8 +305,19 @@ impl DestinationOutbox {
             .collect()
     }
 
-    /// Acknowledges receiver progress for a specific partition, trimming applied ranges (§3.3.2, INV-6).
-    pub fn advance_partition_watermark(&self, topic: &str, partition: u32, new_watermark: u64) {
+    /// Acknowledges receiver progress bound to source epoch and generation provenance (§3.3.2, INV-6, CONTRACT §2.2).
+    ///
+    /// Ensures that a watermark advance only trims ranges matching or preceding the acknowledged
+    /// epoch and source generation, preventing an older replication response from trimming work
+    /// belonging to a higher epoch or newer generation.
+    pub fn advance_partition_watermark_with_provenance(
+        &self,
+        topic: &str,
+        partition: u32,
+        epoch: u64,
+        source_generation: u64,
+        new_watermark: u64,
+    ) {
         let mut inner = self.inner.write().unwrap();
         let key = (topic.to_string(), partition);
         let current = inner.watermarks.get(&key).copied().unwrap_or(0);
@@ -316,11 +327,12 @@ impl DestinationOutbox {
         inner.watermarks.insert(key, new_watermark);
         inner.durable_watermark = std::cmp::max(inner.durable_watermark, new_watermark);
 
-        // Trim strictly ranges belonging to this (topic, partition)
+        // Trim strictly ranges belonging to this (topic, partition) whose provenance matches or precedes the ACK
         let mut trimmed_bytes = 0;
         inner.ranges.retain(|r| {
             if r.topic == topic && r.partition == partition {
-                if r.end_offset <= new_watermark {
+                let provenance_matches = r.epoch <= epoch && r.source_generation <= source_generation;
+                if provenance_matches && r.end_offset <= new_watermark {
                     trimmed_bytes += r.byte_size();
                     false
                 } else {
@@ -331,6 +343,17 @@ impl DestinationOutbox {
             }
         });
         inner.queued_bytes = inner.queued_bytes.saturating_sub(trimmed_bytes);
+    }
+
+    /// Acknowledges receiver progress for a specific partition, trimming applied ranges (§3.3.2, INV-6).
+    pub fn advance_partition_watermark(&self, topic: &str, partition: u32, new_watermark: u64) {
+        self.advance_partition_watermark_with_provenance(
+            topic,
+            partition,
+            u64::MAX,
+            u64::MAX,
+            new_watermark,
+        );
     }
 
     /// Compatibility helper for single-stream outboxes. Never broadcast an ACK

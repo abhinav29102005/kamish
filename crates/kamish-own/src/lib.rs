@@ -313,6 +313,13 @@ impl QuarantineStore {
         let mut candidate = inner.clone();
         candidate.extend(new_records);
 
+        // Bounded quarantine growth (§3.1.4, CONTRACT §4.2): bound to 100,000 records max
+        const MAX_QUARANTINE_RECORDS: usize = 100_000;
+        if candidate.len() > MAX_QUARANTINE_RECORDS {
+            let excess = candidate.len() - MAX_QUARANTINE_RECORDS;
+            candidate.drain(0..excess);
+        }
+
         let serialized = serde_json::to_vec(&candidate)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
