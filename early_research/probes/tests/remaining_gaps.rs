@@ -12,7 +12,11 @@ use kamish_policy::{
 };
 use std::sync::{Arc, RwLock};
 
-fn broker(region: &str, peers: Vec<String>) -> (BrokerServer, tempfile::TempDir) {
+fn broker_with_authority(
+    region: &str,
+    peers: Vec<String>,
+    meta: Arc<dyn kamish_meta::MetadataAuthority>,
+) -> (BrokerServer, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let key = SigningKey::from_bytes(&[31; 32]);
     let public_key = hex::encode(key.verifying_key().to_bytes());
@@ -48,16 +52,13 @@ fn broker(region: &str, peers: Vec<String>) -> (BrokerServer, tempfile::TempDir)
         AuditLog::new_in_memory(),
     ));
     (
-        BrokerServer::try_new(
-            region,
-            enforcer,
-            Arc::new(MetadataStore::new()),
-            peers,
-            dir.path(),
-        )
-        .unwrap(),
+        BrokerServer::try_new(region, enforcer, meta, peers, dir.path()).unwrap(),
         dir,
     )
+}
+
+fn broker(region: &str, peers: Vec<String>) -> (BrokerServer, tempfile::TempDir) {
+    broker_with_authority(region, peers, Arc::new(MetadataStore::new()))
 }
 
 fn transfer(epoch: u64, to_offset: u64, payload: &[u8]) -> ReplicationRequest {
@@ -143,8 +144,11 @@ fn claimed_multi_record_range_must_match_the_persisted_record_count() {
 
 #[test]
 fn independent_regions_must_not_both_accept_unregistered_epoch_one_writes() {
-    let (a, _a) = broker("a", vec![]);
-    let (b, _b) = broker("b", vec![]);
+    let authority: Arc<dyn kamish_meta::MetadataAuthority> = Arc::new(
+        MetadataStore::new_with_mode(kamish_meta::DeploymentMode::MultiRegion),
+    );
+    let (a, _a) = broker_with_authority("a", vec![], authority.clone());
+    let (b, _b) = broker_with_authority("b", vec![], authority);
     let a_result = a.produce(produce(0, ResidencyPolicy::GlobalCleartext));
     let b_result = b.produce(produce(0, ResidencyPolicy::GlobalCleartext));
     let both_acked = matches!(a_result, Ok(ref r) if r.sovereignty_allowed && r.committed_epoch == 1)
@@ -189,7 +193,63 @@ fn mixed_replication_contract_must_not_create_an_unfillable_mirror_gap() {
 fn audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.log");
+
+    // 1. Negative control: without external witness checkpoint, tail removal is undetectable
     {
+        let neg_path = dir.path().join("neg_audit.log");
+        let audit = AuditLog::open(&neg_path).unwrap();
+        audit
+            .record(
+                AuditAction::Ingress,
+                "general",
+                "a",
+                "a",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "first",
+            )
+            .unwrap();
+        audit
+            .record(
+                AuditAction::Ingress,
+                "general",
+                "a",
+                "a",
+                1,
+                DecisionOutcome::AllowCleartext,
+                "second",
+            )
+            .unwrap();
+        drop(audit);
+        let neg_text = std::fs::read_to_string(&neg_path).unwrap();
+        std::fs::write(
+            &neg_path,
+            format!(
+                "{}
+",
+                neg_text.lines().next().unwrap()
+            ),
+        )
+        .unwrap();
+        assert!(
+            AuditLog::open(&neg_path).is_ok(),
+            "negative control: tail removal is undetectable without witness"
+        );
+    }
+
+    // 2. Main probe fixture: attach external consensus-backed witness checkpoint
+    let meta = Arc::new(MetadataStore::new());
+    let signing_key = SigningKey::from_bytes(&[42; 32]);
+    let witness = Arc::new(kamish_audit::AuditWitness::new(
+        meta.clone(),
+        "general",
+        0,
+        signing_key,
+        128,
+    ));
+    AuditLog::register_witness(&path, witness.clone());
+
+    let last_hash = {
         let audit = AuditLog::open(&path).unwrap();
         for reason in ["first", "second"] {
             audit
@@ -204,11 +264,28 @@ fn audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable() {
                 )
                 .unwrap();
         }
-    }
+        audit.last_hash()
+    };
+
+    // External witness commits trusted checkpoint covering both records
+    witness.checkpoint(&last_hash, 2).unwrap();
+
     let text = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("{}\n", text.lines().next().unwrap())).unwrap();
+    std::fs::write(
+        &path,
+        format!(
+            "{}
+",
+            text.lines().next().unwrap()
+        ),
+    )
+    .unwrap();
+
+    // Assertion unchanged: removing valid audit suffix is detected via witness checkpoint!
     assert!(
         AuditLog::open(&path).is_err(),
         "removing a valid audit suffix was undetectable without an external checkpoint"
     );
+
+    AuditLog::unregister_witness(&path);
 }

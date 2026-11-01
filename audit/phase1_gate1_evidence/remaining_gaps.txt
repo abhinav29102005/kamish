@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests/remaining_gaps.rs (early_research/probes/target/debug/deps/remaining_gaps-f65fc1f8a130b043)
+
+running 6 tests
+test claimed_multi_record_range_must_match_the_persisted_record_count ... ok
+test duplicate_offset_with_different_content_must_be_rejected ... ok
+test audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable ... ok
+test stale_epoch_duplicate_must_not_acknowledge_a_new_epoch_history ... ok
+test independent_regions_must_not_both_accept_unregistered_epoch_one_writes ... ok
+test mixed_replication_contract_must_not_create_an_unfillable_mirror_gap ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

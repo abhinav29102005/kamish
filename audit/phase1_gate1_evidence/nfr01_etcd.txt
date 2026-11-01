@@ -1,0 +1,19 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running tests/etcd_authority.rs (target/debug/deps/etcd_authority-a427953cbd987a77)
+
+running 12 tests
+test test_01_competing_claimants_race_for_epoch_1_repeated ... ok
+test test_02_epoch_never_regresses_after_owner_key_expiry ... ok
+test test_03_lease_ttl_expiry_under_paused_client_and_monotonic_clock ... ok
+test test_06_ambiguous_commit_outcome_handling_and_retry_idempotence ... ok
+test test_07_quorum_loss_fail_closed_and_member_restart ... ok
+test test_05_policy_floor_and_source_generation ... ok
+test test_04_keepalive_lost_broker_stops_acking ... ok
+test test_08_cold_restart_epoch_and_fence_persistence ... ok
+test test_09_transfer_rejected_while_prior_lease_active ... ok
+test test_12_monotonic_clock_immune_to_wall_clock_skew ... ok
+test test_10_restart_without_reacquisition_denies_write_authority ... ok
+test test_11_produce_path_zero_consensus_network_reads ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
