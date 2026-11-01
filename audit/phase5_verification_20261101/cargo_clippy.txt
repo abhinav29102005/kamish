@@ -1,0 +1,28 @@
+    Checking kamish-log v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-log)
+    Checking kamish-policy v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-policy)
+    Checking kamish-audit v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-audit)
+    Checking kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+    Checking kamish-enforce v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-enforce)
+    Checking kamish-checkers v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-checkers)
+    Checking kamish-seal v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-seal)
+    Checking kamish-outbox v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-outbox)
+    Checking kamish-route v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-route)
+error: this function has too many arguments (8/7)
+  --> crates/kamish-outbox/src/lib.rs:87:5
+   |
+87 | /     pub fn new(
+88 | |         topic: impl Into<String>,
+89 | |         partition: u32,
+90 | |         epoch: u64,
+...  |
+95 | |         is_sealed: bool,
+96 | |     ) -> Self {
+   | |_____________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#too_many_arguments
+   = note: `-D clippy::too-many-arguments` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
+
+error: could not compile `kamish-outbox` (lib) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `kamish-outbox` (lib test) due to 1 previous error

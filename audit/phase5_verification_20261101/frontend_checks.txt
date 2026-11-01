@@ -1,0 +1,301 @@
+=== NPM RUN TYPECHECK ===
+
+> frontend@0.0.0 typecheck
+> tsc -b --pretty false
+
+EXIT: 0
+=== NPM RUN LINT ===
+
+> frontend@0.0.0 lint
+> oxlint
+
+
+  ! eslint(no-unused-vars): Parameter 'onNavigate' is declared but never used. Unused parameters should start with a '_'.
+   ,-[src/pages/HomePage.jsx:5:36]
+ 4 | 
+ 5 | export default function HomePage({ onNavigate }) {
+   :                                    ^^^^^|^^^^
+   :                                         `-- 'onNavigate' is declared here
+ 6 |   return (
+   `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Variable 'isLiveMode' is declared but never used. Unused variables should start with a '_'.
+    ,-[src/App.jsx:51:11]
+ 50 |   const [location, setLocation] = useState(parseHashRoute);
+ 51 |   const { isLiveMode, isSessionExpired } = useKamish();
+    :           ^^^^^|^^^^
+    :                `-- 'isLiveMode' is declared here
+ 52 |   const currentRoute = location.route;
+    `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'isSessionExpired' is declared but never used. Unused variables should start with a '_'.
+    ,-[src/components/Header.jsx:12:5]
+ 11 |     gatewayStatus,
+ 12 |     isSessionExpired,
+    :     ^^^^^^^^|^^^^^^^
+    :             `-- 'isSessionExpired' is declared here
+ 13 |   } = useKamish();
+    `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'isLiveMode' is declared but never used. Unused variables should start with a '_'.
+   ,-[src/pages/AuthorityPage.jsx:6:24]
+ 5 | export default function AuthorityPage() {
+ 6 |   const { currentUser, isLiveMode } = useKamish();
+   :                        ^^^^^|^^^^
+   :                             `-- 'isLiveMode' is declared here
+ 7 |   const [authority, setAuthority] = useState(null);
+   `----
+  help: Consider removing this declaration.
+
+  ! react(purity): Cannot call impure function during render
+     ,-[src/pages/AuthorityPage.jsx:136:47]
+ 135 |           <span style={{ fontFamily: "var(--font-mono)", fontSize: "1.2rem", fontWeight: 700, color: "#34d399", display: "block", marginTop: "0.25rem" }}>
+ 136 |             {authority?.monotonic_clock_ms || Date.now()} ms
+     :                                               ^^^^^|^^^^
+     :                                                    `-- Cannot call impure function
+ 137 |           </span>
+     `----
+  help: `Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component re-renders
+  note: React Compiler skipped optimizing this component or hook. Additional guidance: https://react.dev/reference/eslint-plugin-react-hooks/lints/purity
+
+  ! react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders
+    ,-[src/pages/AuthorityPage.jsx:53:5]
+ 51 | 
+ 52 |   useEffect(() => {
+    :   ^^^^|^^^^
+    :       `-- This is the containing effect
+ 53 |     loadAuthorityData();
+    :     ^^^^^^^^|^^^^^^^^
+    :             `-- Avoid calling setState() directly within an effect
+ 54 |   }, [currentUser]);
+    `----
+  help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
+  note: React Compiler skipped optimizing this component or hook. Additional guidance: https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
+
+  ! eslint(no-unused-vars): Parameter 'idx' is declared but never used. Unused parameters should start with a '_'.
+     ,-[src/components/Navbar.jsx:323:34]
+ 322 |           >
+ 323 |             {navItems.map((item, idx) => {
+     :                                  ^|^
+     :                                   `-- 'idx' is declared here
+ 324 |               const isActive = currentRoute === item.id;
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Variable 'isLiveMode' is declared but never used. Unused variables should start with a '_'.
+   ,-[src/pages/TopicsPage.jsx:6:24]
+ 5 | export default function TopicsPage() {
+ 6 |   const { currentUser, isLiveMode } = useKamish();
+   :                        ^^^^^|^^^^
+   :                             `-- 'isLiveMode' is declared here
+ 7 |   const [topics, setTopics] = useState([]);
+   `----
+  help: Consider removing this declaration.
+
+  ! react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders
+    ,-[src/pages/TopicsPage.jsx:40:5]
+ 38 | 
+ 39 |   useEffect(() => {
+    :   ^^^^|^^^^
+    :       `-- This is the containing effect
+ 40 |     loadTopics();
+    :     ^^^^^|^^^^
+    :          `-- Avoid calling setState() directly within an effect
+ 41 |   }, [currentUser]);
+    `----
+  help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
+  note: React Compiler skipped optimizing this component or hook. Additional guidance: https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
+
+  ! eslint(no-unused-vars): Parameter 'isShadowForm' is declared but never used. Unused parameters should start with a '_'.
+   ,-[src/components/KamishDragon3D.jsx:5:61]
+ 4 | 
+ 5 | export default function KamishDragon3D({ isFlameOn = false, isShadowForm = false }) {
+   :                                                             ^^^^^^|^^^^^
+   :                                                                   `-- 'isShadowForm' is declared here
+ 6 |   const mountRef = useRef(null);
+   `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Variable 'isWebGlError' is declared but never used. Unused variables should start with a '_'.
+    ,-[src/components/KamishDragon3D.jsx:10:10]
+  9 |   const [isLoaded, setIsLoaded] = useState(false);
+ 10 |   const [isWebGlError, setIsWebGlError] = useState(false);
+    :          ^^^^^^|^^^^^
+    :                `-- 'isWebGlError' is declared here
+ 11 | 
+    `----
+  help: Consider removing this declaration.
+
+  ! react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders
+    ,-[src/components/KamishDragon3D.jsx:14:3]
+ 13 | 
+ 14 |   useEffect(() => {
+    :   ^^^^|^^^^
+    :       `-- This is the containing effect
+ 15 |     const container = mountRef.current;
+    `----
+    ,-[src/components/KamishDragon3D.jsx:40:7]
+ 39 |       console.warn("WebGL renderer creation failed:", err);
+ 40 |       setIsWebGlError(true);
+    :       ^^^^^^^|^^^^^^^
+    :              `-- Avoid calling setState() directly within an effect
+ 41 |       return;
+    `----
+  help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
+  note: React Compiler skipped optimizing this component or hook. Additional guidance: https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
+
+  ! eslint(no-unused-vars): Variable 'currentUser' is declared but never used. Unused variables should start with a '_'.
+   ,-[src/pages/ProduceFetchPage.jsx:6:11]
+ 5 | export default function ProduceFetchPage() {
+ 6 |   const { currentUser } = useKamish();
+   :           ^^^^^|^^^^^
+   :                `-- 'currentUser' is declared here
+ 7 | 
+   `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'setFetchClass' is declared but never used. Unused variables should start with a '_'.
+    ,-[src/pages/ProduceFetchPage.jsx:22:22]
+ 21 |   const [fetchMax, setFetchMax] = useState(10);
+ 22 |   const [fetchClass, setFetchClass] = useState("sovereign-class");
+    :                      ^^^^^^|^^^^^^
+    :                            `-- 'setFetchClass' is declared here
+ 23 |   const [fetchLoading, setFetchLoading] = useState(false);
+    `----
+  help: Consider removing this declaration.
+
+  ! react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders
+    ,-[src/pages/AuditVerificationPage.jsx:49:5]
+ 47 | 
+ 48 |   useEffect(() => {
+    :   ^^^^|^^^^
+    :       `-- This is the containing effect
+ 49 |     loadAuditData();
+    :     ^^^^^^|^^^^^^
+    :           `-- Avoid calling setState() directly within an effect
+ 50 |   }, [currentUser]);
+    `----
+  help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
+  note: React Compiler skipped optimizing this component or hook. Additional guidance: https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
+
+  ! react(only-export-components): Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components.
+     ,-[src/context/KamishContext.tsx:961:10]
+ 960 | 
+ 961 | export { useKamish } from "./useKamish";
+     :          ^^^^^^^^^
+     `----
+
+  ! react(set-state-in-effect): Calling setState synchronously within an effect can trigger cascading renders
+     ,-[src/components/ThreeTopologyGlobe.tsx:131:7]
+ 105 | 
+ 106 |   useEffect(() => {
+     :   ^^^^|^^^^
+     :       `-- This is the containing effect
+ 107 |     if (!containerRef.current) return;
+ 108 |     const container = containerRef.current;
+ 109 |     const width = isGlobalBackground ? window.innerWidth : (container.clientWidth || 450);
+ 110 |     const height = isGlobalBackground ? window.innerHeight : (container.clientHeight || 450);
+ 111 | 
+ 112 |     // 1. Scene setup
+ 113 |     const scene = new THREE.Scene();
+ 114 |     sceneRef.current = scene;
+ 115 | 
+ 116 |     // 2. Camera setup
+ 117 |     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+ 118 |     camera.position.set(0, isGlobalBackground ? 4 : 8, isGlobalBackground ? 26 : 24);
+ 119 |     cameraRef.current = camera;
+ 120 | 
+ 121 |     // 3. Renderer setup with WebGL fallback
+ 122 |     let renderer: THREE.WebGLRenderer;
+ 123 |     try {
+ 124 |       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+ 125 |       renderer.setSize(width, height);
+ 126 |       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+ 127 |       renderer.toneMapping = THREE.ACESFilmicToneMapping;
+ 128 |       rendererRef.current = renderer;
+ 129 |     } catch (e) {
+ 130 |       console.warn("WebGL renderer creation failed for Globe:", e);
+ 131 |       setIsWebGlError(true);
+     :       ^^^^^^^|^^^^^^^
+     :              `-- Avoid calling setState() directly within an effect
+ 132 |       return;
+     `----
+  help: Effects should synchronize React with external systems. Calling setState synchronously inside an effect starts another render and is usually unnecessary. Derive the value during render, initialize state directly, or update it from the event that caused the change. Use an effect only when synchronizing with an external system.
+  note: React Compiler skipped optimizing this component or hook. Additional guidance: https://react.dev/reference/eslint-plugin-react-hooks/lints/set-state-in-effect
+
+Found 17 warnings and 0 errors.
+Finished in 43ms on 44 files with 116 rules using 20 threads.
+EXIT: 0
+=== NPM RUN TEST ===
+
+> frontend@0.0.0 test
+> node --test test/*.test.mjs
+
+TAP version 13
+# Subtest: policy selection produces structured restrictions and malformed inputs fail closed
+ok 1 - policy selection produces structured restrictions and malformed inputs fail closed
+  ---
+  duration_ms: 1.820645
+  type: 'test'
+  ...
+# Subtest: demo task persists metadata and is retrievable after reload
+ok 2 - demo task persists metadata and is retrievable after reload
+  ---
+  duration_ms: 0.429693
+  type: 'test'
+  ...
+# Subtest: invalid storage is not overwritten and failed writes do not report a saved task
+ok 3 - invalid storage is not overwritten and failed writes do not report a saved task
+  ---
+  duration_ms: 0.325129
+  type: 'test'
+  ...
+# Subtest: prototype catalog does not advertise disabled sealing as verified
+ok 4 - prototype catalog does not advertise disabled sealing as verified
+  ---
+  duration_ms: 0.100224
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 94.886838
+EXIT: 0
+=== NPM RUN BUILD ===
+
+> frontend@0.0.0 build
+> vite build
+
+vite v8.3.5 building client environment for production...
+transforming...
+✓ 41 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                  1.02 kB │ gzip:   0.55 kB
+dist/assets/index-CzeNXpeT.css                   3.80 kB │ gzip:   1.50 kB
+dist/assets/NotFoundPage-QlUxK2V1.js             0.99 kB │ gzip:   0.57 kB
+dist/assets/HomePage-7DSAo43J.js                 2.14 kB │ gzip:   0.95 kB
+dist/assets/SignInPage-CKCIMreK.js               5.40 kB │ gzip:   1.80 kB
+dist/assets/TopicsPage-C8K-3Mu9.js               6.04 kB │ gzip:   1.95 kB
+dist/assets/DashboardPage-CNY3buzv.js            6.39 kB │ gzip:   2.42 kB
+dist/assets/AuthorityPage-BTCRD6eA.js            7.45 kB │ gzip:   2.39 kB
+dist/assets/AuditVerificationPage-DMXPA5dv.js    7.86 kB │ gzip:   2.45 kB
+dist/assets/ProduceFetchPage-BDajTI-k.js         9.57 kB │ gzip:   2.19 kB
+dist/assets/index-BXcAbzfa.js                  257.41 kB │ gzip:  80.23 kB
+dist/assets/KamishDragon3D-C6eQf9TR.js         635.77 kB │ gzip: 159.82 kB
+
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 318ms
+EXIT: 0

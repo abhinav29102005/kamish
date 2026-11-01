@@ -1,0 +1,34 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running unittests src/lib.rs (target/debug/deps/kamish_gateway-5f31f03d4590ef7f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/debug/deps/kamish_gateway-9e35aad8f2e5abf4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/gateway_api.rs (target/debug/deps/gateway_api-455409aed9016377)
+
+running 9 tests
+test test_mode_toggle_live_vs_demo ... ok
+test test_real_telemetry_endpoints ... ok
+test test_auth_login_and_logout_lifecycle ... ok
+test test_real_produce_and_fetch_end_to_end ... ok
+test test_scenario_execution_and_results ... ok
+test test_role_based_access_control ... ok
+test test_audit_verify_hash_chain ... ok
+test test_csrf_protection_and_bypass_prevention ... ok
+test test_sliding_window_rate_limiting ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+   Doc-tests kamish_gateway
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

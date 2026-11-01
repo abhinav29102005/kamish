@@ -1,0 +1,634 @@
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent/src/lib.rs:240:
+     }
+ }
+ 
+-fn build_replication_request(source_region: &str, target_region: &str, range: &OutboxRange) -> ReplicationRequest {
+-    let (extracted_ctx, extracted_pv, extracted_cs) = if let Some(ref env_bytes) = range.envelope_payload {
+-        if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
+-            (env.context, Some(env.policy_version), Some(env.checksum))
++fn build_replication_request(
++    source_region: &str,
++    target_region: &str,
++    range: &OutboxRange,
++) -> ReplicationRequest {
++    let (extracted_ctx, extracted_pv, extracted_cs) =
++        if let Some(ref env_bytes) = range.envelope_payload {
++            if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
++                (env.context, Some(env.policy_version), Some(env.checksum))
++            } else {
++                (None, None, None)
++            }
+         } else {
+             (None, None, None)
+-        }
+-    } else {
+-        (None, None, None)
+-    };
++        };
+     let rep_context = range.context.clone().or(extracted_ctx);
+     let policy_version = if range.policy_version > 0 {
+         range.policy_version
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent/src/lib.rs:307:
+             });
+         }
+ 
+-        let rep_req = build_replication_request(&self.local_region, &task.target_region, &task.range);
++        let rep_req =
++            build_replication_request(&self.local_region, &task.target_region, &task.range);
+ 
+         // Prefer TCP peer if address is registered
+         let tcp_addr = {
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent/src/lib.rs:695:
+                 );
+ 
+                 // Check for gap between remote's durable progress and local log HWM
+-                let local_hwm = self
+-                    .local_broker
+-                    .get_watermark(&remote_p.topic, remote_p.partition, &self.local_region);
++                let local_hwm = self.local_broker.get_watermark(
++                    &remote_p.topic,
++                    remote_p.partition,
++                    &self.local_region,
++                );
+ 
+                 if remote_p.durable_watermark < local_hwm {
+                     summary.gaps_detected += 1;
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent/src/lib.rs:736:
+                         }
+                     }
+                 }
+-            } else if ownership.as_ref().map_or(false, |o| o.owner_region == target_region) {
++            } else if ownership
++                .as_ref()
++                .map_or(false, |o| o.owner_region == target_region)
++            {
+                 // Peer is owner: discover if local replica is lagging
+-                let local_hwm = self
+-                    .local_broker
+-                    .get_watermark(&remote_p.topic, remote_p.partition, target_region);
++                let local_hwm = self.local_broker.get_watermark(
++                    &remote_p.topic,
++                    remote_p.partition,
++                    target_region,
++                );
+                 if local_hwm < remote_p.high_watermark {
+                     summary.gaps_detected += 1;
+                     info!(
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:15:
+ 
+ use kamish_audit::AuditAction;
+ use kamish_enforce::{EnforcementRequest, Enforcer};
++use kamish_log::{LogError, PartitionLog, SessionError, SessionManager};
+ pub use kamish_log::{RecordContext, RecordEnvelope};
+-use kamish_log::{
+-    LogError, PartitionLog, SessionError, SessionManager,
+-};
+ use kamish_meta::{
+     DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, MonotonicClock,
+     PartitionOwnership, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent, StreamId,
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:892:
+ 
+     /// Sets the local safety margin buffer required beyond prior owner lease expiry for promotion (§2.3.2).
+     pub fn with_promotion_safety_margin_ms(self, margin_ms: i64) -> Self {
+-        self.promotion_safety_margin_ns.store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
++        self.promotion_safety_margin_ns
++            .store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
+         self
+     }
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:899:
+     /// Dynamically updates the promotion safety margin.
+     pub fn set_promotion_safety_margin_ms(&self, margin_ms: i64) {
+-        self.promotion_safety_margin_ns.store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
++        self.promotion_safety_margin_ns
++            .store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
+     }
+ 
+     /// Returns a reference to the local quarantine store (§1.7, §3.1.4).
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:948:
+ 
+         // If candidate already holds active valid lease for this partition, return current ownership
+         let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+-        if current_ownership.owner_region == self.region && current_ownership.is_lease_valid(now_ns) {
++        if current_ownership.owner_region == self.region && current_ownership.is_lease_valid(now_ns)
++        {
+             return Ok(current_ownership);
+         }
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:955:
+         // 3. Lease safety check with local safety margin (§2.3.2, §3.4.4)
+-        let safety_margin_ns = self.promotion_safety_margin_ns.load(std::sync::atomic::Ordering::SeqCst);
++        let safety_margin_ns = self
++            .promotion_safety_margin_ns
++            .load(std::sync::atomic::Ordering::SeqCst);
+         let safe_expiry_ns = current_ownership.lease_expiry_ns + safety_margin_ns;
+         if now_ns < safe_expiry_ns {
+             return Err(BrokerError::PolicyDenied(format!(
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:991:
+         // 5. Authoritative Watermark & Replica Progress Check (INV-3, §3.1.3, §3.4.4)
+         let operation = self
+             .partition_operations
+-            .get_or_insert_with((topic.to_string(), partition), || {
+-                Arc::new(Mutex::new(()))
+-            });
++            .get_or_insert_with((topic.to_string(), partition), || Arc::new(Mutex::new(())));
+         let _operation = operation.lock().unwrap();
+ 
+         let log = self.get_or_create_log(topic, partition, current_ownership.epoch)?;
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1005:
+         let authoritative_watermark = match required_watermark {
+             Some(w) => w,
+             None => {
+-                let tracked = self.local_tracker.get_watermark(topic, partition, &current_ownership.owner_region);
+-                if tracked > 0 {
+-                    tracked
+-                } else {
+-                    local_hwm
+-                }
++                let tracked = self.local_tracker.get_watermark(
++                    topic,
++                    partition,
++                    &current_ownership.owner_region,
++                );
++                if tracked > 0 { tracked } else { local_hwm }
+             }
+         };
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1045:
+         // 7. Commit bumped epoch via atomic CAS on MetadataAuthority (INV-7)
+         let new_epoch = current_ownership.epoch + 1;
+         let lease_duration_ms = 10_000i64; // Normative 10-second lease (CONTRACT.md §2.3.2)
+-        let new_ownership = self.meta
++        let new_ownership = self
++            .meta
+             .compare_and_swap_epoch(
+                 &stream,
+                 current_ownership.epoch,
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1097:
+     ) -> Result<usize, BrokerError> {
+         let operation = self
+             .partition_operations
+-            .get_or_insert_with((topic.to_string(), partition), || {
+-                Arc::new(Mutex::new(()))
+-            });
++            .get_or_insert_with((topic.to_string(), partition), || Arc::new(Mutex::new(())));
+         let _operation = operation.lock().unwrap();
+ 
+         let log = self.get_or_create_log(topic, partition, 1)?;
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1488:
+         );
+         committed_env.magic = kamish_log::RECORD_MAGIC_V2;
+         committed_env.context = Some(context.clone());
+-        let committed_checksum = committed_env.expected_checksum().unwrap_or(committed_env.checksum);
++        let committed_checksum = committed_env
++            .expected_checksum()
++            .unwrap_or(committed_env.checksum);
+         committed_env.checksum = committed_checksum;
+ 
+         // 5. Commit all reserved outbox ranges (§3.B)
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1674:
+         }
+ 
+         // Extract context, policy_version, checksum
+-        let (extracted_ctx, extracted_pv, extracted_cs) = if let Some(ref env_bytes) = req.envelope_payload {
+-            if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
+-                (env.context, Some(env.policy_version), Some(env.checksum))
++        let (extracted_ctx, extracted_pv, extracted_cs) =
++            if let Some(ref env_bytes) = req.envelope_payload {
++                if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
++                    (env.context, Some(env.policy_version), Some(env.checksum))
++                } else {
++                    (None, None, None)
++                }
+             } else {
+                 (None, None, None)
+-            }
+-        } else {
+-            (None, None, None)
+-        };
++            };
+ 
+         let mut record_context = req.context.or(extracted_ctx);
+         if let Some(ref mut ctx) = record_context {
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1841:
+         for (topic, partition) in streams {
+             if let Some(log) = self.logs.get(&(topic.clone(), partition)) {
+                 let ownership = self.meta.get_ownership(&topic, partition);
+-                let epoch = ownership.as_ref().map_or_else(|| log.current_epoch(), |o| o.epoch);
++                let epoch = ownership
++                    .as_ref()
++                    .map_or_else(|| log.current_epoch(), |o| o.epoch);
+                 let hwm = log.high_watermark();
+                 states.push(PartitionWatermark {
+                     topic,
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1859:
+     ///
+     /// Validates ownership epochs, guards against stale owners, updates tracked watermarks,
+     /// advances outboxes, and reports local partition watermarks.
+-    pub fn handle_heartbeat(&self, req: HeartbeatRequest) -> Result<HeartbeatResponse, BrokerError> {
++    pub fn handle_heartbeat(
++        &self,
++        req: HeartbeatRequest,
++    ) -> Result<HeartbeatResponse, BrokerError> {
+         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+         let mut response_partitions = Vec::new();
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:1900:
+                 // If local broker is the owner and sender made progress, advance outbox and watermark
+                 if is_local_owner && p.durable_watermark > 0 {
+                     if let Some(outbox) = self.get_outbox(&req.sender_region) {
+-                        outbox.advance_partition_watermark(&p.topic, p.partition, p.durable_watermark);
++                        outbox.advance_partition_watermark(
++                            &p.topic,
++                            p.partition,
++                            p.durable_watermark,
++                        );
+                     }
+                     self.local_tracker.update_watermark(
+                         &p.topic,
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/src/lib.rs:2647:
+             })
+             .await?
+         {
+-            BrokerResponse::SuffixQuarantined { quarantined_count, .. } => Ok(quarantined_count),
++            BrokerResponse::SuffixQuarantined {
++                quarantined_count, ..
++            } => Ok(quarantined_count),
+             BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
+             other => Err(std::io::Error::new(
+                 std::io::ErrorKind::InvalidData,
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:89:
+     let audit_a =
+         kamish_audit::AuditLog::open(dir_a.path().join("audit.log").to_str().unwrap()).unwrap();
+     let mut cache_a = PolicyCache::new(trusted.clone());
+-    cache_a.update(signed.clone(), Utc::now().timestamp()).unwrap();
++    cache_a
++        .update(signed.clone(), Utc::now().timestamp())
++        .unwrap();
+     let enforcer_a = Arc::new(Enforcer::new(
+         "region-a",
+         Arc::new(RwLock::new(cache_a)),
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:96:
+         audit_a,
+     ));
+ 
+-    let broker_a = Arc::new(BrokerServer::new(
+-        "region-a",
+-        enforcer_a,
+-        meta.clone(),
+-        vec!["region-b".into()],
+-        dir_a.path(),
+-    ).with_promotion_safety_margin_ms(200));
++    let broker_a = Arc::new(
++        BrokerServer::new(
++            "region-a",
++            enforcer_a,
++            meta.clone(),
++            vec!["region-b".into()],
++            dir_a.path(),
++        )
++        .with_promotion_safety_margin_ms(200),
++    );
+ 
+     let dir_b = tempdir().unwrap();
+     let audit_b =
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:115:
+         audit_b,
+     ));
+ 
+-    let broker_b = Arc::new(BrokerServer::new(
+-        "region-b",
+-        enforcer_b,
+-        meta.clone(),
+-        vec!["region-a".into()],
+-        dir_b.path(),
+-    ).with_promotion_safety_margin_ms(200));
++    let broker_b = Arc::new(
++        BrokerServer::new(
++            "region-b",
++            enforcer_b,
++            meta.clone(),
++            vec!["region-a".into()],
++            dir_b.path(),
++        )
++        .with_promotion_safety_margin_ms(200),
++    );
+ 
+     (broker_a, broker_b, dir_a, dir_b, meta)
+ }
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:365:
+         .quarantine_divergent_suffix("failover-topic", 0, 2)
+         .expect("Quarantine reconciliation must succeed");
+ 
+-    assert_eq!(quarantined_count, 2, "Expected 2 divergent records to be quarantined");
++    assert_eq!(
++        quarantined_count, 2,
++        "Expected 2 divergent records to be quarantined"
++    );
+ 
+     // Verify Region A's active log high watermark is truncated back to 2
+     let fetch_a = broker_a
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:386:
+     assert_eq!(broker_a.quarantine().count(), 2);
+ 
+     // Repeating quarantine is an idempotent no-op
+-    let repeat = broker_a.quarantine_divergent_suffix("failover-topic", 0, 2).unwrap();
++    let repeat = broker_a
++        .quarantine_divergent_suffix("failover-topic", 0, 2)
++        .unwrap();
+     assert_eq!(repeat, 0);
+ }
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:397:
+ 
+     // Append 5 records (offset 0..5)
+     for i in 0..5 {
+-        log.append(1, "general", 1, format!("msg-{}", i).into_bytes()).unwrap();
++        log.append(1, "general", 1, format!("msg-{}", i).into_bytes())
++            .unwrap();
+     }
+     assert_eq!(log.next_offset(), 5);
+     assert_eq!(log.high_watermark(), 5);
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:448:
+ 
+     // 2. Idempotent retry: persisting the exact same batch does not duplicate records
+     q_store.quarantine_records(batch.clone()).unwrap();
+-    assert_eq!(q_store.count(), 2, "Idempotent retry must not duplicate records");
++    assert_eq!(
++        q_store.count(),
++        2,
++        "Idempotent retry must not duplicate records"
++    );
+ 
+     // 3. Adding a new unique record increases count by 1
+     let record3 = kamish_log::RecordEnvelope::new(2, "general", 1, 12, b"divergent-3".to_vec());
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:478:
+ 
+     // 2. Concurrently, another broker or authority increments epoch to 2
+     let stream = kamish_meta::StreamId::new("cas-conflict-topic", 0);
+-    meta.compare_and_swap_epoch(&stream, 1, 2, "region-c", 10_000).unwrap();
++    meta.compare_and_swap_epoch(&stream, 1, 2, "region-c", 10_000)
++        .unwrap();
+ 
+     // 3. Region B attempts promotion: current_ownership in candidate view had epoch 1
+     // But CAS on metadata authority will detect epoch conflict (now at epoch 2)
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:488:
+ 
+     // Broker B must be rejected with EpochFenced or conflict, and NOT become owner
+     assert!(
+-        matches!(err, BrokerError::EpochFenced { current: 2, .. } | BrokerError::PolicyDenied(_)),
++        matches!(
++            err,
++            BrokerError::EpochFenced { current: 2, .. } | BrokerError::PolicyDenied(_)
++        ),
+         "Expected CAS conflict or epoch fenced error, got: {:?}",
+         err
+     );
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:500:
+     let (broker_a, broker_b, _dir_a, _dir_b, _meta) = setup_two_region_cluster();
+ 
+     // 1. Region A claims partition at epoch 1 with 150ms lease and writes 2 records
+-    broker_a.claim_partition_ownership("order-topic", 0, 0, 1, 150).unwrap();
++    broker_a
++        .claim_partition_ownership("order-topic", 0, 0, 1, 150)
++        .unwrap();
+     for seq in 0..2 {
+-        broker_a.produce(ProduceRequest {
+-            topic: "order-topic".to_string(),
+-            partition: 0,
+-            producer_id: 501,
+-            producer_epoch: 1,
+-            sequence_base: seq,
+-            class_id: "general".to_string(),
+-            payload: format!("c-{}", seq).into_bytes(),
+-            residency_rule: None,
+-        }).unwrap();
++        broker_a
++            .produce(ProduceRequest {
++                topic: "order-topic".to_string(),
++                partition: 0,
++                producer_id: 501,
++                producer_epoch: 1,
++                sequence_base: seq,
++                class_id: "general".to_string(),
++                payload: format!("c-{}", seq).into_bytes(),
++                residency_rule: None,
++            })
++            .unwrap();
+     }
+ 
+     // Replicate to Region B
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:518:
+     for offset in 0..2 {
+-        let rec = broker_a.fetch(FetchRequest {
+-            topic: "order-topic".to_string(),
+-            partition: 0,
+-            class_id: "general".to_string(),
+-            start_offset: offset,
+-            max_records: 1,
+-        }).unwrap().records[0].clone();
+-        broker_b.handle_replication(kamish_broker::ReplicationRequest {
+-            topic: "order-topic".to_string(),
+-            partition: 0,
+-            source_region: "region-a".to_string(),
+-            target_region: "region-b".to_string(),
+-            class_id: "general".to_string(),
+-            epoch: 1,
+-            from_offset: offset,
+-            to_offset: offset + 1,
+-            payload: rec.payload,
+-            is_sealed: false,
+-            context: rec.context,
+-            policy_version: rec.policy_version,
+-            checksum: Some(rec.checksum),
+-            ..Default::default()
+-        }).unwrap();
++        let rec = broker_a
++            .fetch(FetchRequest {
++                topic: "order-topic".to_string(),
++                partition: 0,
++                class_id: "general".to_string(),
++                start_offset: offset,
++                max_records: 1,
++            })
++            .unwrap()
++            .records[0]
++            .clone();
++        broker_b
++            .handle_replication(kamish_broker::ReplicationRequest {
++                topic: "order-topic".to_string(),
++                partition: 0,
++                source_region: "region-a".to_string(),
++                target_region: "region-b".to_string(),
++                class_id: "general".to_string(),
++                epoch: 1,
++                from_offset: offset,
++                to_offset: offset + 1,
++                payload: rec.payload,
++                is_sealed: false,
++                context: rec.context,
++                policy_version: rec.policy_version,
++                checksum: Some(rec.checksum),
++                ..Default::default()
++            })
++            .unwrap();
+     }
+ 
+     // Candidate Region B locally receives 1 uncommitted speculative record directly
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:545:
+     let log_b = broker_b.get_or_create_log("order-topic", 0, 1).unwrap();
+-    log_b.append(1, "general", 1, b"speculative-b".to_vec()).unwrap();
++    log_b
++        .append(1, "general", 1, b"speculative-b".to_vec())
++        .unwrap();
+     assert_eq!(log_b.next_offset(), 3);
+ 
+     // Lease expires
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:551:
+ 
+     // Promotion with required watermark 2 must isolate speculative record 2 to quarantine
+     // and truncate log to 2 before CAS commits epoch 2
+-    let promoted = broker_b.promote_partition("order-topic", 0, Some("general"), Some(2)).unwrap();
++    let promoted = broker_b
++        .promote_partition("order-topic", 0, Some("general"), Some(2))
++        .unwrap();
+     assert_eq!(promoted.epoch, 2);
+     assert_eq!(promoted.owner_region, "region-b");
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:576:
+     let mut modes = HashMap::new();
+     modes.insert("region-a".to_string(), DestinationMode::Cleartext);
+     let mut classes = HashMap::new();
+-    classes.insert("general".to_string(), ClassRule {
+-        class_id: "general".to_string(),
+-        description: "General".to_string(),
+-        legal_regions: legal.clone(),
+-        destination_modes: modes.clone(),
+-        ack_mode: AckMode::LocalMajority,
+-        failover_candidates: vec!["region-a".to_string()],
+-        transit_allowed: true,
+-    });
++    classes.insert(
++        "general".to_string(),
++        ClassRule {
++            class_id: "general".to_string(),
++            description: "General".to_string(),
++            legal_regions: legal.clone(),
++            destination_modes: modes.clone(),
++            ack_mode: AckMode::LocalMajority,
++            failover_candidates: vec!["region-a".to_string()],
++            transit_allowed: true,
++        },
++    );
+     let policy_doc = PolicyDocument {
+         policy_id: "pol-cluster".to_string(),
+         version: 1,
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:598:
+     let mut trusted = HashSet::new();
+     trusted.insert(pubkey_hex);
+ 
+-    let audit = kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
++    let audit =
++        kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
+     let mut cache = PolicyCache::new(trusted.clone());
+-    cache.update(signed.clone(), Utc::now().timestamp()).unwrap();
+-    let enforcer = Arc::new(Enforcer::new("region-a", Arc::new(RwLock::new(cache)), audit));
++    cache
++        .update(signed.clone(), Utc::now().timestamp())
++        .unwrap();
++    let enforcer = Arc::new(Enforcer::new(
++        "region-a",
++        Arc::new(RwLock::new(cache)),
++        audit,
++    ));
+     let meta = Arc::new(MetadataStore::new_multi_region());
+ 
+     let broker = Arc::new(BrokerServer::new(
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:615:
+     // Append 4 records directly to log
+     let log = broker.get_or_create_log("restart-topic", 0, 1).unwrap();
+     for i in 0..4 {
+-        log.append(1, "general", 1, format!("rec-{}", i).into_bytes()).unwrap();
++        log.append(1, "general", 1, format!("rec-{}", i).into_bytes())
++            .unwrap();
+     }
+     assert_eq!(log.next_offset(), 4);
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:622:
+     // Reconcile divergent suffix back to 2
+-    let count = broker.quarantine_divergent_suffix("restart-topic", 0, 2).unwrap();
++    let count = broker
++        .quarantine_divergent_suffix("restart-topic", 0, 2)
++        .unwrap();
+     assert_eq!(count, 2);
+     assert_eq!(broker.quarantine().count(), 2);
+     assert_eq!(log.next_offset(), 2);
+Diff in /mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs:628:
+     // Simulate broker process crash and restart: reopen BrokerServer on the same data directory
+     drop(log);
+     drop(broker);
+-    let audit_reopened = kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
++    let audit_reopened =
++        kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
+     let mut cache_reopened = PolicyCache::new(trusted);
+-    cache_reopened.update(signed, Utc::now().timestamp()).unwrap();
+-    let enforcer_reopened = Arc::new(Enforcer::new("region-a", Arc::new(RwLock::new(cache_reopened)), audit_reopened));
+-    let restarted_broker = BrokerServer::new(
++    cache_reopened
++        .update(signed, Utc::now().timestamp())
++        .unwrap();
++    let enforcer_reopened = Arc::new(Enforcer::new(
+         "region-a",
+-        enforcer_reopened,
+-        meta,
+-        vec![],
+-        dir.path(),
+-    );
++        Arc::new(RwLock::new(cache_reopened)),
++        audit_reopened,
++    ));
++    let restarted_broker =
++        BrokerServer::new("region-a", enforcer_reopened, meta, vec![], dir.path());
+ 
+     // Verify restarted broker log is still at 2
+-    let restarted_log = restarted_broker.get_or_create_log("restart-topic", 0, 1).unwrap();
++    let restarted_log = restarted_broker
++        .get_or_create_log("restart-topic", 0, 1)
++        .unwrap();
+     assert_eq!(restarted_log.next_offset(), 2);
+     assert_eq!(restarted_log.high_watermark(), 2);
+     let recs = restarted_log.read(0, 10);
+Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-log/src/lib.rs:855:
+     /// 9. ONLY AFTER replacement succeeds on disk does in-memory state transition to truncated prefix.
+     /// 10. Any failure before installation leaves original in-memory log intact.
+     /// 11. Any ambiguous replacement outcome fences the writer fail-closed.
+-    pub fn truncate_to_offset(&self, new_next_offset: u64) -> Result<Vec<RecordEnvelope>, LogError> {
++    pub fn truncate_to_offset(
++        &self,
++        new_next_offset: u64,
++    ) -> Result<Vec<RecordEnvelope>, LogError> {
+         let mut writer_guard = self.writer_lock.lock().unwrap();
+         let mut inner = self.inner.write().unwrap();
+ 
+Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-own/src/lib.rs:227:
+         // 1. Interrupted write recovery:
+         // If q_file is missing or empty, but a valid tmp_file exists, recover tmp_file
+         let q_empty_or_missing = !q_file.exists()
+-            || std::fs::metadata(&q_file).map(|m| m.len() == 0).unwrap_or(true);
++            || std::fs::metadata(&q_file)
++                .map(|m| m.len() == 0)
++                .unwrap_or(true);
+         if q_empty_or_missing && tmp_file.exists() {
+             if let Ok(content) = std::fs::read(&tmp_file) {
+                 if let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&content) {
+Diff in /mnt/storage/Projects/crowded-mausoleum/crates/kamish-own/src/lib.rs:253:
+                         let _ = std::fs::copy(&q_file, &corrupt_path);
+                         return Err(std::io::Error::new(
+                             std::io::ErrorKind::InvalidData,
+-                            format!("quarantine.data corrupted: {e}; preserved to {corrupt_path:?}"),
++                            format!(
++                                "quarantine.data corrupted: {e}; preserved to {corrupt_path:?}"
++                            ),
+                         ));
+                     }
+                 }

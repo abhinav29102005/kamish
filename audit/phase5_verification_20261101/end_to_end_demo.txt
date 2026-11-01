@@ -1,0 +1,88 @@
+=== 1. Starting kamish-gateway on port 3099 ===
+Gateway is online! HTTP 401 received on unauthenticated status check (Auth working).
+
+=== 2. Authenticating as admin ===
+Login success! User: {'role': 'admin', 'username': 'admin'}
+Set-Cookie Header: kamish_session=8b645809229c517f8033502daa62ec3727f9c171e1792d0032416043fa5a00b2; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600
+CSRF Token: 81b2e113d8cd8d5badb41d54e3b336b411463e549a29c1d5e01fddc7df2f2c33
+
+=== 3. Querying /api/status ===
+Broker Status: {
+  "degraded_links": [],
+  "known_peers": [
+    "US_EAST",
+    "AP_SOUTH"
+  ],
+  "max_connections": 1024,
+  "max_frame_bytes": 4194304,
+  "max_payload_bytes": 1048576,
+  "mode": "LIVE",
+  "region": "EU_WEST",
+  "status": "HEALTHY",
+  "timestamp_utc": "2026-11-01T03:40:47.374873158+00:00",
+  "version": "0.1.0"
+}
+
+=== 4. Producing record to financial-transactions ===
+Produce Result: {
+  "base_offset": 0,
+  "committed_epoch": 1,
+  "count": 1,
+  "partition": 0,
+  "sovereignty_allowed": true,
+  "status": "ACKNOWLEDGED",
+  "topic": "financial-transactions"
+}
+
+=== 5. Fetching record from broker ===
+Fetch Result: {
+  "high_watermark": 1,
+  "partition": 0,
+  "records": [
+    {
+      "class_id": "sovereign-class",
+      "epoch": 1,
+      "offset": 0,
+      "payload": "AUDIT_DEMO_TRANSFER_PAYMENT_EUR_1000000"
+    }
+  ],
+  "topic": "financial-transactions"
+}
+
+=== 6. Stopping broker and gateway for crash/restart test ===
+Process cleanly stopped.
+
+=== 7. Restarting broker with persisted data directory ===
+Re-authenticating after restart...
+
+=== 8. Fetching from persisted partition log after restart ===
+Persisted Fetch Result: {
+  "high_watermark": 1,
+  "partition": 0,
+  "records": [
+    {
+      "class_id": "sovereign-class",
+      "epoch": 1,
+      "offset": 0,
+      "payload": "AUDIT_DEMO_TRANSFER_PAYMENT_EUR_1000000"
+    }
+  ],
+  "topic": "financial-transactions"
+}
+SUCCESS: Record survived restart and high watermark is preserved!
+
+=== 9. Running cryptographic audit verification via gateway ===
+Audit Verification Result: {
+  "anchored_boundary": true,
+  "cryptographic_signatures_valid": true,
+  "total_checkpoints_verified": 0,
+  "total_streams_audited": 9,
+  "verification_result": "PASS",
+  "zero_tamper_detected": true
+}
+
+=== 10. Logging out of gateway ===
+Logout Result: {
+  "status": "logged_out"
+}
+Session correctly invalidated! HTTP 401 received on post-logout request.
