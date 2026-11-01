@@ -163,12 +163,12 @@ export function resolveGatewayConfig(): { baseUrl: string; configError: string |
     }
   }
 
-  // Development fallback: when Vite dev server is on port 5173, point directly to standard gateway port 3001
+  // Local development uses Vite's same-origin proxy. Direct browser-to-gateway
+  // requests would require a separate CORS allowlist and are not the default.
   const isDev = typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
-  const isPort5173 = typeof window !== "undefined" && window.location.port === "5173";
-  if (isDev && isPort5173) {
+  if (isDev) {
     return {
-      baseUrl: "http://127.0.0.1:3001",
+      baseUrl: "",
       configError: null,
       topologyMode: "local-dev",
     };
