@@ -53,7 +53,7 @@ def main():
     run_cmd("SDK Test Init", "npm init -y", cwd=sdk_test)
     run_cmd("SDK Install", f"npm install {clean_dir}/kamish-client-0.1.0-alpha.1.tgz", cwd=sdk_test)
     
-    test_ts = """import { KamishClient } from "@kamish/client";
+    test_ts = """import { KamishClient } from "kamish-client";
 const client = new KamishClient({ allowInsecure: true, host: "127.0.0.1", port: 9092 });
 console.log("SDK client instantiated successfully with maxPayloadBytes:", client.maxPayloadBytes);
 """

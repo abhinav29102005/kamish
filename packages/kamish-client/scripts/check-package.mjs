@@ -26,7 +26,7 @@ try {
   execFileSync(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund', join(temp, pack.filename)],
     { cwd: consumer, stdio: 'pipe', shell: process.platform === 'win32' });
   execFileSync(process.execPath, ['--input-type=module', '-e', `
-    import { KamishClient, KamishProducer, ValidationError } from '@kamish/client';
+    import { KamishClient, KamishProducer, ValidationError } from 'kamish-client';
     const client = new KamishClient({ allowInsecure: true });
     if (!(client.createProducer() instanceof KamishProducer)) throw new Error('Invalid export');
     client.close();
@@ -34,7 +34,7 @@ try {
     catch (error) { if (!(error instanceof ValidationError)) throw error; }
   `], { cwd: consumer, stdio: 'pipe' });
   await writeFile(join(consumer, 'consumer.mts'), `
-    import { KamishClient, type SendRequest, type FetchResult } from '@kamish/client';
+    import { KamishClient, type SendRequest, type FetchResult } from 'kamish-client';
     const client = new KamishClient({ allowInsecure: true });
     const request: SendRequest = { topic: 'events', partition: 0, classId: 'general', payload: new Uint8Array() };
     const producer = client.createProducer({ producerId: 42n });

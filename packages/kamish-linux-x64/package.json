@@ -1,11 +1,10 @@
 {
-  "name": "@kamish/kamish-linux-x64",
+  "name": "kamish-linux-x64",
   "version": "0.1.0-alpha.1",
   "description": "Native Linux x64 binary for Kamish sovereign event streaming broker and CLI",
   "license": "Apache-2.0",
   "author": "Kamish Team",
   "type": "module",
-  "private": true,
   "os": [
     "linux"
   ],
@@ -18,5 +17,8 @@
     "LICENSE",
     "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "sideEffects": false
 }

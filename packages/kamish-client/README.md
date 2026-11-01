@@ -6,7 +6,7 @@ A TypeScript SDK for Kamish's current newline-delimited JSON/TCP protocol.
 Supports produce, fetch, watermark queries, ping, explicit write retry, typed
 errors, cancellation and transport bounds. No runtime npm dependencies.
 
-`@kamish/client` is a **provisional local package name**. Ownership/availability
+`kamish-client` is a **provisional local package name**. Ownership/availability
 of the npm scope has not been verified. `private: true` intentionally prevents
 publication until the name and release/security gates are approved.
 
@@ -68,7 +68,7 @@ It prints a JSON line with an ephemeral loopback port. This fixture uses a fixed
 It is not a production configuration example. Use its printed port below:
 
 ```ts
-import { KamishClient } from '@kamish/client';
+import { KamishClient } from 'kamish-client';
 
 const client = new KamishClient({
   host: '127.0.0.1',
@@ -146,7 +146,7 @@ also occur after commit. `KamishError.outcomeUnknown` distinguishes these from a
 known pre-dispatch failure or explicit `sovereignty_allowed: false` rejection.
 
 ```ts
-import { KamishError } from '@kamish/client';
+import { KamishError } from 'kamish-client';
 
 try {
   await producer.send(request);
