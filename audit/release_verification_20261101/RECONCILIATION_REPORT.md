@@ -6,7 +6,7 @@
 **Reported tested source revision:** `3bab18053c9d7a7256d8e00981531cf67a815b50`  
 **Reconciliation branch:** `audit/evidence-contract-frontend-reconciliation-2026-11-01` (PR #1)  
 **Verification run:** `run-verification-20261101-113645`  
-**Scope:** Documentation/evidence consistency, frontend/backend integration resolution, and security boundary alignment.
+**Scope:** Documentation/evidence consistency and source-level frontend/backend integration changes. Live browser-to-gateway runtime verification remains pending.
 
 ## Executive result
 
@@ -14,7 +14,7 @@ The release report records 261/261 automated tests passing at source revision `3
 
 The evidence establishes a **reported local verification pass**, not an unqualified production-release certification. The benchmark manifest explicitly records `CONFIGURED_UNEXECUTED`; external etcd/KMS/witness services are not shown as live end-to-end tested.
 
-On branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`, the frontend/backend integration gaps identified during the audit were comprehensively resolved:
+On branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`, frontend/backend integration changes were implemented at source level. Runtime browser-to-gateway behavior remains unverified pending a live deployment smoke pass. The follow-up correctness pass tightened mode isolation, metric provenance, the reconciliation response contract, URL parsing, and CORS origin matching:
 1. Deployed gateway URL is fully configurable via `VITE_KAMISH_GATEWAY_URL` with validation and dev proxy.
 2. Production same-origin reverse-proxy configuration template provided (`frontend/nginx.conf.example`).
 3. Backend CORS restriction implemented (`--allowed-origins` CLI flag & `KAMISH_GATEWAY_ALLOWED_ORIGINS` env var) rejecting unauthorized cross-origin requests.
@@ -46,26 +46,28 @@ On branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`, the fron
 
 ## 3. Frontend/backend linkage resolution
 
-### Resolved Integration Gaps (on branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`)
+### Implemented Source Changes (Runtime Verification Pending)
 
 1. **Configurable Deployed API Base URL:**
    - Implemented `resolveGatewayConfig()` in `frontend/src/utils/gatewayClient.ts` reading `import.meta.env.VITE_KAMISH_GATEWAY_URL`.
-   - Validates `http://` or `https://` protocol and normalizes trailing slashes.
+   - Parses the complete URL, requires HTTP(S) and a hostname, rejects credentials/query/fragment components, and normalizes trailing slashes.
    - Detects topology mode (`same-origin-proxy`, `separate-origin`, `local-dev`).
    - Configured Vite development server proxy in `frontend/vite.config.ts` and `frontend/vite.config.js` forwarding `/api` and `/metrics` to `127.0.0.1:3001`.
    - Provided `frontend/.env.example`.
 
 2. **Configurable CORS Allowlist on Gateway:**
    - Added `--allowed-origins` CLI flag and `KAMISH_GATEWAY_ALLOWED_ORIGINS` environment variable in `cmd/kamish-gateway/src/main.rs`.
-   - Updated `apply_security_headers` in `cmd/kamish-gateway/src/lib.rs` to validate the `Origin` header strictly against the authorized whitelist or local loopback in dev.
+   - Updated `apply_security_headers` in `cmd/kamish-gateway/src/lib.rs` to grant CORS only for exact configured origin matches; local development uses the same-origin Vite proxy.
    - Preserves `Access-Control-Allow-Credentials: true` without wildcard reflection.
 
-3. **Explicit Live vs Demo State & Elimination of False-Green Connection:**
+3. **Explicit Live vs Demo State & Metric Provenance:**
    - Added typed `ConnectionStatus` (`"connecting" | "connected" | "auth_required" | "unavailable" | "config_error"`) to `useKamish.ts` and `KamishContext.tsx`.
-   - Updated `Header.jsx` and `Navbar.jsx` to display true connection health rather than counting static in-memory demo nodes. Offline gateway displays `GATEWAY UNAVAILABLE` (red), eliminating false-green status.
+   - Updated `Header.jsx` and `Navbar.jsx` to display connection health rather than counting static in-memory demo nodes. Offline gateway displays `GATEWAY UNAVAILABLE` (red).
+   - Corrected the reconciliation response type to match backend fields: `targets_reconciled`, `gaps_discovered`, and `records_scheduled_into_outbox`.
    - When in Live mode, `produceCustomEvent` dispatches real records via `gatewayClient.produce` and `verifyAuditLedgerIntegrity` invokes real `gatewayClient.verifyAudit`.
-   - When in Demo mode, local WebCrypto SHA-256 hash chains and chaos scenario simulations are explicitly tagged `[DEMO]`.
-   - Synthetic 10Hz node countdown is suppressed during Live mode.
+   - When in Demo mode, local WebCrypto SHA-256 hash chains and chaos scenario simulations are explicitly tagged `[DEMO]`; the UI mode switch does not mutate the broker's server-side mode.
+   - Dashboard decision aggregates, throughput, and p99 latency display `N/A` because the gateway API does not expose those aggregates; demo telemetry is not reused in Live mode.
+   - Gateway-reported outbox pending count is displayed only when the gateway is connected. Synthetic 10Hz node countdown is suppressed during Live mode.
 
 4. **Production Reverse Proxy Template:**
    - Created `frontend/nginx.conf.example` illustrating a production same-origin reverse proxy with SSE streaming headers (`proxy_buffering off`), REST proxying, and SPA fallback routing.
@@ -83,10 +85,12 @@ On branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`, the fron
 - [x] Aligned `docs/CONTRACT.md`, `IMPLEMENTATION_INVENTORY.md`, `REMAINING_WORK_BACKLOG.md`, `FINAL_FUNCTIONAL_COMPLETION_REPORT.md`, and `worktillnow.md` on the same scoped verification statement.
 - [x] Added deployment-configurable gateway base URL (`VITE_KAMISH_GATEWAY_URL`) and Vite development proxy.
 - [x] Created same-origin reverse-proxy example (`frontend/nginx.conf.example`).
-- [x] Replaced localhost-only CORS with explicit `--allowed-origins` configuration without credential wildcards.
-- [x] Marked each dashboard and telemetry surface with explicit Live vs Demo provenance and eliminated false-green status.
+- [x] Replaced implicit loopback CORS allowances with exact configured-origin matching; local development uses the same-origin Vite proxy.
+- [x] Removed demo-derived values from Live dashboard aggregates where no backend metric exists; unavailable decision aggregates, throughput, and p99 latency display `N/A`.
+- [x] Kept the UI Demo/Live selector local to the frontend rather than mutating broker server-side mode.
+- [x] Aligned the frontend reconciliation response contract with actual gateway JSON fields.
 - [x] Updated `frontend/README.md` to reflect hybrid architecture and deployment options.
 - [x] Gated visible development credentials/quick-fill options to explicit dev mode (`VITE_ENABLE_DEV_LOGIN`).
-- [ ] Multi-region browser-to-gateway live cloud cluster smoke verification (deferred pending external cloud infrastructure deployment; **TEST SUITES NOT RUN** during this implementation pass).
+- [ ] Multi-region browser-to-gateway live cluster smoke verification (pending a running deployment; **NO TESTS OR BUILD COMMANDS RUN** during this functionality pass).
 - [ ] Live external cloud KMS key custody integration (deferred pending target cloud provider credentials).
 - [ ] Independent external audit witness quorum (deferred pending remote witness host provisioning).
