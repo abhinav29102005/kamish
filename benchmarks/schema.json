@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "KamishBenchmarkEvidenceSchema",
+  "type": "object",
+  "required": [
+    "run_id",
+    "system",
+    "status",
+    "git_commit",
+    "topology",
+    "workload",
+    "evidence_type"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "Unique run identifier including timestamp and target system"
+    },
+    "system": {
+      "type": "string",
+      "enum": ["kamish", "kafka_mirrormaker2", "apache_pulsar"]
+    },
+    "status": {
+      "type": "string",
+      "enum": ["CONFIGURED_UNEXECUTED", "EXECUTED_MEASURED", "FAILED_EXECUTION"]
+    },
+    "evidence_type": {
+      "type": "string",
+      "enum": ["MEASURED_RUNTIME_TELEMETRY", "BASELINE_CONFIGURATION_ONLY"]
+    },
+    "git_commit": {
+      "type": "string"
+    },
+    "topology": {
+      "type": "object",
+      "properties": {
+        "regions": { "type": "array", "items": { "type": "string" } },
+        "simulated_rtt_ms": { "type": "number" },
+        "packet_loss_rate": { "type": "number" }
+      }
+    },
+    "workload": {
+      "type": "object",
+      "properties": {
+        "producers": { "type": "integer" },
+        "record_size_bytes": { "type": "integer" },
+        "target_rate_msg_sec": { "type": "number" },
+        "duration_sec": { "type": "integer" }
+      }
+    },
+    "durability_level": {
+      "type": "string"
+    },
+    "measured_results": {
+      "type": "object",
+      "properties": {
+        "latency_ms": {
+          "type": "object",
+          "properties": {
+            "p50": { "type": "number" },
+            "p90": { "type": "number" },
+            "p99": { "type": "number" },
+            "p999": { "type": "number" },
+            "max": { "type": "number" }
+          }
+        },
+        "throughput": {
+          "type": "object",
+          "properties": {
+            "total_messages": { "type": "integer" },
+            "msg_per_sec": { "type": "number" },
+            "mb_per_sec": { "type": "number" }
+          }
+        },
+        "replication_lag_ms": {
+          "type": "object",
+          "properties": {
+            "p50": { "type": "number" },
+            "p99": { "type": "number" }
+          }
+        }
+      }
+    },
+    "prerequisites": {
+      "type": "object",
+      "properties": {
+        "all_met": { "type": "boolean" },
+        "unmet_dependencies": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
