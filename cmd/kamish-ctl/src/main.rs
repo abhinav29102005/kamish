@@ -4,9 +4,7 @@ use kamish_audit::AuditLog;
 use kamish_broker::BrokerServer;
 use kamish_client::{KamishAdminClient, KamishConsumer, KamishProducer};
 use kamish_enforce::Enforcer;
-use kamish_meta::{
-    KamishPolicyEngine, MetadataStore, RegionId, ResidencyPolicy, SyntheticChaosInjector,
-};
+use kamish_meta::{KamishPolicyEngine, MetadataStore, RegionId, ResidencyPolicy};
 use kamish_policy::{
     AckMode, ClassRule, DestinationMode, PolicyCache, PolicyDocument, SignedPolicy,
 };
@@ -215,11 +213,28 @@ struct BenchResult {
 
 impl BenchResult {
     fn compute(latencies: &mut [Duration], elapsed: Duration) -> Self {
-        latencies.sort();
         let n = latencies.len();
-        let total_messages = n;
         let elapsed_secs = elapsed.as_secs_f64();
-        let throughput_msg_per_sec = (n as f64) / elapsed_secs;
+        if n == 0 {
+            return Self {
+                total_messages: 0,
+                elapsed_secs,
+                throughput_msg_per_sec: 0.0,
+                min_us: 0.0,
+                p50_us: 0.0,
+                p90_us: 0.0,
+                p99_us: 0.0,
+                max_us: 0.0,
+            };
+        }
+
+        latencies.sort();
+        let total_messages = n;
+        let throughput_msg_per_sec = if elapsed_secs > 0.0 {
+            (n as f64) / elapsed_secs
+        } else {
+            0.0
+        };
 
         let to_us = |d: Duration| d.as_secs_f64() * 1_000_000.0;
 
@@ -571,20 +586,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 normal_res.max_us / 1000.0
             );
 
-            // 3. Degraded Link Workload
+            // 3. Degraded Link Workload with real calibrated network impairment (W31)
             println!(
-                "\n\x1b[1;33m>> [Scenario 2] Injecting 300ms WAN RTT Chaos on Inter-Region Route...\x1b[0m"
+                "\n\x1b[1;33m>> [Scenario 2] Calibrating & Spawning Real Network Impairment Transport (W31)...\x1b[0m"
             );
-            let chaos = SyntheticChaosInjector::new();
-            chaos.set_delay(300);
+            let cal_config = kamish_checkers::CalibrationConfig {
+                configured_delay_ms: 50.0,
+                jitter_ms: 2.0,
+                loss_rate: 0.0,
+                seed: 42,
+                sample_count: 20,
+            };
+            let cal_report = kamish_checkers::calibrate_transport(cal_config.clone()).await?;
+            println!(
+                "  [Calibration] Configured Delay : {:.1} ms",
+                cal_report.configured_delay_ms
+            );
+            println!(
+                "  [Calibration] Achieved p50     : {:.2} ms",
+                cal_report.p50_median_ms
+            );
+            println!(
+                "  [Calibration] Achieved p99     : {:.2} ms",
+                cal_report.p99_ms
+            );
+            println!(
+                "  [Calibration] Spread (IQR)     : {:.2} ms (stddev: {:.2} ms)",
+                cal_report.spread_iqr_ms, cal_report.spread_stddev_ms
+            );
+
+            let (impairment_proxy, impaired_target_addr) =
+                kamish_checkers::ImpairedTcpProxy::spawn(target_addr.clone(), cal_config).await?;
 
             let degraded_count = std::cmp::max(effective_concurrency * 50, count / 2);
             println!(
-                "\x1b[1;33m>> Running Ingestion Benchmark under DEGRADED SLOW LINK ({} records)...\x1b[0m",
+                "\x1b[1;33m>> Running Ingestion Benchmark across CALIBRATED IMPAIRED TRANSPORT ({} records)...\x1b[0m",
                 degraded_count
             );
             let degraded_res = run_produce_workload(
-                &target_addr,
+                &impaired_target_addr,
                 degraded_count,
                 effective_concurrency,
                 5000,
@@ -593,6 +633,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "degraded",
             )
             .await?;
+            impairment_proxy.stop();
 
             println!(
                 "  Total Messages Produced : {}",

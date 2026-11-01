@@ -1,0 +1,78 @@
+{
+  "run_id": "run_20261101_011647",
+  "timestamp_utc": "2026-11-01T01:17:26.796708035+00:00",
+  "git_commit": "6d507b4147b702592ce87fffe0e16e7e40ca7c4f",
+  "scenario_name": "three_region_evidence",
+  "seed": 42,
+  "link_calibrations": [
+    {
+      "link_name": "EU_WEST -> US_EAST",
+      "configured_delay_ms": 70.0,
+      "achieved_p50_median_ms": 70.3801405,
+      "achieved_p90_ms": 72.403484,
+      "achieved_p95_ms": 72.4393825,
+      "achieved_p99_ms": 72.92336900000001,
+      "spread_iqr_ms": 3.96904600000002,
+      "spread_stddev_ms": 2.7914242604804542,
+      "sample_count": 50,
+      "calibration_error_pct": 0.5430578571428514
+    },
+    {
+      "link_name": "EU_WEST -> AP_SOUTH",
+      "configured_delay_ms": 130.0,
+      "achieved_p50_median_ms": 130.455035,
+      "achieved_p90_ms": 134.0627065,
+      "achieved_p95_ms": 134.6477615,
+      "achieved_p99_ms": 135.5198175,
+      "spread_iqr_ms": 8.068951000000027,
+      "spread_stddev_ms": 5.6398032986917235,
+      "sample_count": 50,
+      "calibration_error_pct": 0.35002692307693034
+    },
+    {
+      "link_name": "US_EAST -> AP_SOUTH",
+      "configured_delay_ms": 190.0,
+      "achieved_p50_median_ms": 190.3659895,
+      "achieved_p90_ms": 195.9429785,
+      "achieved_p95_ms": 196.48639649999998,
+      "achieved_p99_ms": 197.96297099999998,
+      "spread_iqr_ms": 12.738751000000036,
+      "spread_stddev_ms": 8.302111704272807,
+      "sample_count": 50,
+      "calibration_error_pct": 0.19262605263158525
+    }
+  ],
+  "invariant_checks": [
+    {
+      "invariant_id": "W31-CALIBRATION",
+      "description": "Transport Delay Calibration across 3 WAN Links",
+      "status": "PASS",
+      "details": "3 links calibrated with seed 42; max error was 0.54%"
+    },
+    {
+      "invariant_id": "INV-2/INV-3-QUORUM",
+      "description": "In-region Quorum 2-of-3 Persist Durability",
+      "status": "PASS",
+      "details": "Write committed and acknowledged after 2 of 3 physical persists"
+    },
+    {
+      "invariant_id": "W30-HISTORY-CHECKER",
+      "description": "History-based Loss, Duplicate, Ordering, and Epoch Checker",
+      "status": "PASS",
+      "details": "0 data loss, 0 duplicates, 0 ordering gaps across 200 verified records"
+    },
+    {
+      "invariant_id": "W30-CANARY-SCANNER",
+      "description": "Storage & Wire Canary Token Scanner with Positive Control",
+      "status": "PASS",
+      "details": "Clean storage verified clean; positive control caught deliberate leak in decoded storage"
+    }
+  ],
+  "history_report": {
+    "total_acked_records": 200,
+    "total_consumed_records": 200,
+    "verified_streams": 1
+  },
+  "positive_control_passed": true,
+  "verdict": "ALL_INVARIANTS_PASSED"
+}

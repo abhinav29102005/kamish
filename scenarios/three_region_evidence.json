@@ -1,0 +1,68 @@
+{
+  "scenario_name": "three_region_evidence",
+  "version": "1.0.0",
+  "seed": 42,
+  "runs": 5,
+  "topology": {
+    "regions": ["EU_WEST", "US_EAST", "AP_SOUTH"],
+    "in_region_replication": {
+      "ensemble_size": 3,
+      "write_quorum": 3,
+      "ack_quorum": 2,
+      "durability_contract": "INV-2/INV-3 (2-of-3 persist ACK)"
+    },
+    "wan_links": [
+      {
+        "from": "EU_WEST",
+        "to": "US_EAST",
+        "configured_latency_ms": 70.0,
+        "configured_jitter_ms": 5.0,
+        "loss_rate": 0.0
+      },
+      {
+        "from": "EU_WEST",
+        "to": "AP_SOUTH",
+        "configured_latency_ms": 130.0,
+        "configured_jitter_ms": 10.0,
+        "loss_rate": 0.0
+      },
+      {
+        "from": "US_EAST",
+        "to": "AP_SOUTH",
+        "configured_latency_ms": 190.0,
+        "configured_jitter_ms": 15.0,
+        "loss_rate": 0.0
+      }
+    ]
+  },
+  "routing": {
+    "ewma_alpha": 0.2,
+    "circuit_breaker": {
+      "failure_threshold": 3,
+      "reset_timeout_ms": 2000,
+      "half_open_success_threshold": 2
+    },
+    "retry_policy": {
+      "initial_backoff_ms": 50,
+      "multiplier": 2.0,
+      "max_backoff_ms": 1000,
+      "max_retries": 3
+    }
+  },
+  "metadata_authority": {
+    "engine": "etcd",
+    "version": "3.7.3",
+    "cluster_members": ["127.0.0.1:2379", "127.0.0.1:22379", "127.0.0.1:32379"],
+    "lease_ttl_ms": 10000,
+    "produce_path_consensus_reads": 0
+  },
+  "invariants": [
+    "INV-1: Linearizable epoch monotonically increasing, strictly non-regressing",
+    "INV-2: In-region quorum replication requires >=2 physical persists before ACK",
+    "INV-3: Zero silent uncommitted record loss on leader crash or failover",
+    "INV-4: StrictLocal and BorderRestricted residency strictly enforced before wire egress",
+    "INV-5: Common-prefix reconciliation quarantines superseded uncommitted divergent records",
+    "INV-6: Independent history cross-reference verifies 0 loss, 0 dupes, 0 ordering gaps",
+    "INV-7: Storage and wire canary scanning detects zero canary token leakage"
+  ]
+}

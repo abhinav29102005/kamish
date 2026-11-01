@@ -126,7 +126,26 @@ impl EtcdMetadataAuthority {
             options = options.with_tls(tls.clone());
         }
 
-        let client = Client::connect(self.endpoints.clone(), Some(options))
+        let mut reachable = Vec::new();
+        for ep in &self.endpoints {
+            let addr_str = ep
+                .trim_start_matches("https://")
+                .trim_start_matches("http://");
+            if let Ok(addr) = addr_str.parse::<std::net::SocketAddr>() {
+                if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok() {
+                    reachable.push(ep.clone());
+                }
+            } else {
+                reachable.push(ep.clone());
+            }
+        }
+        let endpoints_to_use = if reachable.is_empty() {
+            self.endpoints.clone()
+        } else {
+            reachable
+        };
+
+        let client = Client::connect(endpoints_to_use, Some(options))
             .await
             .map_err(|e| {
                 MetaError::AuthorityError(format!("Failed to connect to etcd endpoints: {e}"))
@@ -453,11 +472,7 @@ impl MetadataAuthority for EtcdMetadataAuthority {
                 Err(err) => {
                     last_err = err;
                     if attempt < max_attempts {
-                        // Allow Tower balanced channel to rotate to healthy endpoints
-                        // before destroying channel state
-                        if attempt >= 2 {
-                            self.reset_connection();
-                        }
+                        self.reset_connection();
                         std::thread::sleep(Duration::from_millis(300 * attempt as u64));
                     }
                 }

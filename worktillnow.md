@@ -3120,3 +3120,11 @@ a tested local prototype, a usable experimental Node SDK and a much more honest
 demonstration. The next phase is to establish authority, security and durable
 distributed recovery—not to present the current green local tests as completed
 multi-region production guarantees.
+
+### Phase 4 - Evidence Complete (2026-11-01)
+
+- **W31 Real Network Impairment & Calibration**: Implemented `ImpairedTcpProxy` and `scripts/netem_impairment.sh` for kernel `tc/netem` and TCP proxy delays. Calibrated achieved vs configured latency with fixed seed (42), recording raw latency samples, medians (p50), tail percentiles (p90, p95, p99), IQR spread, and standard deviation across all 3 WAN links. Fixed benchmark delay wiring in `kamish-ctl`.
+- **W30 History Checkers & Canary Scanner**: Implemented `HistoryChecker` cross-referencing independent producer-ACK logs against consumer logs to flag data loss, duplicate records, ordering gaps, and stale epochs. Implemented `CanaryScanner` over raw decoded storage bytes (`partition.data`, `quarantine.data`) and wire frames, verified by positive control testing that flags deliberate canary leakage.
+- **W32 Version-Pinned Baseline Topologies**: Recorded version-pinned comparative configurations for Apache Kafka 3.9.0 + MirrorMaker 2 and Apache Pulsar 4.0.0 in `benchmarks/baselines/` with parity of durability settings (3 replicas in-region, 2-of-3 persist ACK, unclean leader election disabled).
+- **One-Command Scenario Runner (`scripts/run_scenario.sh`)**: Implemented reproducible scenario executor reproducing runs from recorded configs (`scenarios/three_region_evidence.json`), including starting/stopping 3-node external etcd 3.7.3 members with mTLS, executing all invariant verifications, and outputting structured JSON and Markdown audit reports linking every metric to a specific run ID.
+- **W26/W27 Routing Signals, Breakers & Bounded Retries**: Implemented EWMA signal smoothing ($S_t = \alpha X_t + (1-\alpha) S_{t-1}$), 3-state Circuit Breaker (`Closed`, `Open`, `HalfOpen`) with hysteresis dwell and route skipping, and fair bounded exponential retry policy.

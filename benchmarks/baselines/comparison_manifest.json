@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "topology": {
+    "regions": [
+      "EU_WEST",
+      "US_EAST",
+      "AP_SOUTH"
+    ],
+    "inter_region_links": [
+      {
+        "from": "EU_WEST",
+        "to": "US_EAST",
+        "rtt_ms": 72.0,
+        "loss_rate": 0.001
+      },
+      {
+        "from": "US_EAST",
+        "to": "AP_SOUTH",
+        "rtt_ms": 185.0,
+        "loss_rate": 0.002
+      },
+      {
+        "from": "EU_WEST",
+        "to": "AP_SOUTH",
+        "rtt_ms": 115.0,
+        "loss_rate": 0.001
+      }
+    ]
+  },
+  "comparison": {
+    "durability_level": "Local majority persist (2 of 3) before producer ACK; async durable WAN replication",
+    "systems": {
+      "kamish": {
+        "version": "0.1.0",
+        "in_region_replicas": 3,
+        "ack_mode": "LocalMajority (2 of 3)",
+        "wan_replication": "Offset-preserving, single-record outbox with crash-safe atomic reservation",
+        "residency_enforcement": "Cryptographic signed policy at ingress, egress, and relay",
+        "tls_version": "TLS 1.3 pure-Rust mutual auth",
+        "storage": "Segmented crash-durable CRC32-checksummed append log with sparse index"
+      },
+      "kafka_mirrormaker2": {
+        "version": "Apache Kafka 3.9.0",
+        "in_region_replicas": 3,
+        "ack_mode": "acks=all (min.insync.replicas=2)",
+        "unclean_leader_election": "false",
+        "wan_replication": "MirrorMaker 2 (Kafka Connect source/sink)",
+        "residency_enforcement": "Manual topic partitioning and routing (no cryptographic boundary)",
+        "tls_version": "TLS 1.3 Java JSSE",
+        "storage": "Log segment files with time/size rolling and .index/.timeindex"
+      },
+      "apache_pulsar": {
+        "version": "Apache Pulsar 4.0.0",
+        "in_region_replicas": 3,
+        "ack_mode": "writeQuorum=3, ackQuorum=2",
+        "wan_replication": "Built-in full-duplex cross-cluster geo-replication on namespace",
+        "residency_enforcement": "Cluster whitelist on tenant/namespace (no cryptographically signed envelope)",
+        "tls_version": "TLS 1.3 OpenSSL/BouncyCastle",
+        "storage": "BookKeeper ledgers with journal and entry loggers"
+      }
+    }
+  }
+}

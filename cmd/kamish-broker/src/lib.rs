@@ -26,7 +26,7 @@ use kamish_meta::{
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
-use std::collections::{{HashMap, HashSet}, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 pub mod catalog;
@@ -307,6 +307,10 @@ pub struct BrokerServer {
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
     pub clock: Arc<dyn MonotonicClock>,
     pub catalog: Arc<RwLock<TenantCatalog>>,
+    consumer_checkpoints: ConsumerCheckpoints,
+    degraded_links: Arc<RwLock<HashSet<String>>>,
+    owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
+    renewal_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl BrokerServer {
@@ -399,7 +403,29 @@ impl BrokerServer {
             sessions: Arc::new(StripedStore::new()),
             partition_operations: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
+            clock: Arc::new(SystemMonotonicClock::new()),
+            catalog,
+            consumer_checkpoints: Arc::new(RwLock::new(HashMap::new())),
+            degraded_links: Arc::new(RwLock::new(HashSet::new())),
+            owned_partitions: Arc::new(RwLock::new(HashSet::new())),
+            renewal_shutdown: Arc::new(renewal_tx),
         };
+
+        // Load existing consumer checkpoints from disk (W22)
+        let offsets_file = broker.data_dir.join("consumer_offsets.json");
+        if let Ok(bytes) = std::fs::read(&offsets_file)
+            && let Ok(map) = serde_json::from_slice::<HashMap<String, u64>>(&bytes)
+        {
+            let mut ckpt = broker.consumer_checkpoints.write().unwrap();
+            for (k, v) in map {
+                let parts: Vec<&str> = k.split(":").collect();
+                if parts.len() == 3
+                    && let Ok(p) = parts[2].parse::<u32>()
+                {
+                    ckpt.insert((parts[0].to_string(), parts[1].to_string(), p), v);
+                }
+            }
+        }
         for entry in std::fs::read_dir(&broker.data_dir)? {
             let entry = entry?;
             if !entry.file_type()?.is_dir() {

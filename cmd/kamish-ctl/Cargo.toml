@@ -12,6 +12,7 @@ kamish-meta = { path = "../../crates/kamish-meta" }
 kamish-client = { path = "../../crates/kamish-client" }
 kamish-broker = { path = "../../cmd/kamish-broker" }
 kamish-enforce = { path = "../../crates/kamish-enforce" }
+kamish-checkers = { path = "../../crates/kamish-checkers" }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

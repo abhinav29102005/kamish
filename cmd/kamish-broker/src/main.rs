@@ -189,7 +189,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tls_cfg.require_client_auth,
         )?;
         let acceptor = tokio_rustls::TlsAcceptor::from(server_tls_config);
-        broker.clone().start_tls_listener(&bind_addr, acceptor).await?
+        broker
+            .clone()
+            .start_tls_listener(&bind_addr, acceptor)
+            .await?
     } else {
         broker.clone().start_tcp_listener(&bind_addr).await?
     };

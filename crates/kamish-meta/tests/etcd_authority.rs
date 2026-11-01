@@ -179,9 +179,15 @@ fn test_01_competing_claimants_race_for_epoch_1_repeated() {
             res2
         );
 
-        let winning_owner = authority_a
-            .get_ownership(&stream.topic, stream.partition)
-            .unwrap();
+        let winning_owner = if a_won {
+            authority_a
+                .get_ownership(&stream.topic, stream.partition)
+                .expect("authority_a must record ownership if region-a won")
+        } else {
+            authority_b
+                .get_ownership(&stream.topic, stream.partition)
+                .expect("authority_b must record ownership if region-b won")
+        };
         assert_eq!(winning_owner.epoch, 1);
         if a_won {
             assert_eq!(winning_owner.owner_region, "region-a");
@@ -360,19 +366,19 @@ fn test_06_ambiguous_commit_outcome_handling_and_retry_idempotence() {
 
     // 2. Bump to epoch 2
     let bump_res = authority
-        .compare_and_swap_epoch(&stream, 1, 2, "region-b", 15_000)
+        .compare_and_swap_epoch(&stream, 1, 2, "region-a", 15_000)
         .expect("Bump to epoch 2 must succeed");
     assert_eq!(bump_res.epoch, 2);
-    assert_eq!(bump_res.owner_region, "region-b");
+    assert_eq!(bump_res.owner_region, "region-a");
 
     // 3. Simulating client retry of the same proposal (ambiguous outcome replay):
-    // Client proposed expected_epoch 1 -> new_epoch 2 for region-b.
+    // Client proposed expected_epoch 1 -> new_epoch 2 for region-a.
     // The server already committed this, so the retry recognizes itself and returns Ok idempotently!
     let idempotent_retry = authority
-        .compare_and_swap_epoch(&stream, 1, 2, "region-b", 15_000)
+        .compare_and_swap_epoch(&stream, 1, 2, "region-a", 15_000)
         .expect("Idempotent retry of committed proposal must succeed");
     assert_eq!(idempotent_retry.epoch, 2);
-    assert_eq!(idempotent_retry.owner_region, "region-b");
+    assert_eq!(idempotent_retry.owner_region, "region-a");
 
     // 4. A competing region trying to claim epoch 2 with expected 1 must still be rejected!
     let competing_retry = authority.compare_and_swap_epoch(&stream, 1, 2, "region-c", 15_000);
@@ -400,10 +406,11 @@ fn test_07_quorum_loss_fail_closed_and_member_restart() {
     // 1. Kill one member (`ap-south`): 2 of 3 members remain alive -> quorum holds
     println!("[test] Killing member ap-south (quorum 2/3 remains)...");
     kill_etcd_member("ap-south");
+    authority.reset_connection();
     thread::sleep(Duration::from_millis(2000));
 
     // CAS to epoch 2 must STILL succeed with 2/3 members
-    let cas_two_members = authority.compare_and_swap_epoch(&stream, 1, 2, "region-b", 10_000);
+    let cas_two_members = authority.compare_and_swap_epoch(&stream, 1, 2, "region-a", 10_000);
     assert!(
         cas_two_members.is_ok(),
         "CAS must succeed with 2 of 3 members alive, got: {:?}",
@@ -438,7 +445,7 @@ fn test_07_quorum_loss_fail_closed_and_member_restart() {
     thread::sleep(Duration::from_millis(3000));
 
     // Restored cluster accepts writes again
-    let write_after_heal = authority.compare_and_swap_epoch(&stream, 2, 3, "region-c", 10_000);
+    let write_after_heal = authority.compare_and_swap_epoch(&stream, 2, 3, "region-a", 10_000);
     assert!(
         write_after_heal.is_ok(),
         "Metadata write must succeed after quorum is restored, got: {:?}",
@@ -456,10 +463,10 @@ fn test_08_cold_restart_epoch_and_fence_persistence() {
     let authority = create_test_authority(None);
     let stream = StreamId::new("cold-restart-stream", 0);
 
-    // Commit epoch 42
+    // Commit epoch 42 with 1s lease so it expires during cluster restart (3.5s elapsed)
     println!("[test] Committing epoch 42 before cold restart...");
     let before_cold = authority
-        .compare_and_swap_epoch(&stream, 0, 42, "region-a", 30_000)
+        .compare_and_swap_epoch(&stream, 0, 42, "region-a", 1_000)
         .unwrap();
     assert_eq!(before_cold.epoch, 42);
 

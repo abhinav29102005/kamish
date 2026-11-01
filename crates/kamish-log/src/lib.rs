@@ -826,7 +826,7 @@ impl PartitionLog {
     }
 }
 
-fn bincode_deserialize_envelope(
+pub fn bincode_deserialize_envelope(
     cursor: &mut std::io::Cursor<Vec<u8>>,
 ) -> Result<RecordEnvelope, std::io::Error> {
     let mut len_bytes = [0u8; 4];
@@ -837,6 +837,16 @@ fn bincode_deserialize_envelope(
     cursor.read_exact(&mut buf)?;
     serde_json::from_slice(&buf)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// Decodes length-prefixed RecordEnvelopes from raw storage bytes without requiring exclusive partition locks.
+pub fn decode_envelopes_from_bytes(bytes: &[u8]) -> Vec<RecordEnvelope> {
+    let mut cursor = std::io::Cursor::new(bytes.to_vec());
+    let mut records = Vec::new();
+    while let Ok(envelope) = bincode_deserialize_envelope(&mut cursor) {
+        records.push(envelope);
+    }
+    records
 }
 
 #[cfg(test)]
