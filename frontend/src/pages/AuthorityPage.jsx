@@ -36,12 +36,34 @@ export default function AuthorityPage() {
             { topic: "financial-transactions", partition: 0, owner_region: "EU_WEST", epoch: 1, active_lease: true },
             { topic: "financial-transactions", partition: 1, owner_region: "EU_WEST", epoch: 1, active_lease: true },
             { topic: "financial-transactions", partition: 2, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "sovereign-stream", partition: 0, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "sovereign-stream", partition: 1, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "sovereign-stream", partition: 2, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "healthcare-clinical-trials", partition: 0, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "healthcare-clinical-trials", partition: 1, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "healthcare-clinical-trials", partition: 2, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "cross-border-kyc-registry", partition: 0, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "cross-border-kyc-registry", partition: 1, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "cross-border-kyc-registry", partition: 2, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "order-matching-engine", partition: 0, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "order-matching-engine", partition: 1, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "order-matching-engine", partition: 2, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "general-topic", partition: 0, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "general-topic", partition: 1, owner_region: "EU_WEST", epoch: 1, active_lease: true },
+            { topic: "general-topic", partition: 2, owner_region: "EU_WEST", epoch: 1, active_lease: true },
           ],
         });
         setPolicy({
           policy_version_floor: 1,
           enforcement: "StrictLocal / BorderRestricted Cryptographic Egress",
-          registered_topics: ["financial-transactions", "sovereign-stream", "general-topic"],
+          registered_topics: [
+            "financial-transactions",
+            "sovereign-stream",
+            "healthcare-clinical-trials",
+            "cross-border-kyc-registry",
+            "order-matching-engine",
+            "general-topic",
+          ],
         });
       }
     } catch (err) {

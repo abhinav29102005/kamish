@@ -112,6 +112,9 @@ export default function ProduceFetchPage() {
               >
                 <option value="financial-transactions">financial-transactions</option>
                 <option value="sovereign-stream">sovereign-stream</option>
+                <option value="healthcare-clinical-trials">healthcare-clinical-trials</option>
+                <option value="cross-border-kyc-registry">cross-border-kyc-registry</option>
+                <option value="order-matching-engine">order-matching-engine</option>
                 <option value="general-topic">general-topic</option>
               </select>
             </div>
@@ -199,6 +202,9 @@ export default function ProduceFetchPage() {
               >
                 <option value="financial-transactions">financial-transactions</option>
                 <option value="sovereign-stream">sovereign-stream</option>
+                <option value="healthcare-clinical-trials">healthcare-clinical-trials</option>
+                <option value="cross-border-kyc-registry">cross-border-kyc-registry</option>
+                <option value="order-matching-engine">order-matching-engine</option>
                 <option value="general-topic">general-topic</option>
               </select>
             </div>

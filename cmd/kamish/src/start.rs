@@ -213,6 +213,14 @@ pub async fn run_start(opts: StartOptions<'_>) -> Result<(), Box<dyn std::error:
     let mut catalog = TenantCatalog::new();
     let mut sovereign_classes = HashSet::new();
     sovereign_classes.insert("sovereign-class".to_string());
+    sovereign_classes.insert("sovereign".to_string());
+    sovereign_classes.insert("financial".to_string());
+    sovereign_classes.insert("telemetry".to_string());
+    sovereign_classes.insert("hipaa-regulated".to_string());
+    sovereign_classes.insert("biomarker".to_string());
+    sovereign_classes.insert("aml-sanctions".to_string());
+    sovereign_classes.insert("compliance".to_string());
+
     catalog.register_topic(TopicMetadata::new(
         "financial-transactions",
         "tenant-sovereign",
@@ -223,12 +231,33 @@ pub async fn run_start(opts: StartOptions<'_>) -> Result<(), Box<dyn std::error:
         "sovereign-stream",
         "tenant-sovereign",
         3,
+        sovereign_classes.clone(),
+    ));
+    catalog.register_topic(TopicMetadata::new(
+        "healthcare-clinical-trials",
+        "tenant-sovereign",
+        3,
+        sovereign_classes.clone(),
+    ));
+    catalog.register_topic(TopicMetadata::new(
+        "cross-border-kyc-registry",
+        "tenant-sovereign",
+        3,
         sovereign_classes,
     ));
 
     let mut general_classes = HashSet::new();
     general_classes.insert("general-topic".to_string());
     general_classes.insert("general".to_string());
+    general_classes.insert("order-matching".to_string());
+    general_classes.insert("l3-market-data".to_string());
+
+    catalog.register_topic(TopicMetadata::new(
+        "order-matching-engine",
+        "tenant-default",
+        3,
+        general_classes.clone(),
+    ));
     catalog.register_topic(TopicMetadata::new(
         "general-topic",
         "tenant-default",
@@ -249,10 +278,22 @@ pub async fn run_start(opts: StartOptions<'_>) -> Result<(), Box<dyn std::error:
     );
 
     // Initial partition claims
-    for p in 0..3 {
-        let _ = broker.claim_partition_ownership("financial-transactions", p, 0, 1, 30_000);
-        let _ = broker.claim_partition_ownership("sovereign-stream", p, 0, 1, 30_000);
-        let _ = broker.claim_partition_ownership("general-topic", p, 0, 1, 30_000);
+    let all_topics = [
+        "financial-transactions",
+        "sovereign-stream",
+        "healthcare-clinical-trials",
+        "cross-border-kyc-registry",
+        "order-matching-engine",
+        "general-topic",
+    ];
+    for topic in all_topics {
+        for p in 0..3 {
+            let _ = broker.claim_partition_ownership(topic, p, 0, 1, 30_000);
+        }
+    }
+
+    if opts.dev {
+        crate::seed::seed_development_data(&broker);
     }
 
     // 5. Consensus / Mode Check

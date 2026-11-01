@@ -25,11 +25,26 @@ export default function AuditVerificationPage() {
         // Demo fallback
         setAuditInfo({
           audit_ledger_status: "TAMPER_EVIDENT_HASH_CHAINED",
-          checkpoints_count: 3,
+          checkpoints_count: 18,
           checkpoint_anchors: [
             { stream: "financial-transactions:0", tail_hash: "3a8f9c102b4e87d12f3490...", record_count: 1420 },
             { stream: "financial-transactions:1", tail_hash: "7bc41a9e88d011244fa310...", record_count: 1390 },
             { stream: "financial-transactions:2", tail_hash: "ff902381249b01aa76c891...", record_count: 1410 },
+            { stream: "sovereign-stream:0", tail_hash: "982a14bc00192e48fa7102...", record_count: 890 },
+            { stream: "sovereign-stream:1", tail_hash: "1104fe90bc44129881023a...", record_count: 875 },
+            { stream: "sovereign-stream:2", tail_hash: "ee48190214acb019824410...", record_count: 910 },
+            { stream: "healthcare-clinical-trials:0", tail_hash: "88fa41092e40bc871239aa...", record_count: 480 },
+            { stream: "healthcare-clinical-trials:1", tail_hash: "5c89104fae109823410bc9...", record_count: 495 },
+            { stream: "healthcare-clinical-trials:2", tail_hash: "bb09124410ae8790123fa1...", record_count: 470 },
+            { stream: "cross-border-kyc-registry:0", tail_hash: "2e44198fa01bce471029aa...", record_count: 620 },
+            { stream: "cross-border-kyc-registry:1", tail_hash: "44fe891024bc0192837410...", record_count: 610 },
+            { stream: "cross-border-kyc-registry:2", tail_hash: "aa891023410bc8749102ff...", record_count: 635 },
+            { stream: "order-matching-engine:0", tail_hash: "66e4091bc8819203841029...", record_count: 18450 },
+            { stream: "order-matching-engine:1", tail_hash: "991024bcae192038471023...", record_count: 18210 },
+            { stream: "order-matching-engine:2", tail_hash: "331048fe891029384710bc...", record_count: 18390 },
+            { stream: "general-topic:0", tail_hash: "1029384756abcdef012345...", record_count: 1205 },
+            { stream: "general-topic:1", tail_hash: "abcdef0123456789102938...", record_count: 1190 },
+            { stream: "general-topic:2", tail_hash: "9876543210fedcba102938...", record_count: 1215 },
           ],
           verification: "CHECKPOINT_ANCHORED_BOUNDARY_VALID",
         });

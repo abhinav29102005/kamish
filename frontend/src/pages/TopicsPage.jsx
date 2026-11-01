@@ -24,9 +24,12 @@ export default function TopicsPage() {
       } else {
         // Fallback demo catalog
         setTopics([
-          { topic_name: "financial-transactions", owner_tenant: "tenant-sovereign", partition_count: 3, allowed_classes: ["sovereign-class"] },
-          { topic_name: "sovereign-stream", owner_tenant: "tenant-sovereign", partition_count: 3, allowed_classes: ["sovereign-class"] },
-          { topic_name: "general-topic", owner_tenant: "tenant-default", partition_count: 3, allowed_classes: ["general"] },
+          { topic_name: "financial-transactions", owner_tenant: "tenant-sovereign", partition_count: 3, allowed_classes: ["sovereign-class", "financial"] },
+          { topic_name: "sovereign-stream", owner_tenant: "tenant-sovereign", partition_count: 3, allowed_classes: ["sovereign-class", "telemetry"] },
+          { topic_name: "healthcare-clinical-trials", owner_tenant: "tenant-sovereign", partition_count: 3, allowed_classes: ["sovereign-class", "hipaa-regulated", "biomarker"] },
+          { topic_name: "cross-border-kyc-registry", owner_tenant: "tenant-sovereign", partition_count: 3, allowed_classes: ["sovereign-class", "aml-sanctions", "compliance"] },
+          { topic_name: "order-matching-engine", owner_tenant: "tenant-default", partition_count: 3, allowed_classes: ["general", "order-matching", "l3-market-data"] },
+          { topic_name: "general-topic", owner_tenant: "tenant-default", partition_count: 3, allowed_classes: ["general", "general-topic"] },
         ]);
       }
     } catch (err) {
