@@ -3440,3 +3440,95 @@ Milestone FN-03 closes the replication metadata and context preservation gap ide
   - `DEEP_RECONNAISSANCE_REPORT.md`: Comprehensive 15-section audit report with architectural reconstructions, path traces, and evidence assessments.
   - `IMPLEMENTATION_INVENTORY.md`: Granular status matrix covering 40+ capabilities classified under strict audit labels.
   - `REMAINING_WORK_BACKLOG.md`: Authoritative engineering backlog organized from P0 to P3, purging previously resolved backlog items.
+
+
+---
+
+## 36. One-Shot Remaining Implementation & Functional Completion Campaign (2026-11-01)
+
+### 36.1 Overview & Execution Mandate
+Following the Deep Reconnaissance & Implementation Reality Audit (Section 35), an autonomous implementation campaign was executed to implement, integrate, and commit all genuinely outstanding functional backlog items across the Kamish repository.
+
+In strict adherence to the functional-first directive:
+- **No tests were written, modified, or executed during this campaign** (deferred to a separately authorized verification phase).
+- **All compilation was validated purely via static analysis and `cargo check` / `cargo check --workspace`**.
+- **No security capabilities or quorum semantics were faked**; fail-closed behavior was strictly preserved when external infrastructure dependencies are unconfigured.
+
+### 36.2 Workstream A: Production AEAD & Key Provider Boundaries (Commit `85b293c`)
+- **Cryptographic Engine (`crates/kamish-seal`):**
+  - Replaced prototype XOR transformations with standard authenticated encryption using `ring::aead`.
+  - Implemented `AeadSealEngine` supporting `SealingAlgorithm::ChaCha20Poly1305` and `SealingAlgorithm::Aes256Gcm`.
+  - Added 96-bit CSPRNG nonce generation per record (`rand::rngs::OsRng`).
+  - Added Additional Authenticated Data (AAD) cryptographic context binding:
+    $$\text{AAD} = \text{topic} \parallel \text{partition} \parallel \text{epoch} \parallel \text{policy\_version} \parallel \text{key\_id} \parallel \text{key\_version}$$
+- **Key Custody Boundaries:**
+  - Defined `KeyProvider` trait for key lookup and DEK unwrapping.
+  - Implemented `DevKeyProvider` strictly isolated for local development with regional boundary validation.
+  - Defined `ExternalKmsProvider` as the boundary for production cloud KMS integrations (AWS KMS, GCP KMS, Azure Key Vault, HashiCorp Vault).
+- **Broker Integration (`cmd/kamish-broker/src/lib.rs`):**
+  - Integrated sealed encryption into `BrokerServer::produce`.
+  - When `ResidencyPolicy::SealedCiphertext` is configured, the broker verifies local home-region residency, encrypts the payload via `AeadSealEngine` using wrapped DEKs, and stages the authenticated ciphertext to the destination outbox.
+  - If external KMS custody is unconfigured, the broker fails closed with `"sealed_replication_not_configured"`, eliminating plaintext exposure risks.
+
+### 36.3 Workstream B: Autonomous Audit Witness Publication Daemon (Commit `5e7cdf9`)
+- **Publication Engine (`crates/kamish-audit/src/publisher.rs`):**
+  - Implemented `WitnessPublisher` providing durable, bounded background checkpoint publication.
+  - Added `WitnessDestination` trait with `UnconfiguredWitnessDestination` and `FileWitnessDestination`.
+  - Added crash-safe journal persistence (`witness_publisher_journal.json`) using temporary file `sync_all` and atomic rename to ensure checkpoints survive broker crashes.
+  - Enforced bounded queue capacity (10,000 checkpoints) with retry backoff and failure metrics.
+- **Daemon Lifecycle (`cmd/kamish-broker/src/main.rs`, `cmd/kamish-broker/src/lib.rs`):**
+  - Wired `WitnessPublisher` into `BrokerServer`.
+  - Spawned `spawn_witness_publisher_worker` background task in broker daemon with configurable sweep interval (default 60s) and graceful shutdown signal handling.
+
+### 36.4 Workstream C: Dynamic Consumer Group Coordination (Commit `388d469`)
+- **Coordinator Engine (`cmd/kamish-broker/src/consumer_group.rs`):**
+  - Implemented `ConsumerGroupCoordinator` with dynamic member registration (`JoinGroup`), session heartbeats (`HeartbeatGroup`), and voluntary departures (`LeaveGroup`).
+  - Implemented deterministic round-robin partition assignment across subscribed topics.
+  - Enforced generational fencing (`generation_id` epoch increment) on group membership changes.
+  - Implemented session timeout tracking (`sweep_expired_members`) to automatically evict dead consumers.
+  - Added crash-safe disk persistence to `consumer_groups.json` using temporary file `sync_all` and atomic rename, with automatic restart recovery.
+- **Broker & Wire Protocol Integration (`cmd/kamish-broker/src/lib.rs`):**
+  - Extended `BrokerRequest` / `BrokerResponse` with `JoinGroup`, `HeartbeatGroup`, `LeaveGroup`, `ListGroups`, and `DescribeGroup`.
+  - Enforced wire-level RBAC requiring `Consumer` role for all group operations.
+  - Enforced generation fencing on consumer `CommitOffsetRequest` to reject stale consumers.
+- **TypeScript Client SDK (`packages/kamish-client/src/client.ts`, `types.ts`):**
+  - Added `joinGroup`, `heartbeatGroup`, `leaveGroup`, `commitOffset`, and `fetchOffset` client APIs with generation tracking.
+
+### 36.5 Workstream D: Safe Segment Retention Lifecycle (Commit `36819bd`)
+- **Storage Layer Reclaiming (`crates/kamish-log/src/lib.rs`):**
+  - Added `base_offset_floor` tracking to `PartitionLog` to maintain monotonic offset identities without offset renumbering.
+  - Implemented `reclaim_prefix_before_offset` with temporary file `sync_all` and atomic rename of `partition.data` and `partition.idx`.
+  - Updated read methods (`read`, `read_range`, `read_suffix`) to bound offset lookups against `base_offset_floor`.
+- **Retention Coordinator & Background Daemon (`cmd/kamish-broker/src/retention.rs`):**
+  - Implemented `RetentionCoordinator` evaluating `TopicRetentionPolicy` (`retention_ms`, `retention_bytes`).
+  - Enforced strict safe watermark ceiling:
+    $$\text{safe\_ceiling} = \min(\text{high\_watermark}, \min(\text{consumer\_checkpoints}), \min(\text{outbox\_watermarks}))$$
+  - Guarantees records needed by active consumer groups or un-replicated outbox queues are never garbage collected.
+  - Spawned `spawn_retention_worker` in `cmd/kamish-broker/src/main.rs` with configurable sweep interval (default 60s) and graceful shutdown.
+
+### 36.6 Workstream E: Observability & Prometheus Metrics Exporter (Commit `97e99eb`)
+- **Metrics Registry (`cmd/kamish-broker/src/metrics.rs`):**
+  - Implemented `BrokerMetricsRegistry` tracking lock-free atomic counters and gauges:
+    - Produce requests, record count, byte volume, error counts.
+    - Fetch requests, record count, byte volume.
+    - Cross-region replication received and error counts.
+    - Consumer offset commits and consumer group counts.
+    - Outbox queue depths and replication watermarks per destination.
+    - Quarantined divergent record counts.
+    - Retention reclaimed bytes and records.
+    - Witness checkpoints published, pending, and failed.
+    - Sealed replication status.
+  - Implemented standard Prometheus text exposition format 0.0.4 renderer (`render_prometheus`).
+- **Gateway HTTP Endpoint (`cmd/kamish-gateway/src/lib.rs`):**
+  - Added `/metrics` endpoint to the Axum router, bypassing session authentication to allow standard Prometheus scraper access.
+
+### 36.7 Workstream F: Benchmark Scenario Orchestrator (Commit `e3a4c13`)
+- **Scenario Schema & Orchestration (`benchmarks/schema.json`, `benchmarks/orchestrator.mjs`):**
+  - Defined strict JSON schema for benchmark workloads, run configurations, topology, and performance results.
+  - Implemented CLI orchestrator validating system dependencies (local binaries, Docker, Kafka 3.9.0, Pulsar 4.0.0, Toxiproxy).
+  - Emits versioned run manifests (`benchmarks/results/run-<system>-<timestamp>.json`) with `status: "CONFIGURED_UNEXECUTED"` when external environments or live runs are absent, preventing fake benchmark claims while providing ready-to-run automation.
+
+### 36.8 Workstream G: Gateway REST Integration & Cleanup (Commit `49752d0`)
+- **Operational Endpoints (`cmd/kamish-gateway/src/lib.rs`):**
+  - `GET /api/consumer-groups`: Returns active consumer groups, generation IDs, member counts, and partition assignments via `state.broker.consumer_groups.list_groups()`.
+  - `GET /api/retention`: Returns operational retention metrics (`reclaimed_bytes_total`, `reclaimed_records_total`, `last_sweep_timestamp_ms`, `active_retention_rules`).

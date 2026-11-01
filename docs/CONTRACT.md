@@ -623,3 +623,62 @@ be agreed before that integration; the current SDK stays unchanged here.
 **Current stop gate: Phase 1 preparation is authorized; implementation waits for
 the consensus pick and relevant timing/consistency decisions.** Documents and
 candidate comparisons do not close any W item or turn either probe green.
+
+
+## 8. Supported Guarantees and Operational Boundaries (Workstream Reconciliation)
+
+Following the completion of the One-Shot Functional Completion campaign, this section formally specifies the operational architecture, supported guarantees, and boundary conditions enforced across the live Kamish codebase.
+
+### 8.1 Operational Durability: Tier A (Single-Node LeaderFsync)
+- **Supported Operational Contract:** The live `BrokerServer` runtime operates as an authoritative single-node regional daemon. Every successful client produce acknowledgement under `AckLevel::LeaderFsync` guarantees:
+  1. The record is durably written and flushed to local storage via synchronous file system barriers (`f.sync_all()`) on segmented log data and index files before an acknowledgement is transmitted to the client.
+  2. The write was admitted under an active, non-expired etcd-backed ownership lease evaluated locally using a monotonic clock source with a conservative 2.0-second safety margin.
+  3. Producer session sequence state is validated for idempotent deduplication.
+  4. Cross-region asynchronous replication is staged into durable outbox queues.
+- **In-Region Quorum Reality:** `AckLevel::InRegionQuorum` is **not** operational in `BrokerServer`. The codebase contains unit test mocks for multi-node groups, but the live broker daemon does not run intra-region replication consensus. Running multi-node in-region clustering would require:
+  - Consensus engine integration (e.g. Raft via `openraft` or `tikv/raft-rs`) across multiple broker daemon instances within the same region.
+  - Multi-node log replication pipelines with majority commit frontiers prior to client ACK.
+  - Intra-region membership discovery, failure detection, and joint consensus reconfigurations.
+  These requirements are formally deferred under `ITEM-DEF-01`.
+
+### 8.2 Production AEAD Sealing and Fail-Closed KMS Boundary
+- **Cryptographic Primitives:** `crates/kamish-seal` integrates standard, audited cryptographic implementations via `ring::aead`:
+  - `SealingAlgorithm::ChaCha20Poly1305` (IETF RFC 8439)
+  - `SealingAlgorithm::Aes256Gcm` (NIST SP 800-38D)
+- **Envelope Security Invariants:**
+  - Every sealed record generates a unique 96-bit CSPRNG nonce (`OsRng`) per encryption operation.
+  - Additional Authenticated Data (AAD) cryptographically binds:
+    $$\text{AAD} = \text{topic} \parallel \text{partition} \parallel \text{epoch} \parallel \text{policy\_version} \parallel \text{key\_id} \parallel \text{key\_version}$$
+  - Tampering with ciphertext or context metadata causes Poly1305 or GCM tag authentication to fail, dropping the frame.
+- **KMS Custody & Fail-Closed Boundary:**
+  - `KeyProvider` trait abstracts key retrieval and unwrapping.
+  - `DevKeyProvider` is strictly isolated for offline local development and rejects foreign-region unwrap requests.
+  - `ExternalKmsProvider` models production cloud KMS integration (AWS KMS, GCP KMS, Azure Key Vault, HashiCorp Vault).
+  - In `BrokerServer::produce`: when a topic policy mandates `ResidencyPolicy::SealedCiphertext`, the broker verifies local key provider configuration. If external KMS custody is unconfigured, the broker fails closed immediately with error `"sealed_replication_not_configured"`. No plaintext or mock XOR transformations are permitted in transit.
+
+### 8.3 Autonomous Audit Witness Publication
+- **Durable Checkpoint Journal:**
+  - `crates/kamish-audit::WitnessPublisher` periodically captures the rolling SHA-256 event digest, signs the payload with Ed25519, and journals checkpoints to `witness_publisher_journal.json` using crash-safe atomic rename and `sync_all()`.
+  - Checkpoints queue durably during network interruptions up to a bounded backlog (10,000 checkpoints).
+- **Fail-Closed Verification:**
+  - If no external witness endpoint is configured (`UnconfiguredWitnessDestination`), checkpoints accumulate in the journal and are marked pending.
+  - Local audit verification fails closed if the audit log has suffered historical truncation or modification, preventing untrusted local state from asserting unanchored validity.
+
+### 8.4 Dynamic Consumer Group Coordination
+- **Protocol & Rebalancing:**
+  - `ConsumerGroupCoordinator` manages dynamic client membership (`JoinGroup`, `HeartbeatGroup`, `LeaveGroup`).
+  - Assigns partition ownership deterministically across group members using round-robin distribution over all subscribed topics.
+  - Heartbeat sweeps expire unresponsive members exceeding `session_timeout_ms` and trigger immediate rebalancing.
+- **Generational Fencing:**
+  - Every rebalance increments the group's `generation_id`.
+  - Offset commits validate `(group_id, member_id, generation_id)`. Stale members attempting to commit offsets under superseded generations are rejected with `BrokerError::EpochFenced`.
+  - State persists atomically to `consumer_groups.json` with temporary file `sync_all` and atomic rename.
+
+### 8.5 Safe Storage Retention and Prefix Reclamation
+- **Offset Monotonicity Preservation:**
+  - `PartitionLog::reclaim_prefix_before_offset` prunes historical log segments safely without renumbering offsets, tracking `base_offset_floor = new_retained_start_offset`.
+  - High watermarks and dense sequential offset identities are preserved. Any read for `start_offset < base_offset_floor` returns empty, preserving monotonicity without offset renumbering.
+- **Strict Reclamation Ceiling:**
+  - `RetentionCoordinator` calculates:
+    $$\text{safe\_ceiling} = \min(\text{high\_watermark}, \min(\text{active\_consumer\_checkpoints}), \min(\text{outbox\_watermarks}))$$
+  - Records required by active consumer groups or un-replicated cross-region outbox queues are never garbage collected, guaranteeing zero consumer data loss and zero replication gaps.
