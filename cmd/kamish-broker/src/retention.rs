@@ -254,3 +254,91 @@ pub fn spawn_retention_worker(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_retention_disabled_by_default() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let log = PartitionLog::open(temp_dir.path(), 1).unwrap();
+        log.append(1, "general", 1, b"hello".to_vec()).unwrap();
+
+        let coordinator = RetentionCoordinator::new();
+        let checkpoints = HashMap::new();
+        let outboxes = HashMap::new();
+
+        let res = coordinator
+            .evaluate_and_reclaim("events", 0, &log, &checkpoints, &outboxes)
+            .unwrap();
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_retention_safe_ceiling_bounded_by_consumer_checkpoint() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let log = PartitionLog::open(temp_dir.path(), 1).unwrap();
+        for i in 0..10 {
+            log.append(1, "general", i + 1, format!("record-{i}").into_bytes())
+                .unwrap();
+        }
+
+        let coordinator = RetentionCoordinator::new();
+        // Policy: aggressively retain only 1 byte (try to delete everything)
+        coordinator.set_policy(TopicRetentionPolicy {
+            topic: "events".to_string(),
+            retention_ms: None,
+            retention_bytes: Some(1),
+        });
+
+        // Consumer is at offset 3
+        let mut checkpoints = HashMap::new();
+        checkpoints.insert(("grp1".to_string(), "events".to_string(), 0), 3u64);
+        let outboxes = HashMap::new();
+
+        let res = coordinator
+            .evaluate_and_reclaim("events", 0, &log, &checkpoints, &outboxes)
+            .unwrap();
+
+        assert!(res.is_some());
+        let reclaim = res.unwrap();
+        // Safe ceiling was 3, so new floor cannot exceed 3
+        assert!(reclaim.new_base_offset_floor <= 3);
+        assert!(log.base_offset_floor() <= 3);
+        // Records at offset 3..10 must remain readable
+        let remaining = log.read_range(reclaim.new_base_offset_floor, log.high_watermark());
+        assert!(!remaining.is_empty());
+    }
+
+    #[test]
+    fn test_retention_safe_ceiling_bounded_by_quorum_commit() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let log = PartitionLog::open(temp_dir.path(), 1).unwrap();
+        for i in 0..10 {
+            log.append(1, "general", i + 1, format!("data-{i}").into_bytes())
+                .unwrap();
+        }
+
+        let coordinator = RetentionCoordinator::new();
+        coordinator.set_policy(TopicRetentionPolicy {
+            topic: "orders".to_string(),
+            retention_ms: None,
+            retention_bytes: Some(1),
+        });
+
+        let checkpoints = HashMap::new();
+        let outboxes = HashMap::new();
+        // Quorum committed only up to offset 4 (uncommitted above 4)
+        let quorum_commit = Some(4u64);
+
+        let res = coordinator
+            .evaluate_and_reclaim_with_quorum("orders", 0, &log, &checkpoints, &outboxes, quorum_commit)
+            .unwrap();
+
+        assert!(res.is_some());
+        let reclaim = res.unwrap();
+        assert!(reclaim.new_base_offset_floor <= 4);
+    }
+}
+

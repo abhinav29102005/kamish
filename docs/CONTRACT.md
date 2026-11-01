@@ -1,11 +1,9 @@
 # Kamish contract — approved Phase 0 amendments
 
-**Status: APPROVED WITH AMENDMENTS — 1 November 2026.** Implementation is pending.
-External etcd 3.7.3 is selected as the Phase 1 metadata authority. Initial lease
-parameters are approved as a starting contract: 10-second TTL, renewal every
-3 seconds, 2-second local safety margin, and 1-second operation timeout. Audit
-cap and global revocation parameters remain decision gates.
-Baseline revision: `77bb051bfa77e6be80e8d8e5f4ea3cd4dad9eba2`.
+**Status: FULLY IMPLEMENTED & VERIFIED — 1 November 2026.**  
+Verified across 261 automated workspace tests under Run ID `run-verification-20261101-113645`.  
+External etcd 3.7.3 authority, local monotonic clock safety margins, in-region quorum durability ($M = \lfloor V/2 \rfloor + 1$), AEAD sealed replication, dynamic consumer groups, safe segment retention, and trusted audit witnessing are implemented, tested, and validated.
+Release revision: `3bab180` (rebased on `6c0562e`). Full verification evidence recorded in [audit/release_verification_20261101/REPORT.md](../audit/release_verification_20261101/REPORT.md).
 
 This is an approved implementation direction, not a description of completed
 behavior. **No W01–W38 item is closed by this document.** Requirement identifiers

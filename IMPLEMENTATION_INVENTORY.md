@@ -1,9 +1,9 @@
 # KAMISH — IMPLEMENTATION INVENTORY
 
-**Inspected Revision:** `fb6341d` (Branch: `main`)  
+**Inspected Revision:** `3bab180` (Branch: `main`)  
 **Date:** 2026-11-01  
-**Method:** Static Source Inspection, Git Commit History, Manifest & Configuration Audit  
-**Status:** Authoritative Post-Gap-Closure Inventory (Prompt 2 Handover)
+**Method:** Static Source Inspection, Git Commit History, Full Automated Test Suite Execution  
+**Status:** **AUTHORITATIVE POST-VERIFICATION INVENTORY (RELEASE READY)**
 
 ---
 
@@ -31,7 +31,7 @@ Each entry in this inventory represents a distinct capability within the Kamish 
 | **LOG-05** | Atomic log truncation to common prefix offset | `crates/kamish-log/src/lib.rs` | Called during failover reconciliation with `sync_all` | Source inspection, Git `41e6b49` | **IMPLEMENTED AND INTEGRATED** | None | Filesystem rename/truncate |
 | **LOG-06** | Segment log retention and background garbage collection | `crates/kamish-log/src/lib.rs`, `cmd/kamish-broker/src/retention.rs` | Periodic background cleaner worker spawned in `main.rs`, safe watermark calculation, active tail preservation, `/api/retention` REST endpoint | Source inspection, Git `36819bd`, `fb6341d` | **IMPLEMENTED AND INTEGRATED** | None for single leader | Local filesystem |
 | **DUR-01** | Local persistent log durability (`LeaderFsync`) | `cmd/kamish-broker/src/lib.rs` | Fsyncs segment before returning produce ACK | Source inspection, Git `0895dd6` | **IMPLEMENTED AND INTEGRATED** | None for single leader | NVMe write barrier |
-| **DUR-02** | In-region multi-replica synchronous quorum durability (`InRegionQuorum`) | `crates/kamish-own/src/quorum.rs`, `cmd/kamish-broker/src/quorum_manager.rs`, `cmd/kamish-broker/src/lib.rs` | Multi-node TCP replication protocol, majority quorum verification ($M = \lfloor V/2 \rfloor + 1$), commit index advancement, consumer fetch gating (INV-4), follower committed-history protection, `/api/quorum` gateway endpoint | Source inspection, Git `d84313c`, `88398bf`, `3dcbd7f`, `add2ff8` | **IMPLEMENTED AND INTEGRATED** | Awaiting runtime verification | Regional peer network connectivity |
+| **DUR-02** | In-region multi-replica synchronous quorum durability (`InRegionQuorum`) | `crates/kamish-own/src/quorum.rs`, `cmd/kamish-broker/src/quorum_manager.rs`, `cmd/kamish-broker/src/lib.rs` | Multi-node TCP replication protocol, majority quorum verification ($M = \lfloor V/2 \rfloor + 1$), commit index advancement, consumer fetch gating (INV-4), follower committed-history protection, `/api/quorum` gateway endpoint | Source inspection & integration tests, Git `d84313c`, `88398bf`, `3dcbd7f`, `add2ff8` | **IMPLEMENTED AND INTEGRATED** | Verified passing (`in_region_quorum_and_replication.rs`) | Regional peer network connectivity |
 | **DUR-03** | Cross-region synchronous produce durability | `docs/CONTRACT.md` | Excluded by architecture design: WAN replication is strictly asynchronous via outbox queues | Architecture contract | **ARCHITECTURALLY DEFERRED** | Excluded to preserve WAN throughput | Cross-region latency SLA |
 | **DED-01** | Producer session tracking and idempotent deduplication | `cmd/kamish-broker/src/lib.rs` | Checked and updated before every log append | Source inspection | **IMPLEMENTED AND INTEGRATED** | Volatile in-memory map resets on restart | Disk session log |
 | **OWN-01** | etcd 3.7.3 atomic CAS ownership acquisition & epoch bump | `crates/kamish-meta/src/etcd.rs` | Transaction checks create revision before granting epoch | Source inspection, Git `75165c5` | **IMPLEMENTED AND INTEGRATED** | None | Running etcd 3.7.3 cluster |

@@ -10,7 +10,7 @@ const temp = await mkdtemp(join(tmpdir(), 'kamish-package-check-'));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 try {
   const result = execFileSync(npm, ['pack', '--json', '--ignore-scripts', '--pack-destination', temp],
-    { cwd: packageDir, encoding: 'utf8' });
+    { cwd: packageDir, encoding: 'utf8', shell: process.platform === 'win32' });
   const [pack] = JSON.parse(result);
   for (const file of pack.files) {
     assert.match(file.path, /^(dist\/|README\.md$|LICENSE$|CHANGELOG\.md$|package\.json$)/);
@@ -24,7 +24,7 @@ try {
     name: 'kamish-isolated-consumer', version: '0.0.0', private: true, type: 'module',
   }));
   execFileSync(npm, ['install', '--ignore-scripts', '--no-audit', '--no-fund', join(temp, pack.filename)],
-    { cwd: consumer, stdio: 'pipe' });
+    { cwd: consumer, stdio: 'pipe', shell: process.platform === 'win32' });
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import { KamishClient, KamishProducer, ValidationError } from '@kamish/client';
     const client = new KamishClient({ allowInsecure: true });
