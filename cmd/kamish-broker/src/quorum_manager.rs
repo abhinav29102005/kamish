@@ -286,6 +286,22 @@ impl QuorumReplicationManager {
 
         // 3. Divergent history reconciliation (§3.1.4, W20)
         let local_hwm = log.high_watermark();
+        let local_commit = self.get_commit_index(&req.topic, req.partition);
+        if req.base_offset < local_commit {
+            return Ok(QuorumAppendResponse {
+                term: current_term,
+                node_id: local_node,
+                topic: req.topic,
+                partition: req.partition,
+                success: false,
+                match_offset: local_hwm,
+                error: Some(format!(
+                    "Consensus safety violation: leader attempts to truncate committed history (base_offset {} < local commit_index {})",
+                    req.base_offset, local_commit
+                )),
+            });
+        }
+
         if req.base_offset < local_hwm {
             let existing_records = log.read_range(req.base_offset, local_hwm);
             let mut diverged = false;

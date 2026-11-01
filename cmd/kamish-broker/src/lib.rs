@@ -1723,6 +1723,7 @@ impl BrokerServer {
             }
         }
 
+        let target_hwm = offset + 1;
         if self.ack_level == AckLevel::InRegionQuorum {
             let quorum_timeout = std::time::Duration::from_millis(3000);
             self.quorum.replicate_to_quorum_sync(
@@ -1730,12 +1731,12 @@ impl BrokerServer {
                 req.partition,
                 epoch,
                 vec![committed_env.clone()],
-                offset,
+                target_hwm,
                 quorum_timeout,
             )?;
             self.metrics.quorum_appends_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         } else {
-            let _ = self.quorum.advance_commit_index(&req.topic, req.partition, offset);
+            let _ = self.quorum.advance_commit_index(&req.topic, req.partition, target_hwm);
         }
 
         Ok(ProduceResponse {

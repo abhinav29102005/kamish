@@ -255,6 +255,28 @@ impl BrokerMetricsRegistry {
             if q_status.role == kamish_own::ReplicaRole::Leader { 1 } else { 0 }
         ));
 
+        out.push_str("# HELP kamish_quorum_available Whether a majority of replicas are currently connected and available.\n");
+        out.push_str("# TYPE kamish_quorum_available gauge\n");
+        let connected_voters = 1 + q_status.peers.iter().filter(|p| p.is_voter && p.connected).count();
+        let quorum_available = !q_status.configured || connected_voters >= q_status.quorum_size;
+        out.push_str(&format!(
+            "kamish_quorum_available{{region=\"{}\"}} {}\n",
+            region,
+            if quorum_available { 1 } else { 0 }
+        ));
+
+        out.push_str("# HELP kamish_quorum_commit_index Committed watermark index per partition.\n");
+        out.push_str("# TYPE kamish_quorum_commit_index gauge\n");
+        for (partition_key, idx) in &q_status.commit_indices {
+            let parts: Vec<&str> = partition_key.split(':').collect();
+            if parts.len() == 2 {
+                out.push_str(&format!(
+                    "kamish_quorum_commit_index{{region=\"{}\",topic=\"{}\",partition=\"{}\"}} {}\n",
+                    region, parts[0], parts[1], idx
+                ));
+            }
+        }
+
         out.push_str("# HELP kamish_quorum_voters_total Total voting nodes in the regional group.\n");
         out.push_str("# TYPE kamish_quorum_voters_total gauge\n");
         out.push_str(&format!(

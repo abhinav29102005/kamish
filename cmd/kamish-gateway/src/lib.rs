@@ -475,11 +475,22 @@ async fn authority_handler(State(state): State<GatewayState>) -> Json<serde_json
     }
 
     let total_quarantined = state.broker.quarantine().count();
+    let is_quorum_configured = state.broker.quorum.is_configured();
+    let is_quorum_active = state.broker.ack_level == kamish_broker::AckLevel::InRegionQuorum;
+    let is_multi_region = state.broker.meta.deployment_mode() == kamish_meta::DeploymentMode::MultiRegion;
+
+    let (authority_type, consensus_backing) = if is_quorum_configured && is_quorum_active {
+        ("IN_REGION_QUORUM_CONSENSUS", "PRIMARY_BACKUP_QUORUM")
+    } else if is_multi_region {
+        ("ETCD_LEASED_METADATA", "ETCD_3_7_3_DISTRIBUTED")
+    } else {
+        ("LOCAL_PERSISTENT_STORAGE", "LOCAL_FSYNC")
+    };
 
     Json(serde_json::json!({
-        "authority_type": "LOCAL (in-memory; quorum requires etcd)",
-        "consensus_backing": "LOCAL_IN_MEMORY",
-        "quorum_backed": false,
+        "authority_type": authority_type,
+        "consensus_backing": consensus_backing,
+        "quorum_backed": is_quorum_configured && is_quorum_active,
         "active_region": state.broker.region,
         "monotonic_clock_ms": state.broker.clock.now_monotonic_ms(),
         "lease_ttl_ms": 10_000,
