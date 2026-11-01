@@ -3342,3 +3342,44 @@ Milestone FN-03 closes the replication metadata and context preservation gap ide
 - **INV-5 / INV-6 (Ordered Prefix Replication & Idempotency):** Resumed replication starts strictly from the remote durable watermark. Gaps discovered by heartbeats are refilled without duplicating existing ranges or creating tight loops.
 - **Lease Invariants:** Heartbeats respect external etcd 3.7.3 authority (10s TTL, 3s renewal, 2s margin, 1s timeout). Heartbeats never refresh leases or bypass fencing checks.
 
+
+---
+
+## 33. Consolidated Functional Completion Push: Explicit Ack Durability, Divergence Quarantine, Ownership Fencing, and Gateway Operations (2026-11-01)
+
+### 33.1 Explicit Durability & Acknowledgement Semantics
+- **`AckLevel` Durability Representation (`cmd/kamish-broker/src/lib.rs`):**
+  - Introduced the explicit `AckLevel` enum (`LeaderFsync`, `InRegionQuorum`) complying with CONTRACT.md §3.1.1 and §3.2.
+  - In Phase 1 architecture, the broker enforces `AckLevel::LeaderFsync` (local fsync to the persistent segmented commit log before emitting a client ACK).
+  - Added `pub ack_level: AckLevel` to `BrokerServer` (defaulting to `LeaderFsync`) and populated `ack_level: Option<AckLevel>` in `ProduceResponse`.
+  - Every successful produce or idempotent deduplication explicitly communicates the durability level achieved (`Some(AckLevel::LeaderFsync)`).
+  - Maintained zero breaking changes on client produce structures while making broker durability guarantees unambiguous to producers.
+
+### 33.2 Authoritative Divergence Quarantine & Reconciliation
+- **Divergent History Recovery (`cmd/kamish-broker/src/lib.rs`):**
+  - Updated `BrokerServer::handle_replication` to distinguish recoverable deduplication from divergent history conflicts when `req.from_offset < local_next`.
+  - When the incoming record checksum/context conflicts with local log records:
+    - **Authoritative Promotion/Transfer ($E_{sender} > E_{local}$):** If the sender is verified as the authoritative partition owner holding a valid lease under a strictly higher epoch, the local conflicting suffix is classified as speculative from a superseded prior owner. The broker durably quarantines the divergent records to `QuarantineStore`, safely truncates the local log to `from_offset`, and appends the authoritative record.
+    - **Stale or Competing Senders ($E_{sender} \le E_{local}$):** If the sender lacks verified authority or has a stale epoch, the broker rejects replication with `replication_history_conflict` to prevent overwriting canonical local history.
+
+### 33.3 Ownership Fencing on Replication Dispatch
+- **Fenced Replication Pipeline (`cmd/kamish-agent/src/lib.rs`):**
+  - Implemented `ReplicationAgent::check_replication_authority(&self, topic: &str, partition: u32) -> bool` to check active, non-expired partition ownership lease authority before staging or dispatching replication tasks.
+  - Integrated authority checks into `execute_task`, `step_replication`, and `step_replication_tcp`.
+  - If a broker loses its ownership lease or a failover occurs, replication dispatch is immediately halted and fenced, preventing stale brokers from emitting unauthoritative replication records over WAN links.
+
+### 33.4 Daemon Execution Wiring & Automation
+- **Replication Agent Daemon (`cmd/kamish-agent/src/main.rs`):**
+  - Connected `agent.clone().spawn_retry_worker()` into the production daemon execution lifecycle, ensuring automated heartbeat sweeps, gap discovery, and backoff retries run continuously in the background.
+  - Added an initial startup peer reconciliation pass (`agent.reconcile_peer(&target)`) executed upon daemon boot.
+  - Implemented graceful shutdown aborting background worker tasks upon `SIGINT`/`SIGTERM`.
+
+### 33.5 Gateway Operational Endpoints & Telemetry
+- **Broker-Backed Endpoints (`cmd/kamish-gateway/src/lib.rs`):**
+  - `POST /api/partitions/promote`: Triggers `BrokerServer::promote_partition` to transfer ownership to the local broker under etcd epoch fencing, enforcing promotion safety margins and emitting broadcast telemetry events.
+  - `GET /api/partitions/quarantine`: Exposes quarantined divergent records (`offset`, `epoch`, `class_id`, `checksum`, `payload_len`) from `QuarantineStore`.
+  - `POST /api/reconciliation/run`: Manually or automatically triggers outbox backlog refills and replication gap reconciliation across all known peers.
+- **RBAC Security & Telemetry Enrichment:**
+  - Extended gateway `security_middleware` to enforce operator/admin role authorization for partition promotion and reconciliation endpoints.
+  - Enriched `streams_handler` with real-time broker partition states, high watermarks, durable watermarks, epochs, owner regions, outbox queue depths, and quarantined record counts.
+  - Enriched `authority_handler` with lease TTL, renewal intervals, safety margins, remaining lease duration in milliseconds, and total quarantined records count.
