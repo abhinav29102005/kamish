@@ -171,6 +171,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         10_000,
     );
 
+    // Start autonomous audit witness publisher worker (§5.1, W08)
+    let (witness_shutdown_tx, witness_shutdown_rx) = tokio::sync::watch::channel(false);
+    let witness_task = kamish_audit::spawn_witness_publisher_worker(
+        broker.witness_publisher.clone(),
+        witness_shutdown_rx,
+        std::time::Duration::from_secs(5),
+    );
+
     let bind_addr = format!("{}:{}", config.host, config.port);
     let (addr, server_task) = if let Some(ref tls_cfg) = config.tls {
         info!(
@@ -208,14 +216,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ = tokio::signal::ctrl_c() => {
             info!("Received shutdown signal, terminating broker.");
             broker.stop_lease_renewal();
+            let _ = witness_shutdown_tx.send(true);
             let _ = renewal_task.await;
+            let _ = witness_task.await;
         }
         res = server_task => {
             if let Err(e) = res {
                 error!(error = %e, "Broker listener task aborted");
             }
             broker.stop_lease_renewal();
+            let _ = witness_shutdown_tx.send(true);
             let _ = renewal_task.await;
+            let _ = witness_task.await;
         }
     }
 

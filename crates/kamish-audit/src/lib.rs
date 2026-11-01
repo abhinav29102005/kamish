@@ -18,6 +18,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use thiserror::Error;
 
+pub mod publisher;
+pub use publisher::{
+    spawn_witness_publisher_worker, FileWitnessDestination, UnconfiguredWitnessDestination,
+    WitnessAck, WitnessCheckpointEnvelope, WitnessDestination, WitnessPublisher,
+    WitnessPublisherMetrics,
+};
+
 /// Predefined zero hash for the genesis entry.
 pub const GENESIS_PREV_HASH: [u8; 32] = [0u8; 32];
 

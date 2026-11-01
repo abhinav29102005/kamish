@@ -484,6 +484,7 @@ pub struct BrokerServer {
     renewal_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     pub ack_level: AckLevel,
     pub key_provider: Option<Arc<dyn kamish_seal::KeyProvider>>,
+    pub witness_publisher: Arc<kamish_audit::WitnessPublisher>,
 }
 
 impl BrokerServer {
@@ -572,7 +573,7 @@ impl BrokerServer {
             known_peers,
             limits,
             connection_semaphore,
-            data_dir: data_dir_buf,
+            data_dir: data_dir_buf.clone(),
             logs: Arc::new(StripedStore::new()),
             sessions: Arc::new(StripedStore::new()),
             partition_operations: Arc::new(StripedStore::new()),
@@ -587,6 +588,11 @@ impl BrokerServer {
             renewal_shutdown: Arc::new(renewal_tx),
             ack_level: AckLevel::LeaderFsync,
             key_provider: None,
+            witness_publisher: Arc::new(kamish_audit::WitnessPublisher::new(
+                &data_dir_buf,
+                Arc::new(kamish_audit::UnconfiguredWitnessDestination),
+                10_000,
+            )),
         };
 
         // Load existing consumer checkpoints from disk (W22)
@@ -720,6 +726,19 @@ impl BrokerServer {
     /// Dynamically sets or updates the key provider.
     pub fn set_key_provider(&mut self, provider: Arc<dyn kamish_seal::KeyProvider>) {
         self.key_provider = Some(provider);
+    }
+
+    /// Attaches an independent witness destination for durable checkpoint publication (§5.1, W08).
+    pub fn with_witness_destination(
+        mut self,
+        destination: Arc<dyn kamish_audit::WitnessDestination>,
+    ) -> Self {
+        self.witness_publisher = Arc::new(kamish_audit::WitnessPublisher::new(
+            &self.data_dir,
+            destination,
+            10_000,
+        ));
+        self
     }
 
     /// Claims or updates partition ownership via atomic CAS on the metadata authority.
