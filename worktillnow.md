@@ -21,15 +21,15 @@
 | Public-production release status | **APPROVED / RELEASE READY** |
 | Current phase | **Verification & Hardening Phase Complete — Release Ready** |
 
-**FULL VERIFICATION & RELEASE READINESS (Run ID: `run-verification-20261101-113645`):**
+**LOCAL VERIFICATION RESULT (Run ID: `run-verification-20261101-113645`; source revision `3bab180`):**
 - Completed exhaustive workspace verification across all 15 crates and integration test suites.
-- 261 automated tests executed and verified passing (0 failures).
+- Verification report records 261 automated tests passing (0 failures); preserve raw test output and toolchain metadata as release evidence.
 - In-Region Multi-Node Quorum durability (`InRegionQuorum`) verified with 3-replica quorum, majority commit advancement, and INV-4 fetch isolation.
 - Production AEAD ciphers (ChaCha20-Poly1305, AES-256-GCM), tenant AAD context binding, and KMS boundaries tested and verified.
 - Dynamic Consumer Group Coordinator tested for multi-member rebalance, generation fencing, partition ownership validation, and disk state recovery.
 - Storage retention coordinator verified for active tail preservation, watermark bounding, and crash-safe prefix reclamation.
 - TypeScript SDK and package verified via local tarball packing and isolated consumer integration tests.
-- Full verification audit evidence recorded in `audit/release_verification_20261101/REPORT.md`.
+- Full verification report is `audit/release_verification_20261101/REPORT.md`. The benchmark run was `CONFIGURED_UNEXECUTED`; live external infrastructure and separately hosted frontend/backend integration remain unverified. See `audit/release_verification_20261101/RECONCILIATION_REPORT.md`.
 
 The original walkthrough describes `170de8e`, whose change clarifies PowerShell
 demo output. A fresh baseline at `77bb051` additionally includes frontend logo
