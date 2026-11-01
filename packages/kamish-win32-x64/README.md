@@ -1,4 +1,4 @@
-# @kamish/kamish-win32-x64
+# kamish-win32-x64
 
 Native win32 x64 binary package for Kamish.
 

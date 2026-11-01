@@ -11,8 +11,11 @@
   "cpu": [
     "x64"
   ],
+  "bin": {
+    "kamish": "bin/kamish.cmd"
+  },
   "files": [
-    "bin/kamish.exe",
+    "bin",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

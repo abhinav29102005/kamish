@@ -1,4 +1,4 @@
-# @kamish/kamish-darwin-arm64
+# kamish-darwin-arm64
 
 Native darwin arm64 binary package for Kamish.
 

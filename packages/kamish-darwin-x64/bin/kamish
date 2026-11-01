@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$DIR/kamish-native" ] && [ $(wc -c < "$DIR/kamish-native" 2>/dev/null || echo 0) -gt 1024 ]; then
+  exec "$DIR/kamish-native" "$@"
+elif [ -f "$DIR/kamish.bin" ] && [ $(wc -c < "$DIR/kamish.bin" 2>/dev/null || echo 0) -gt 1024 ]; then
+  exec "$DIR/kamish.bin" "$@"
+elif [ -f "$DIR/../../kamish/bin/kamish.js" ]; then
+  exec node "$DIR/../../kamish/bin/kamish.js" "$@"
+else
+  echo "[kamish] Error: Native binary and portable CLI not found." >&2
+  exit 1
+fi

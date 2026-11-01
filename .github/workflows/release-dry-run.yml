@@ -53,6 +53,26 @@ jobs:
           cd packages/kamish-linux-x64
           npm publish --dry-run --provenance
 
+      - name: Dry-Run npm Publish (Linux ARM64)
+        run: |
+          cd packages/kamish-linux-arm64
+          npm publish --dry-run --provenance
+
+      - name: Dry-Run npm Publish (Windows x64)
+        run: |
+          cd packages/kamish-win32-x64
+          npm publish --dry-run --provenance
+
+      - name: Dry-Run npm Publish (macOS Apple Silicon)
+        run: |
+          cd packages/kamish-darwin-arm64
+          npm publish --dry-run --provenance
+
+      - name: Dry-Run npm Publish (macOS Intel)
+        run: |
+          cd packages/kamish-darwin-x64
+          npm publish --dry-run --provenance
+
       - name: Dry-Run npm Publish (Global Wrapper)
         run: |
           cd packages/kamish

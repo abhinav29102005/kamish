@@ -11,8 +11,11 @@
   "cpu": [
     "arm64"
   ],
+  "bin": {
+    "kamish": "bin/kamish"
+  },
   "files": [
-    "bin/kamish",
+    "bin",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"

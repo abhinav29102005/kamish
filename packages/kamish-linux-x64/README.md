@@ -1,4 +1,4 @@
-# @kamish/kamish-linux-x64
+# kamish-linux-x64
 
 Native Linux x64 executable package for Kamish.
 

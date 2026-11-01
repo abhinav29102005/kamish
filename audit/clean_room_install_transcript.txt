@@ -1,3 +1,107 @@
+=== [Pack packages/kamish-client] ===
+$ npm pack --pack-destination /tmp/kamish_cleanroom
+Exit Code: 0
+Output:
+
+> kamish-client@0.1.0-alpha.1 prepack
+> npm run build
+
+
+> kamish-client@0.1.0-alpha.1 build
+> tsc -p tsconfig.json
+
+npm notice
+npm notice 📦  kamish-client@0.1.0-alpha.1
+npm notice Tarball Contents
+npm notice 562B CHANGELOG.md
+npm notice 11.4kB LICENSE
+npm notice 9.7kB README.md
+npm notice 1.6kB dist/client.d.ts
+npm notice 7.2kB dist/client.js
+npm notice 14.4kB dist/client.js.map
+npm notice 1.5kB dist/errors.d.ts
+npm notice 2.0kB dist/errors.js
+npm notice 3.7kB dist/errors.js.map
+npm notice 572B dist/index.d.ts
+npm notice 320B dist/index.js
+npm notice 937B dist/index.js.map
+npm notice 930B dist/producer.d.ts
+npm notice 4.1kB dist/producer.js
+npm notice 8.4kB dist/producer.js.map
+npm notice 1.4kB dist/protocol.d.ts
+npm notice 9.2kB dist/protocol.js
+npm notice 19.4kB dist/protocol.js.map
+npm notice 591B dist/transport.d.ts
+npm notice 4.4kB dist/transport.js
+npm notice 8.6kB dist/transport.js.map
+npm notice 4.3kB dist/types.d.ts
+npm notice 44B dist/types.js
+npm notice 4.4kB dist/types.js.map
+npm notice 968B package.json
+npm notice Tarball Details
+npm notice name: kamish-client
+npm notice version: 0.1.0-alpha.1
+npm notice filename: kamish-client-0.1.0-alpha.1.tgz
+npm notice package size: 31.1 kB
+npm notice unpacked size: 120.5 kB
+npm notice shasum: 813441dd2e0126f874718b46248822615dc34bc8
+npm notice integrity: sha512-pCPuU5sgUjVV/[...]nPQX8hLTcgtdg==
+npm notice total files: 25
+npm notice
+kamish-client-0.1.0-alpha.1.tgz
+
+
+=== [Pack packages/kamish-linux-x64] ===
+$ npm pack --pack-destination /tmp/kamish_cleanroom
+Exit Code: 0
+Output:
+npm notice
+npm notice 📦  kamish-linux-x64@0.1.0-alpha.1
+npm notice Tarball Contents
+npm notice 891B CHANGELOG.md
+npm notice 11.4kB LICENSE
+npm notice 218B README.md
+npm notice 12.6MB bin/kamish
+npm notice 482B package.json
+npm notice Tarball Details
+npm notice name: kamish-linux-x64
+npm notice version: 0.1.0-alpha.1
+npm notice filename: kamish-linux-x64-0.1.0-alpha.1.tgz
+npm notice package size: 7.4 MB
+npm notice unpacked size: 12.6 MB
+npm notice shasum: 4dbe213189a31797700618ec9db360d00473a43b
+npm notice integrity: sha512-NWfUgLlSWsOkq[...]I+8Dd1lALI3xg==
+npm notice total files: 5
+npm notice
+kamish-linux-x64-0.1.0-alpha.1.tgz
+
+
+=== [Pack packages/kamish] ===
+$ npm pack --pack-destination /tmp/kamish_cleanroom
+Exit Code: 0
+Output:
+npm notice
+npm notice 📦  kamish@0.1.0-alpha.1
+npm notice Tarball Contents
+npm notice 891B CHANGELOG.md
+npm notice 11.4kB LICENSE
+npm notice 3.8kB README.md
+npm notice 4.9kB bin/kamish.js
+npm notice 44.9kB lib/portable-runner.js
+npm notice 785B package.json
+npm notice Tarball Details
+npm notice name: kamish
+npm notice version: 0.1.0-alpha.1
+npm notice filename: kamish-0.1.0-alpha.1.tgz
+npm notice package size: 19.4 kB
+npm notice unpacked size: 66.6 kB
+npm notice shasum: 4dbb338326528322cec55a44c7a191e23e0978be
+npm notice integrity: sha512-rnV8jhoaGyfhE[...]993w9L71AdExg==
+npm notice total files: 6
+npm notice
+kamish-0.1.0-alpha.1.tgz
+
+
 === [SDK Test Init] ===
 $ npm init -y
 Exit Code: 0
@@ -26,7 +130,7 @@ $ npm install /tmp/kamish_cleanroom/kamish-client-0.1.0-alpha.1.tgz
 Exit Code: 0
 Output:
 
-added 1 package, and audited 2 packages in 902ms
+added 1 package, and audited 2 packages in 686ms
 
 found 0 vulnerabilities
 
@@ -38,7 +142,7 @@ Output:
 
 
 === [NPM Global Install] ===
-$ npm install -g --prefix /tmp/kamish_cleanroom/global_prefix /tmp/kamish_cleanroom/kamish-client-0.1.0-alpha.1.tgz /tmp/kamish_cleanroom/kamish-kamish-linux-x64-0.1.0-alpha.1.tgz /tmp/kamish_cleanroom/kamish-0.1.0-alpha.1.tgz
+$ npm install -g --prefix /tmp/kamish_cleanroom/global_prefix /tmp/kamish_cleanroom/kamish-linux-x64-0.1.0-alpha.1.tgz /tmp/kamish_cleanroom/kamish-client-0.1.0-alpha.1.tgz /tmp/kamish_cleanroom/kamish-0.1.0-alpha.1.tgz
 Exit Code: 0
 Output:
 
@@ -136,7 +240,7 @@ Next steps:
 $ kamish policy verify --policy policy.signed.json --trusted-keys admin.pub
 Exit Code: 0
 Output:
-[1;32m[PASS][0m Policy 'kamish-default-dev-policy' (version 1) cryptographically verified by authority key '31736d8f36f48b0ac2977c33fce86de98c313b5ac8dca08fb8c5f8afd8826a85'
+[1;32m[PASS][0m Policy 'kamish-default-dev-policy' (version 1) cryptographically verified by authority key 'c7abd093c59ee4296d15322d18fbc0d719f926009d61e698794fd33d73cc4b4d'
 
 
 === [CLI Status] ===
@@ -156,10 +260,10 @@ Max Frame Bytes : 4194304
 Authority Type  : [1;33mLOCAL_PERSISTENT_STORAGE[0m
 Consensus Model : LOCAL_FSYNC
 Quorum Backed   : [1;33mfalse (single-node local storage)[0m
-Monotonic Clock : 202 ms
+Monotonic Clock : 398 ms
 Active Leases   : 9
 Quarantined     : 0
-Timestamp (UTC) : 2026-11-01T07:01:18.701333253+00:00
+Timestamp (UTC) : 2026-11-01T10:35:04.871420443+00:00
 
 
 
@@ -170,9 +274,9 @@ Output:
 [1;36m=== Registered Sovereign Topics ===[0m
 TOPIC                    TENANT             PARTITIONS   CLASSES             
 ----------------------------------------------------------------------
+general-topic            default            1            []
 financial-transactions   default            1            []
 sovereign-stream         default            1            []
-general-topic            default            1            []
 
 
 
@@ -238,5 +342,5 @@ $ npm uninstall -g --prefix /tmp/kamish_cleanroom/global_prefix kamish
 Exit Code: 0
 Output:
 
-removed 1 package in 130ms
+removed 1 package in 132ms
 

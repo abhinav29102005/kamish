@@ -48,6 +48,12 @@ def main():
     os.makedirs(sdk_test, exist_ok=True)
     os.makedirs(cluster_dir, exist_ok=True)
 
+    # 0. Ensure native binary and packaged tarballs exist
+    if not os.path.exists("packages/kamish-linux-x64/bin/kamish") or os.path.getsize("packages/kamish-linux-x64/bin/kamish") < 1024:
+        run_cmd("Build Release Binary", "cargo build --release -p kamish && cp target/release/kamish packages/kamish-linux-x64/bin/kamish")
+    for pkg in ["packages/kamish-client", "packages/kamish-linux-x64", "packages/kamish"]:
+        run_cmd(f"Pack {pkg}", f"npm pack --pack-destination {clean_dir}", cwd=pkg)
+
     # 1. SDK Import & Typecheck Test
     print("--- 1. Testing SDK Package Installation and Typechecking ---")
     run_cmd("SDK Test Init", "npm init -y", cwd=sdk_test)
@@ -66,7 +72,7 @@ console.log("SDK client instantiated successfully with maxPayloadBytes:", client
     print("--- 2. Testing Global CLI Tarball Installation ---")
     run_cmd(
         "NPM Global Install",
-        f"npm install -g --prefix {global_prefix} {clean_dir}/kamish-client-0.1.0-alpha.1.tgz {clean_dir}/kamish-kamish-linux-x64-0.1.0-alpha.1.tgz {clean_dir}/kamish-0.1.0-alpha.1.tgz",
+        "npm install -g --prefix " + global_prefix + " " + (f"{clean_dir}/kamish-linux-x64-0.1.0-alpha.1.tgz" if os.path.exists(f"{clean_dir}/kamish-linux-x64-0.1.0-alpha.1.tgz") else f"{clean_dir}/kamish-kamish-linux-x64-0.1.0-alpha.1.tgz") + f" {clean_dir}/kamish-client-0.1.0-alpha.1.tgz {clean_dir}/kamish-0.1.0-alpha.1.tgz",
         cwd=clean_dir
     )
 

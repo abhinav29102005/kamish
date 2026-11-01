@@ -12,7 +12,7 @@
     "x64"
   ],
   "files": [
-    "bin/kamish",
+    "bin",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
@@ -20,5 +20,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "bin": {
+    "kamish": "bin/kamish"
+  }
 }

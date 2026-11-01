@@ -1,4 +1,4 @@
-# @kamish/kamish-darwin-x64
+# kamish-darwin-x64
 
 Native darwin x64 binary package for Kamish.
 

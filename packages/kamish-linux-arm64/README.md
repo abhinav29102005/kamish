@@ -1,4 +1,4 @@
-# @kamish/kamish-linux-arm64
+# kamish-linux-arm64
 
 Native linux arm64 binary package for Kamish.
 

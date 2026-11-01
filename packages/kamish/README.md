@@ -15,7 +15,21 @@ Unified command-line interface, sovereign event streaming broker, and embedded o
 npm install -g kamish
 ```
 
-When installed via npm, native binaries are resolved via platform-specific `optionalDependencies` with zero post-install download scripts.
+Or run instantly without installation using `npx`:
+
+```bash
+npx kamish start --dev
+```
+
+### Platform Support
+
+| Operating System | Architecture | Launcher Support | Execution Engine |
+| :--- | :--- | :--- | :--- |
+| **Windows** | x64, ARM64 | CMD (`kamish.cmd`), PowerShell (`kamish.ps1`), WSL | Native `kamish.exe` or Portable Node Engine |
+| **macOS** | Apple Silicon (`arm64`), Intel (`x64`) | Zsh, Bash | Native Mach-O or Portable Node Engine |
+| **Linux** | x86_64, aarch64 | Bash, Sh | Native ELF (12.5MB) or Portable Node Engine |
+
+When installed via npm, native binaries are resolved via platform-specific `optionalDependencies` with zero post-install download scripts. If native prebuilt binaries are unavailable, `kamish` seamlessly runs using its zero-dependency portable engine with full REST/SSE APIs, cryptographic audit verification, multi-topic event streaming, and embedded dashboard serving.
 
 ## Quickstart
 

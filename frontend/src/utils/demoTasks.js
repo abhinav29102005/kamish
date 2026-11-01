@@ -42,7 +42,7 @@ export const INITIAL_DEMO_TASKS = [
   {
     id: 'TSK-005',
     title: 'Hardware enclave TPM 2.0 PCR attestation',
-    status: 'ACTIVE',
+    status: 'DISABLED',
     owner: 'Sovereign Enclave Ops',
     policy: 'EU_GDPR_STRICT',
     description: 'Continuous PCR quote verification against trusted hardware enclave baseline digests, validating kernel and BIOS integrity at Frankfurt DC-4.',
