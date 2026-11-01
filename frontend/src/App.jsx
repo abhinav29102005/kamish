@@ -2,7 +2,6 @@ import { lazy, Suspense, useState, useEffect } from "react";
 import { KamishProvider } from "./context/KamishContext";
 import { useKamish } from "./context/useKamish";
 import DemoTasksProvider from "./context/DemoTasksProvider.jsx";
-import Header from "./components/Header";
 import Navbar from "./components/Navbar";
 
 const HomePage = lazy(() => import("./pages/HomePage.jsx"));
@@ -76,53 +75,21 @@ function AppContent() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* Top Header with Brand, Live Status, 3D Story Link, Mode Toggle & User Controls */}
-      <Header onNavigate={navigateTo} />
-
-      {/* Prominent LIVE vs DEMO Mode Banner */}
-      {isLiveMode ? (
-        <div
-          role="status"
-          style={{
-            padding: "0.5rem 2rem",
-            textAlign: "center",
-            background: "rgba(16, 185, 129, 0.12)",
-            color: "#6ee7b7",
-            borderBottom: "1px solid rgba(16, 185, 129, 0.25)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.85rem",
-          }}
-        >
-          ● LIVE BROKER OPERATION ACTIVE — Authenticated Rust Axum Gateway Connected (Port 3001)
-        </div>
-      ) : (
-        <div
-          role="status"
-          style={{
-            padding: "0.5rem 2rem",
-            textAlign: "center",
-            background: "rgba(245, 158, 11, 0.15)",
-            color: "#fcd34d",
-            borderBottom: "1px solid rgba(245, 158, 11, 0.25)",
-            fontFamily: "var(--font-mono)",
-            fontSize: "0.85rem",
-          }}
-        >
-          ⚠ DEMO / SIMULATION MODE — Local Mock Simulation Active (Switch to LIVE in top bar)
-        </div>
-      )}
-
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", position: "relative" }}>
       {/* Session Expired Alert Banner */}
       {isSessionExpired && (
         <div
           role="alert"
           style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 200,
             padding: "0.75rem 2rem",
             textAlign: "center",
-            background: "rgba(244, 63, 94, 0.2)",
-            color: "#fda4af",
-            borderBottom: "1px solid #f43f5e",
+            background: "rgba(244, 63, 94, 0.95)",
+            color: "#ffffff",
             fontFamily: "var(--font-mono)",
             fontSize: "0.85rem",
             display: "flex",
@@ -135,11 +102,10 @@ function AppContent() {
           <button
             onClick={() => navigateTo("signin")}
             style={{
-              background: "#f43f5e",
+              background: "#000",
               color: "#fff",
-              border: "none",
-              padding: "3px 12px",
-              borderRadius: "4px",
+              border: "1px solid #fff",
+              padding: "2px 10px",
               cursor: "pointer",
               fontFamily: "var(--font-mono)",
               fontWeight: 700,
@@ -150,8 +116,8 @@ function AppContent() {
         </div>
       )}
 
-      {/* Main Routed Content */}
-      <main style={{ flex: 1 }}>
+      {/* Main Routed Content takes the entire top screen space */}
+      <main style={{ flex: 1, paddingBottom: "40px", display: "flex", flexDirection: "column", width: "100%", alignItems: "center" }}>
         <Suspense fallback={<p role="status" style={{ textAlign: "center", padding: "3rem", color: "#a855f7", fontFamily: "var(--font-mono)" }}>Loading view...</p>}>
           {currentRoute === "home" && <HomePage onNavigate={navigateTo} />}
           {currentRoute === "dashboard" && <DashboardPage onNavigate={navigateTo} />}
@@ -164,7 +130,7 @@ function AppContent() {
         </Suspense>
       </main>
 
-      {/* Bottom Floating Navigation Dock */}
+      {/* Unified Bottom Control Bar & Navigation Dock */}
       <Navbar currentRoute={currentRoute} onNavigate={navigateTo} />
     </div>
   );

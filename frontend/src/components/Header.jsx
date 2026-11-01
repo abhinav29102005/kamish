@@ -20,7 +20,7 @@ export default function Header({ onNavigate }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        padding: "1.25rem 2.5rem 0.5rem",
+        padding: "0.6rem 2rem",
         background: "transparent",
         position: "relative",
         zIndex: 50,
@@ -33,30 +33,7 @@ export default function Header({ onNavigate }) {
     >
       {/* Top Left: Brutalist Logo Box */}
       <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="brutal-logo-box"
-          onClick={() => onNavigate("home")}
-          style={{
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "10px",
-            padding: "4px 16px 4px 8px",
-          }}
-        >
-          <img
-            src="/logo.png"
-            alt="Kamish Dragon Logo"
-            style={{
-              width: "32px",
-              height: "32px",
-              objectFit: "contain",
-              filter: "drop-shadow(0 0 8px rgba(192, 132, 252, 0.8))",
-            }}
-          />
-          <span>KAMISH</span>
-        </button>
+
 
         {/* Live Cluster Health Badge */}
         <div
