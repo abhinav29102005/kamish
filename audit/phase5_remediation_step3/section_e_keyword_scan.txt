@@ -1,0 +1,112 @@
+cmd/kamish-gateway/src/auth.rs:104 [fault] pub fn new_with_defaults() -> Self {
+cmd/kamish-gateway/src/auth.rs:137 [fault] default_ttl: Duration,
+cmd/kamish-gateway/src/auth.rs:141 [fault] pub fn new(default_ttl: Duration) -> Self {
+cmd/kamish-gateway/src/auth.rs:144 [fault] default_ttl,
+cmd/kamish-gateway/src/auth.rs:164 [fault] expires_at: now + self.default_ttl,
+cmd/kamish-gateway/src/auth.rs:210 [fault] let timestamps = guard.entry(client_key.to_string()).or_default();
+cmd/kamish-gateway/src/lib.rs:44 [fault] user_store: Arc::new(UserStore::new_with_defaults()),
+cmd/kamish-gateway/src/lib.rs:347 [HEALTHY] "status": if degraded_links.is_empty() { "HEALTHY" } else { "DEGRADED" },
+cmd/kamish-gateway/src/lib.rs:596 [HEALTHY] "status": if is_degraded { "DEGRADED_BYPASSED" } else { "HEALTHY" },
+cmd/kamish-gateway/src/lib.rs:632 [fault] "tenant-default",
+cmd/kamish-gateway/src/lib.rs:817 [3-replica] "details": "NOT_IMPLEMENTED: 3-replica quorum requires clustered etcd consensus authority; currently running single-broker in-memory MetadataStore.",
+cmd/kamish-gateway/src/lib.rs:954 [fault] Ok(msg) => Some(Ok(Event::default().data(msg))),
+cmd/kamish-gateway/src/lib.rs:958 [fault] Sse::new(stream).keep_alive(KeepAlive::default())
+cmd/kamish-gateway/src/lib.rs:962 [fault] pub fn create_default_policy_cache(
+cmd/kamish-gateway/src/lib.rs:1003 [fault] policy_id: "gateway-default-policy".to_string(),
+cmd/kamish-gateway/src/main.rs:19 [fault] #[arg(short, long, default_value_t = 3001)]
+cmd/kamish-gateway/src/main.rs:23 [fault] #[arg(short, long, default_value = "EU_WEST")]
+cmd/kamish-gateway/src/main.rs:27 [fault] #[arg(short, long, default_value = "data/gateway-broker")]
+cmd/kamish-gateway/src/main.rs:31 [fault] #[arg(long, default_value = "US_EAST,AP_SOUTH")]
+cmd/kamish-gateway/src/main.rs:39 [fault] tracing_subscriber::EnvFilter::try_from_default_env()
+cmd/kamish-gateway/src/main.rs:57 [fault] kamish_gateway::create_default_policy_cache(&["EU_WEST", "US_EAST", "AP_SOUTH"]);
+cmd/kamish-gateway/src/main.rs:81 [fault] "tenant-default",
+frontend/src/App.jsx:139 [fault] export default function App() {
+frontend/src/App.tsx:202 [fault] export default function App() {
+frontend/src/components/ChaosAndScenarioController.tsx:42 [fault] e.preventDefault();
+frontend/src/components/ChaosAndScenarioController.tsx:235 [synthetic] Synthetic Chaos & WAN Tuning Lab
+frontend/src/components/ChaosAndScenarioController.tsx:260 [HEALTHY] <span>0ms (Healthy Fiber)</span>
+frontend/src/components/ChaosAndScenarioController.tsx:283 [HEALTHY] {isPartitioned ? 'SEVERED' : 'HEALTHY'}
+frontend/src/components/ContactModal.jsx:4 [fault] export default function ContactModal({ isOpen, onClose, onProduceEvent }) {
+frontend/src/components/ContactModal.jsx:14 [fault] e.preventDefault();
+frontend/src/components/ContactModal.jsx:16 [Math.random] id: Math.floor(Math.random() * 900000) + 100000,
+frontend/src/components/GrafanaTelemetryDashboard.tsx:361 [HEALTHY] <span>Link Status: {isPartitioned ? 'SEVERED' : wanDelayMs > 150 ? 'DEGRADED' : 'HEALTHY'}</span>
+frontend/src/components/Header.jsx:4 [fault] export default function Header({ onNavigate }) {
+frontend/src/components/Header.jsx:15 [HEALTHY] const activeRegions = Object.values(nodes).filter((node) => node.status === "HEALTHY").length;
+frontend/src/components/KamishDragon3D.jsx:5 [fault] export default function KamishDragon3D({ isFlameOn = false, isShadowForm = false }) {
+frontend/src/components/KamishDragon3D.jsx:92 [Math.random] x: (Math.random() - 0.5) * 0.42,
+frontend/src/components/KamishDragon3D.jsx:93 [Math.random] y: -0.1 - Math.random() * 0.32,
+frontend/src/components/KamishDragon3D.jsx:94 [Math.random] z: 1.2 + Math.random() * 1.8,
+frontend/src/components/KamishDragon3D.jsx:95 [Math.random] life: Math.random(),
+frontend/src/components/KamishDragon3D.jsx:121 [Math.random] emberPos[i * 3] = (Math.random() - 0.5) * 0.4;
+frontend/src/components/KamishDragon3D.jsx:122 [Math.random] emberPos[i * 3 + 1] = (Math.random() - 0.5) * 0.4;
+frontend/src/components/KamishDragon3D.jsx:123 [Math.random] emberPos[i * 3 + 2] = (Math.random() - 0.5) * 0.4;
+frontend/src/components/KamishDragon3D.jsx:125 [Math.random] x: (Math.random() - 0.5) * 0.7,
+frontend/src/components/KamishDragon3D.jsx:126 [Math.random] y: (Math.random() - 0.2) * 0.6,
+frontend/src/components/KamishDragon3D.jsx:127 [Math.random] z: (Math.random() - 0.5) * 0.7,
+frontend/src/components/KamishDragon3D.jsx:128 [Math.random] life: Math.random(),
+frontend/src/components/KamishDragon3D.jsx:250 [Math.random] positions[i * 3] = (Math.random() - 0.5) * 0.12;
+frontend/src/components/KamishDragon3D.jsx:251 [Math.random] positions[i * 3 + 1] = (Math.random() - 0.5) * 0.12;
+frontend/src/components/KamishDragon3D.jsx:268 [Math.random] ePos[j * 3] = (Math.random() - 0.5) * 0.3;
+frontend/src/components/KamishDragon3D.jsx:269 [Math.random] ePos[j * 3 + 1] = (Math.random() - 0.5) * 0.3;
+frontend/src/components/KamishDragon3D.jsx:327 [fault] cursor: 'default',
+frontend/src/components/Navbar.jsx:4 [fault] export default function Navbar({ currentRoute, onNavigate }) {
+frontend/src/components/Navbar.jsx:15 [HEALTHY] const activeRegions = Object.values(nodes).filter((node) => node.status === "HEALTHY").length;
+frontend/src/components/ThreeTopologyGlobe.tsx:156 [Math.random] starPositions[i] = (Math.random() - 0.5) * 120;
+frontend/src/components/ThreeTopologyGlobe.tsx:157 [Math.random] starPositions[i + 1] = (Math.random() - 0.5) * 120;
+frontend/src/components/ThreeTopologyGlobe.tsx:158 [Math.random] starPositions[i + 2] = (Math.random() - 0.5) * 120;
+frontend/src/components/ThreeTopologyGlobe.tsx:387 [fault] e.preventDefault();
+frontend/src/components/ThreeTopologyGlobe.tsx:634 [HEALTHY] node.status === 'HEALTHY'
+frontend/src/components/ThreeTopologyGlobe.tsx:715 [HEALTHY] currentNode.status === 'HEALTHY'
+frontend/src/context/DemoTasksProvider.jsx:5 [fault] export default function DemoTasksProvider({ children }) {
+frontend/src/context/KamishContext.tsx:26 [HEALTHY] status: 'HEALTHY',
+frontend/src/context/KamishContext.tsx:44 [HEALTHY] status: 'HEALTHY',
+frontend/src/context/KamishContext.tsx:62 [HEALTHY] status: 'HEALTHY',
+frontend/src/context/KamishContext.tsx:83 [HEALTHY] status: 'HEALTHY',
+frontend/src/context/KamishContext.tsx:95 [HEALTHY] status: 'HEALTHY',
+frontend/src/context/KamishContext.tsx:107 [HEALTHY] status: 'HEALTHY',
+frontend/src/context/KamishContext.tsx:302 [HEALTHY] us.status = 'HEALTHY';
+frontend/src/context/KamishContext.tsx:307 [synthetic] // Background traffic ingestion (DEMO MODE ONLY: Never invent synthetic writes in LIVE mode)
+frontend/src/context/KamishContext.tsx:310 [Math.random] const increment = Math.floor(delta) + (Math.random() < delta % 1 ? 1 : 0);
+frontend/src/context/KamishContext.tsx:321 [HEALTHY] // Healthy instant drain
+frontend/src/context/KamishContext.tsx:341 [HEALTHY] status: isPartitioned ? 'SEVERED' : wanDelayMs > 150 ? 'DEGRADED' : 'HEALTHY',
+frontend/src/context/KamishContext.tsx:379 [HEALTHY] status: status.status === "HEALTHY" ? "HEALTHY" : "DEGRADED",
+frontend/src/context/KamishContext.tsx:409 [synthetic] // Telemetry stream sampler (every 500ms): In LIVE mode, refresh real gateway telemetry without synthetic jitter
+frontend/src/context/KamishContext.tsx:418 [synthetic] // LIVE MODE: Do NOT invent numbers or run synthetic generators.
+frontend/src/context/KamishContext.tsx:423 [synthetic] // DEMO MODE ONLY: Synthetic simulation sampling
+frontend/src/context/KamishContext.tsx:674 [HEALTHY] title: 'Verify Baseline Healthy Link (10ms, Lag = 0)',
+frontend/src/context/KamishContext.tsx:695 [HEALTHY] '[00:01] Measuring baseline healthy link: RTT = 14.5ms, Replication Lag = 0.',
+frontend/src/context/KamishContext.tsx:710 [synthetic] '[00:03] Injected 300ms WAN latency via synthetic chaos proxy on US_EAST link...',
+frontend/src/context/KamishContext.tsx:842 [HEALTHY] status: 'HEALTHY',
+frontend/src/pages/AuditChainPage.jsx:4 [fault] export default function AuditChainPage() {
+frontend/src/pages/AuditVerificationPage.jsx:5 [fault] export default function AuditVerificationPage() {
+frontend/src/pages/AuthorityPage.jsx:5 [fault] export default function AuthorityPage() {
+frontend/src/pages/AuthorityPage.jsx:59 [fault] e.preventDefault();
+frontend/src/pages/ContactPage.jsx:3 [fault] export default function ContactPage() {
+frontend/src/pages/ContactPage.jsx:10 [fault] e.preventDefault();
+frontend/src/pages/DashboardPage.jsx:5 [fault] export default function DashboardPage({ onNavigate }) {
+frontend/src/pages/DashboardPage.jsx:20 [HEALTHY] const activeNodeCount = Object.values(nodes).filter((n) => n.status === 'HEALTHY').length;
+frontend/src/pages/DashboardPage.jsx:63 [HEALTHY] { label: 'HEALTHY DEMO REGIONS', count: `0${activeNodeCount}`, path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6' },
+frontend/src/pages/DashboardPage.jsx:289 [fault] cursor: 'default',
+frontend/src/pages/HomePage.jsx:5 [fault] export default function HomePage({ onNavigate }) {
+frontend/src/pages/NewTaskPage.jsx:4 [fault] export default function NewTaskPage({ onCreated }) {
+frontend/src/pages/NewTaskPage.jsx:15 [fault] e.preventDefault();
+frontend/src/pages/NotFoundPage.jsx:4 [fault] export default function NotFoundPage({ onBack }) {
+frontend/src/pages/ProduceFetchPage.jsx:5 [fault] export default function ProduceFetchPage() {
+frontend/src/pages/ProduceFetchPage.jsx:28 [fault] e.preventDefault();
+frontend/src/pages/ProduceFetchPage.jsx:48 [fault] e.preventDefault();
+frontend/src/pages/SignInPage.jsx:4 [fault] export default function SignInPage({ onSignedIn }) {
+frontend/src/pages/SignInPage.jsx:12 [fault] if (e) e.preventDefault();
+frontend/src/pages/TasksPage.jsx:3 [fault] export default function TasksPage({ onSelectTask, onNewTask }) {
+frontend/src/pages/TasksPage.jsx:75 [fault] event.preventDefault();
+frontend/src/pages/TelemetryPage.jsx:4 [fault] export default function TelemetryPage() {
+frontend/src/pages/TelemetryPage.jsx:17 [synthetic] // In LIVE mode, NEVER invent synthetic random metrics
+frontend/src/pages/TelemetryPage.jsx:22 [synthetic] // In DEMO mode only, run synthetic simulation
+frontend/src/pages/TopicsPage.jsx:5 [fault] export default function TopicsPage() {
+frontend/src/pages/TopicsPage.jsx:29 [fault] { topic_name: "general-topic", owner_tenant: "tenant-default", partition_count: 3, allowed_classes: ["general"] },
+frontend/src/pages/TopicsPage.jsx:44 [fault] e.preventDefault();
+frontend/src/pages/WorkTaskPage.jsx:5 [fault] export default function WorkTaskPage({ taskId = 'TSK-001', onBack }) {
+frontend/src/types/index.ts:62 [HEALTHY] status: 'HEALTHY' | 'DEGRADED' | 'OFFLINE';
+frontend/src/types/index.ts:81 [HEALTHY] status: 'HEALTHY' | 'DEGRADED' | 'SEVERED';
+frontend/src/utils/demoPolicy.js:8 [fault] default: throw new Error('Unknown demo policy selection');
+frontend/src/utils/demoTasks.js:14 [synthetic] ['TSK-009', 'Synthetic canary and ordering checks', 'PARTIAL'],
+frontend/src/utils/gatewayClient.ts:328 [fault] export default gatewayClient;

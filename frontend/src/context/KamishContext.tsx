@@ -304,8 +304,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         ap.leaseExpiresInSec = ap.leaseExpiresInSec <= 0.5 ? 10.0 : parseFloat((ap.leaseExpiresInSec - 0.1).toFixed(1));
 
-        // Background traffic ingestion
-        if (trafficRateEps > 0 && scenarioState.status !== 'running') {
+        // Background traffic ingestion (DEMO MODE ONLY: Never invent synthetic writes in LIVE mode)
+        if (!isLiveMode && trafficRateEps > 0 && scenarioState.status !== 'running') {
           const delta = trafficRateEps * 0.1; // per 100ms
           const increment = Math.floor(delta) + (Math.random() < delta % 1 ? 1 : 0);
           if (increment > 0) {
@@ -355,48 +355,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }, 100);
 
     return () => clearInterval(interval);
-  }, [trafficRateEps, wanDelayMs, isPartitioned, adaptiveRoutingActive, scenarioState.status]);
+  }, [trafficRateEps, wanDelayMs, isPartitioned, adaptiveRoutingActive, scenarioState.status, isLiveMode]);
 
-  // Telemetry stream sampler (every 500ms)
-  const simulationRef = useRef({ nodes, wanDelayMs, isPartitioned, trafficRateEps });
-  useEffect(() => {
-    simulationRef.current = { nodes, wanDelayMs, isPartitioned, trafficRateEps };
-  }, [nodes, wanDelayMs, isPartitioned, trafficRateEps]);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const { nodes: sampledNodes, wanDelayMs, isPartitioned, trafficRateEps } = simulationRef.current;
-      const eu = sampledNodes.EU_WEST;
-      const us = sampledNodes.US_EAST;
-      const lag = Math.max(0, eu.localCommittedOffset - us.durableWatermark);
-      const effectiveRtt = isPartitioned ? 999 : 14.5 + wanDelayMs;
-      const writeLat = 0.35 + Math.random() * 0.15; // Local fsync is always sub-millisecond!
-
-      const sample: TelemetrySample = {
-        timestamp: Date.now(),
-        localCommitted: eu.localCommittedOffset,
-        remoteWatermark: us.durableWatermark,
-        replicationLag: lag,
-        wanRttMs: effectiveRtt,
-        outboxDepth: eu.outboxQueueSize,
-        ingressEps: trafficRateEps,
-        writeLatencyMs: parseFloat(writeLat.toFixed(2)),
-        leaseExpiresInSec: eu.leaseExpiresInSec,
-        throughputEps: trafficRateEps,
-        p99LatencyMs: 0.42,
-      };
-
-      setCurrentTelemetry(sample);
-      setTelemetryHistory((prev) => {
-        const next = [...prev, sample];
-        return next.length > 50 ? next.slice(next.length - 50) : next;
-      });
-    }, 500);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  // Produce a custom event
-  
   // Phase 5 Gateway telemetry refresh
   const refreshLiveTelemetry = async () => {
     try {
@@ -445,6 +405,54 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     }
   };
+
+  // Telemetry stream sampler (every 500ms): In LIVE mode, refresh real gateway telemetry without synthetic jitter
+  const simulationRef = useRef({ nodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode });
+  useEffect(() => {
+    simulationRef.current = { nodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode };
+  }, [nodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const { nodes: sampledNodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode: inLive } = simulationRef.current;
+      if (inLive) {
+        // LIVE MODE: Do NOT invent numbers or run synthetic generators.
+        refreshLiveTelemetry();
+        return;
+      }
+
+      // DEMO MODE ONLY: Synthetic simulation sampling
+      const eu = sampledNodes.EU_WEST;
+      const us = sampledNodes.US_EAST;
+      const lag = Math.max(0, eu.localCommittedOffset - us.durableWatermark);
+      const effectiveRtt = isPartitioned ? 999 : 14.5 + wanDelayMs;
+      const writeLat = 0.40;
+
+      const sample: TelemetrySample = {
+        timestamp: Date.now(),
+        localCommitted: eu.localCommittedOffset,
+        remoteWatermark: us.durableWatermark,
+        replicationLag: lag,
+        wanRttMs: effectiveRtt,
+        outboxDepth: eu.outboxQueueSize,
+        ingressEps: trafficRateEps,
+        writeLatencyMs: writeLat,
+        leaseExpiresInSec: eu.leaseExpiresInSec,
+        throughputEps: trafficRateEps,
+        p99LatencyMs: 0.42,
+      };
+
+      setCurrentTelemetry(sample);
+      setTelemetryHistory((prev) => {
+        const next = [...prev, sample];
+        return next.length > 50 ? next.slice(next.length - 50) : next;
+      });
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, [isLiveMode]);
+
+  // Produce a custom event
+  
 
   const toggleMode = async () => {
     const nextMode = isLiveMode ? "DEMO" : "LIVE";

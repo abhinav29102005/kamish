@@ -92,29 +92,37 @@ export default function AuditVerificationPage() {
         </div>
       )}
 
-      {/* VERIFICATION SUCCESS RESULT */}
+      {/* VERIFICATION RESULT */}
       {verifyResult && (
         <div
           id="verify-result-box"
           style={{
-            background: "rgba(16, 185, 129, 0.15)",
-            border: "2px solid #10b981",
+            background: verifyResult.verification_result === "PASS" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
+            border: verifyResult.verification_result === "PASS" ? "2px solid #10b981" : "2px solid #f59e0b",
             borderRadius: "8px",
             padding: "1.5rem 2rem",
             marginBottom: "2.5rem",
             fontFamily: "var(--font-mono)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", color: "#34d399", fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.75rem" }}>
-            <span>✓ CRYPTOGRAPHIC AUDIT VERIFIED — STATUS: {verifyResult.verification_result}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", color: verifyResult.verification_result === "PASS" ? "#34d399" : "#fbbf24", fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.75rem" }}>
+            <span>{verifyResult.verification_result === "PASS" ? "✓ CRYPTOGRAPHIC AUDIT VERIFIED" : "⚠ AUDIT VERIFICATION STATUS"}: {verifyResult.verification_result}</span>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", fontSize: "0.85rem", color: "#d1fae5" }}>
-            <div>Anchored Boundary: <strong>{verifyResult.anchored_boundary ? "VALID" : "INVALID"}</strong></div>
-            <div>Streams Audited: <strong>{verifyResult.total_streams_audited}</strong></div>
-            <div>Checkpoints Verified: <strong>{verifyResult.total_checkpoints_verified}</strong></div>
-            <div>Tamper Detected: <strong>{verifyResult.zero_tamper_detected ? "ZERO (INTEGRITY INTACT)" : "TAMPER FOUND"}</strong></div>
-            <div>Signatures: <strong>{verifyResult.cryptographic_signatures_valid ? "CRYPTOGRAPHICALLY VALID" : "INVALID"}</strong></div>
-          </div>
+          {verifyResult.verification_result === "UNAVAILABLE" ? (
+            <div style={{ fontSize: "0.85rem", color: "#fef3c7" }}>
+              <div>Operation: <strong>{verifyResult.operation || "checkpoint_existence_check_only"}</strong></div>
+              <div>Note: <em>{verifyResult.error || "Full on-disk verification wired in Step 4"}</em></div>
+              <div>Streams Checked: <strong>{verifyResult.total_streams_checked || 0}</strong> | Checkpoints Present: <strong>{verifyResult.checkpoints_present || 0}</strong></div>
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem", fontSize: "0.85rem", color: "#d1fae5" }}>
+              <div>Anchored Boundary: <strong>{verifyResult.anchored_boundary ? "VALID" : "INVALID"}</strong></div>
+              <div>Streams Audited: <strong>{verifyResult.total_streams_audited}</strong></div>
+              <div>Checkpoints Verified: <strong>{verifyResult.total_checkpoints_verified}</strong></div>
+              <div>Tamper Detected: <strong>{verifyResult.zero_tamper_detected ? "ZERO (INTEGRITY INTACT)" : "TAMPER FOUND"}</strong></div>
+              <div>Signatures: <strong>{verifyResult.cryptographic_signatures_valid ? "CRYPTOGRAPHICALLY VALID" : "INVALID"}</strong></div>
+            </div>
+          )}
         </div>
       )}
 

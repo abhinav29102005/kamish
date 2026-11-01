@@ -1,28 +1,36 @@
 import React, { useState, useEffect } from 'react';
+import { useKamish } from '../context/useKamish';
 
 export default function TelemetryPage() {
+  const { isLiveMode, currentTelemetry } = useKamish();
   const [metrics, setMetrics] = useState({
     throughput: 12479,
     p50: 59.9,
     p90: 157.3,
     p99: 241.2,
     max: 399.4,
-    activeBrokers: 3,
+    activeBrokers: 1,
     totalRecords: 1428590,
   });
 
   useEffect(() => {
+    // In LIVE mode, NEVER invent synthetic random metrics
+    if (isLiveMode) {
+      return;
+    }
+
+    // In DEMO mode only, run synthetic simulation
     const interval = setInterval(() => {
       setMetrics((prev) => ({
         ...prev,
-        throughput: Math.floor(12400 + Math.random() * 200),
-        p50: +(59.0 + Math.random() * 2.0).toFixed(1),
-        p99: +(238.0 + Math.random() * 8.0).toFixed(1),
-        totalRecords: prev.totalRecords + Math.floor(Math.random() * 120),
+        throughput: 12450,
+        p50: 59.5,
+        p99: 240.0,
+        totalRecords: prev.totalRecords + 10,
       }));
     }, 1500);
     return () => clearInterval(interval);
-  }, []);
+  }, [isLiveMode]);
 
   return (
     <div style={{ paddingBottom: '120px', maxWidth: '1100px', margin: '0 auto', paddingLeft: '1.5rem', paddingRight: '1.5rem' }}>
