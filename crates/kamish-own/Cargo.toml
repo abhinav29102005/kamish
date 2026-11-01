@@ -15,9 +15,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+tempfile = "3.17"
 
 [dev-dependencies]
 rand = { workspace = true }
 ed25519-dalek = { workspace = true }
 hex = { workspace = true }
-tempfile = "3.17"

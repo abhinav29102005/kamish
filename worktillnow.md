@@ -87,6 +87,29 @@ Older CLI/browser/advisory results below retain their original dates and scope.
   - Extended wire protocol with `PromotePartition` / `QuarantineDivergentSuffix` requests and responses.
   - Extended `KamishAdminClient` and `kamish-ctl` with `promote` command.
   - Verified with 4 comprehensive tests in `cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs`.
+- **Failover Atomicity & Recovery Hardening (FN-02.1, Correctness Blocker):**
+  - **Failure-Safe Partition Truncation (`crates/kamish-log`):**
+    - `truncate_to_offset` prepares retained records and superseded records without mutating in-memory log.
+    - Writes replacement `partition.data` and `partition.idx` to temporary files, flushes, and invokes `sync_all()` for disk durability.
+    - Closes writer handle and performs platform-safe atomic replacement via `NamedTempFile::persist`.
+    - Synchronizes containing directory on Unix.
+    - Only after replacement succeeds on disk does in-memory state transition to truncated prefix; writer is fenced fail-closed on ambiguous outcome.
+    - Added `read_suffix(from_offset)` to safely inspect divergent records without modifying state.
+  - **Durable and Idempotent Quarantine Persistence (`crates/kamish-own`):**
+    - `QuarantineStore::quarantine_records` deduplicates incoming envelopes against existing records (by epoch, offset, checksum, and payload) making retries strictly idempotent.
+    - Prepares candidate collection without mutating in-memory state.
+    - Writes to temporary file, flushes, syncs to disk with `sync_all()`, and atomically replaces `quarantine.data`.
+    - `QuarantineStore::open` recovers from interrupted writes (`quarantine.data.tmp`), preserves corrupted data files to timestamped paths instead of silently discarding them, and cleans up stale temporary files.
+  - **Failover Promotion & Reconciliation Ordering (`cmd/kamish-broker`):**
+    - Corrected fatal failure-ordering bug: previously advanced metadata epoch before isolating local divergent suffixes.
+    - In `promote_partition`, candidate now isolates any divergent suffix into `QuarantineStore` first and truncates `PartitionLog` before invoking `compare_and_swap_epoch`. Storage failure aborts promotion before epoch advancement, preventing divergent data exposure.
+    - In `quarantine_divergent_suffix`, reads suffix, persists to `QuarantineStore` first, and only truncates `PartitionLog` after persistence is confirmed, preventing suffix data loss on storage failure.
+  - **Lease Safety Margin Reconciliation:**
+    - Reconciled hardcoded 200ms buffer with approved 2-second local safety margin (`docs/CONTRACT.md` §2.3.2).
+    - Added configurable `promotion_safety_margin_ns` on `BrokerServer` defaulting to `2_000_000_000` (2s), with `with_promotion_safety_margin_ms` for test environments.
+  - **Authoritative Watermark Boundary Verification:**
+    - Reconciled `required_watermark` semantics: candidate cannot self-authorize committed frontier. Must verify against `local_tracker` or explicitly passed authoritative quorum frontier; candidate local high watermark must satisfy boundary.
+  - Verified with 9 comprehensive tests covering all 12 failure modes in `cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs`.
 
 ## Table of Contents
 

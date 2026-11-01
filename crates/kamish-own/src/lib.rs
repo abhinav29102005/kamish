@@ -14,8 +14,7 @@ use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
 use kamish_log::RecordEnvelope;
 use kamish_meta::{MetadataAuthority, PartitionOwnership, StreamId};
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
@@ -222,17 +221,48 @@ impl QuarantineStore {
         std::fs::create_dir_all(&dir_buf)?;
 
         let q_file = dir_buf.join("quarantine.data");
+        let tmp_file = dir_buf.join("quarantine.data.tmp");
         let mut quarantined = Vec::new();
 
-        if q_file.exists() {
-            let mut file = File::open(&q_file)?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            if !buf.is_empty()
-                && let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&buf)
-            {
-                quarantined = records;
+        // 1. Interrupted write recovery:
+        // If q_file is missing or empty, but a valid tmp_file exists, recover tmp_file
+        let q_empty_or_missing = !q_file.exists()
+            || std::fs::metadata(&q_file).map(|m| m.len() == 0).unwrap_or(true);
+        if q_empty_or_missing && tmp_file.exists() {
+            if let Ok(content) = std::fs::read(&tmp_file) {
+                if let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&content) {
+                    let _ = std::fs::rename(&tmp_file, &q_file);
+                    quarantined = records;
+                }
             }
+        }
+
+        // 2. Normal open and integrity validation
+        if quarantined.is_empty() && q_file.exists() {
+            let buf = std::fs::read(&q_file)?;
+            if !buf.is_empty() {
+                match serde_json::from_slice::<Vec<RecordEnvelope>>(&buf) {
+                    Ok(records) => {
+                        quarantined = records;
+                    }
+                    Err(e) => {
+                        let corrupt_path = dir_buf.join(format!(
+                            "quarantine.data.corrupted.{}",
+                            chrono::Utc::now().timestamp_millis()
+                        ));
+                        let _ = std::fs::copy(&q_file, &corrupt_path);
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("quarantine.data corrupted: {e}; preserved to {corrupt_path:?}"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 3. Clean up stale tmp file if main data file is healthy
+        if q_file.exists() && tmp_file.exists() {
+            let _ = std::fs::remove_file(&tmp_file);
         }
 
         Ok(Self {
@@ -242,6 +272,16 @@ impl QuarantineStore {
     }
 
     /// Moves a superseded suffix of records to the quarantine store (§3.1.4).
+    ///
+    /// Durability & Idempotency Protocol (FN-02.1):
+    /// 1. Deduplicates candidate records against existing quarantined records by epoch, offset, checksum, and payload.
+    /// 2. If all records are duplicates, returns Ok(()) without modifying disk.
+    /// 3. Prepares candidate collection without mutating in-memory state.
+    /// 4. Writes serialized JSON to a temporary file in the quarantine directory.
+    /// 5. Flushes and sync_all() to guarantee disk persistence before replacement.
+    /// 6. Atomically replaces quarantine.data with the temporary file.
+    /// 7. Synchronizes the containing directory on Unix.
+    /// 8. Only after disk replacement succeeds does the in-memory state update.
     pub fn quarantine_records(&self, records: Vec<RecordEnvelope>) -> Result<(), std::io::Error> {
         if records.is_empty() {
             return Ok(());
@@ -249,23 +289,62 @@ impl QuarantineStore {
 
         std::fs::create_dir_all(&self.dir)?;
         let mut inner = self.inner.write().unwrap();
-        inner.extend(records);
 
+        // 1. Deduplicate against existing records to make retries idempotent
+        let mut new_records = Vec::new();
+        for rec in records {
+            let already_present = inner.iter().any(|existing| {
+                existing.epoch == rec.epoch
+                    && existing.base_offset == rec.base_offset
+                    && existing.checksum == rec.checksum
+                    && existing.payload == rec.payload
+                    && existing.class_id == rec.class_id
+            });
+            if !already_present {
+                new_records.push(rec);
+            }
+        }
+
+        if new_records.is_empty() {
+            return Ok(()); // All records were already quarantined (idempotent retry)
+        }
+
+        // 2. Prepare candidate collection without mutating in-memory inner
+        let mut candidate = inner.clone();
+        candidate.extend(new_records);
+
+        let serialized = serde_json::to_vec(&candidate)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        // 3. Write and sync temporary file
         let q_file = self.dir.join("quarantine.data");
-        let serialized = serde_json::to_vec(&*inner)?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(q_file)?;
-        file.write_all(&serialized)?;
-        file.flush()?;
+        let mut tmp_file = tempfile::NamedTempFile::new_in(&self.dir)?;
+        tmp_file.write_all(&serialized)?;
+        tmp_file.flush()?;
+        tmp_file.as_file().sync_all()?;
+
+        // 4. Platform atomic replacement
+        tmp_file.persist(&q_file).map_err(|e| e.error)?;
+
+        #[cfg(unix)]
+        {
+            if let Ok(dir_file) = std::fs::File::open(&self.dir) {
+                let _ = dir_file.sync_all();
+            }
+        }
+
+        // 5. Update in-memory state ONLY AFTER successful disk persistence
+        *inner = candidate;
 
         Ok(())
     }
 
     pub fn count(&self) -> usize {
         self.inner.read().unwrap().len()
+    }
+
+    pub fn records(&self) -> Vec<RecordEnvelope> {
+        self.inner.read().unwrap().clone()
     }
 }
 

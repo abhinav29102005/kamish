@@ -335,6 +335,7 @@ pub struct BrokerServer {
     pub clock: Arc<dyn MonotonicClock>,
     pub catalog: Arc<RwLock<TenantCatalog>>,
     pub quarantine: QuarantineStore,
+    pub promotion_safety_margin_ns: Arc<std::sync::atomic::AtomicI64>,
     consumer_checkpoints: ConsumerCheckpoints,
     degraded_links: Arc<RwLock<HashSet<String>>>,
     owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
@@ -435,6 +436,7 @@ impl BrokerServer {
             clock: Arc::new(SystemMonotonicClock::new()),
             catalog,
             quarantine,
+            promotion_safety_margin_ns: Arc::new(std::sync::atomic::AtomicI64::new(2_000_000_000)), // 2s per CONTRACT.md §2.3.2
             consumer_checkpoints: Arc::new(RwLock::new(HashMap::new())),
             degraded_links: Arc::new(RwLock::new(HashSet::new())),
             owned_partitions: Arc::new(RwLock::new(HashSet::new())),
@@ -758,6 +760,17 @@ impl BrokerServer {
         let _ = self.renewal_shutdown.send(true);
     }
 
+    /// Sets the local safety margin buffer required beyond prior owner lease expiry for promotion (§2.3.2).
+    pub fn with_promotion_safety_margin_ms(self, margin_ms: i64) -> Self {
+        self.promotion_safety_margin_ns.store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
+        self
+    }
+
+    /// Dynamically updates the promotion safety margin.
+    pub fn set_promotion_safety_margin_ms(&self, margin_ms: i64) {
+        self.promotion_safety_margin_ns.store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// Returns a reference to the local quarantine store (§1.7, §3.1.4).
     pub fn quarantine(&self) -> &QuarantineStore {
         &self.quarantine
@@ -809,13 +822,13 @@ impl BrokerServer {
             return Ok(current_ownership);
         }
 
-        // 3. Lease safety check with clock drift buffer (§4.7.2 R6, §3.4.4)
-        let max_clock_drift_ms = 200i64;
-        let safe_expiry_ns = current_ownership.lease_expiry_ns + (max_clock_drift_ms * 1_000_000);
+        // 3. Lease safety check with local safety margin (§2.3.2, §3.4.4)
+        let safety_margin_ns = self.promotion_safety_margin_ns.load(std::sync::atomic::Ordering::SeqCst);
+        let safe_expiry_ns = current_ownership.lease_expiry_ns + safety_margin_ns;
         if now_ns < safe_expiry_ns {
             return Err(BrokerError::PolicyDenied(format!(
-                "prior_owner_lease_active: expires at {}, current time is {}",
-                safe_expiry_ns, now_ns
+                "prior_owner_lease_active: expires at {}, current time is {} (safety margin {}ns)",
+                safe_expiry_ns, now_ns, safety_margin_ns
             )));
         }
 
@@ -845,7 +858,7 @@ impl BrokerServer {
             )));
         }
 
-        // 5. Replica progress verification (INV-3)
+        // 5. Authoritative Watermark & Replica Progress Check (INV-3, §3.1.3, §3.4.4)
         let operation = self
             .partition_operations
             .get_or_insert_with((topic.to_string(), partition), || {
@@ -855,16 +868,51 @@ impl BrokerServer {
 
         let log = self.get_or_create_log(topic, partition, current_ownership.epoch)?;
         let local_hwm = log.high_watermark();
+        let local_next = log.next_offset();
 
-        if let Some(req_wm) = required_watermark {
-            if local_hwm < req_wm {
-                return Err(BrokerError::PolicyDenied(format!(
-                    "candidate_watermark_behind: candidate has {local_hwm}, required {req_wm}"
-                )));
+        // Determine authoritative committed frontier:
+        // A candidate cannot independently establish its own frontier.
+        let authoritative_watermark = match required_watermark {
+            Some(w) => w,
+            None => {
+                let tracked = self.local_tracker.get_watermark(topic, partition, &current_ownership.owner_region);
+                if tracked > 0 {
+                    tracked
+                } else {
+                    local_hwm
+                }
+            }
+        };
+
+        // Candidate must hold all committed records up to the authoritative frontier
+        if local_hwm < authoritative_watermark {
+            return Err(BrokerError::PolicyDenied(format!(
+                "candidate_watermark_behind: candidate hwm {local_hwm} < authoritative {authoritative_watermark}"
+            )));
+        }
+
+        // 6. Suffix Isolation & Truncation BEFORE Metadata CAS (FN-02.1):
+        // If candidate has speculative/divergent records beyond the authoritative frontier,
+        // isolate them into QuarantineStore first, and then truncate the partition log.
+        // A storage failure here aborts promotion without calling CAS or exposing divergent data.
+        if local_next > authoritative_watermark {
+            let divergent = log.read_suffix(authoritative_watermark);
+            if !divergent.is_empty() {
+                tracing::warn!(
+                    topic = %topic,
+                    partition = partition,
+                    count = divergent.len(),
+                    authoritative_watermark = authoritative_watermark,
+                    "Quarantining speculative divergent suffix before failover promotion"
+                );
+                // Step A: Durably persist to QuarantineStore first
+                self.quarantine.quarantine_records(divergent)?;
+                // Step B: Atomically truncate PartitionLog
+                log.truncate_to_offset(authoritative_watermark)?;
             }
         }
 
-        // 6. Commit bumped epoch via atomic CAS on MetadataAuthority (INV-7)
+        // 7. Commit bumped epoch via atomic CAS on MetadataAuthority (INV-7)
         let new_epoch = current_ownership.epoch + 1;
         let lease_duration_ms = 10_000i64; // Normative 10-second lease (CONTRACT.md §2.3.2)
         let new_ownership = self.meta
@@ -883,34 +931,16 @@ impl BrokerServer {
                     }
                 }
                 kamish_meta::MetaError::LeaseConflict { .. } => {
-                    BrokerError::PolicyDenied("prior_owner_lease_active".into())
+                    BrokerError::PolicyDenied("promotion_cas_conflict".into())
                 }
                 other => BrokerError::Authority(other.to_string()),
             })?;
 
-        // 7. Update local ownership and active lease renewal registry
+        // 8. Update local ownership and active lease renewal registry ONLY AFTER confirmed CAS
         self.owned_partitions
             .write()
             .unwrap()
             .insert((topic.to_string(), partition));
-
-        // 8. If required_watermark was specified and candidate had speculative records beyond it,
-        // isolate divergent records to QuarantineStore
-        if let Some(req_wm) = required_watermark {
-            if local_hwm > req_wm {
-                let superseded = log.truncate_to_offset(req_wm)?;
-                if !superseded.is_empty() {
-                    tracing::warn!(
-                        topic = %topic,
-                        partition = partition,
-                        count = superseded.len(),
-                        agreed_watermark = req_wm,
-                        "Quarantined speculative records beyond agreed frontier upon promotion"
-                    );
-                    self.quarantine.quarantine_records(superseded)?;
-                }
-            }
-        }
 
         tracing::info!(
             topic = %topic,
@@ -943,13 +973,14 @@ impl BrokerServer {
         let _operation = operation.lock().unwrap();
 
         let log = self.get_or_create_log(topic, partition, 1)?;
-        let local_hwm = log.high_watermark();
+        let local_next = log.next_offset();
 
-        if local_hwm <= agreed_watermark {
+        if local_next <= agreed_watermark {
             return Ok(0);
         }
 
-        let superseded = log.truncate_to_offset(agreed_watermark)?;
+        // Safe ordering: Read suffix -> Quarantine -> Truncate log
+        let superseded = log.read_suffix(agreed_watermark);
         let count = superseded.len();
         if !superseded.is_empty() {
             tracing::warn!(
@@ -959,7 +990,10 @@ impl BrokerServer {
                 agreed_watermark = agreed_watermark,
                 "Quarantining divergent log suffix from superseded owner"
             );
+            // 1. Durably persist to QuarantineStore first
             self.quarantine.quarantine_records(superseded)?;
+            // 2. Only after quarantine succeeds, truncate PartitionLog
+            log.truncate_to_offset(agreed_watermark)?;
         }
 
         // If this broker was previously renewing this partition, verify if we are still owner
@@ -1706,7 +1740,7 @@ impl BrokerServer {
             .clone()
     }
 
-    fn get_or_create_log(
+    pub fn get_or_create_log(
         &self,
         topic: &str,
         partition: u32,

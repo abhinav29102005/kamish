@@ -825,46 +825,120 @@ impl PartitionLog {
         *guard = Some(writer);
     }
 
+    /// Returns a copy of records starting from `from_offset` up to `next_offset` (including uncommitted).
+    /// Used to safely prepare divergent suffixes for quarantine before truncating (§3.1.4, W20).
+    pub fn read_suffix(&self, from_offset: u64) -> Vec<RecordEnvelope> {
+        let inner = self.inner.read().unwrap();
+        if from_offset >= inner.next_offset {
+            return Vec::new();
+        }
+        let idx = from_offset as usize;
+        if idx < inner.records.len() {
+            inner.records[idx..].to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Truncates the log to `new_next_offset`, removing all records with `base_offset >= new_next_offset`.
     /// Returns the removed records (superseded suffix) for quarantine routing (§3.1.4, W20).
+    ///
+    /// Failure-Safe Durability Protocol (FN-02.1):
+    /// 1. Verifies writer is not fenced before starting.
+    /// 2. Prepares retained prefix and superseded suffix without mutating original in-memory state.
+    /// 3. Writes replacement partition.data to a temporary file in the same directory.
+    /// 4. Flushes and sync_all() to ensure data durability on disk before installation.
+    /// 5. Writes replacement partition.idx to a temporary file and syncs it.
+    /// 6. Closes active file writer handle before atomic replacement.
+    /// 7. Atomically installs replacement files using platform-safe replacement semantics.
+    /// 8. On Unix, synchronizes the containing directory.
+    /// 9. ONLY AFTER replacement succeeds on disk does in-memory state transition to truncated prefix.
+    /// 10. Any failure before installation leaves original in-memory log intact.
+    /// 11. Any ambiguous replacement outcome fences the writer fail-closed.
     pub fn truncate_to_offset(&self, new_next_offset: u64) -> Result<Vec<RecordEnvelope>, LogError> {
         let mut writer_guard = self.writer_lock.lock().unwrap();
         let mut inner = self.inner.write().unwrap();
 
+        // 1. Writer fencing check
+        if let Some(ref reason) = inner.fenced_reason {
+            return Err(LogError::WriterFenced(reason.clone()));
+        }
+
+        // 2. Early return if nothing to truncate
         if new_next_offset >= inner.next_offset {
             return Ok(Vec::new());
         }
 
-        let superseded = inner.records.split_off(new_next_offset as usize);
-        inner.next_offset = new_next_offset;
-        inner.high_watermark = new_next_offset;
-        inner.index_entries.retain(|e| e.base_offset < new_next_offset);
-
-        // Rewrite on-disk partition.data cleanly up to new_next_offset
-        let log_path = inner.dir.join("partition.data");
-        let tmp_path = inner.dir.join("partition.data.tmp");
-        {
-            let mut tmp_file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .truncate(true)
-                .open(&tmp_path)?;
-            for rec in &inner.records {
-                let serialized = serde_json::to_vec(rec)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                let len_bytes = (serialized.len() as u32).to_be_bytes();
-                tmp_file.write_all(&len_bytes)?;
-                tmp_file.write_all(&serialized)?;
-            }
-            tmp_file.flush()?;
-            tmp_file.sync_all()?;
+        let split_idx = new_next_offset as usize;
+        if split_idx > inner.records.len() {
+            return Ok(Vec::new());
         }
-        std::fs::rename(&tmp_path, &log_path)?;
 
-        // Reset the writer handle so subsequent appends reopen or seek to new end
+        // 3. Prepare retained and superseded collections WITHOUT mutating in-memory log
+        let retained_records = inner.records[..split_idx].to_vec();
+        let superseded_records = inner.records[split_idx..].to_vec();
+        let retained_index: Vec<SparseIndexEntry> = inner
+            .index_entries
+            .iter()
+            .filter(|e| e.base_offset < new_next_offset)
+            .copied()
+            .collect();
+
+        // 4. Write replacement partition.data to a temporary file
+        let mut tmp_file = tempfile::NamedTempFile::new_in(&inner.dir)?;
+        for rec in &retained_records {
+            let serialized = serde_json::to_vec(rec)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let len_bytes = (serialized.len() as u32).to_be_bytes();
+            tmp_file.write_all(&len_bytes)?;
+            tmp_file.write_all(&serialized)?;
+        }
+        tmp_file.flush()?;
+        tmp_file.as_file().sync_all()?;
+
+        // 5. Write replacement partition.idx to a temporary file
+        let idx_serialized = serde_json::to_vec(&retained_index)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut idx_tmp = tempfile::NamedTempFile::new_in(&inner.dir)?;
+        idx_tmp.write_all(&idx_serialized)?;
+        idx_tmp.flush()?;
+        idx_tmp.as_file().sync_all()?;
+
+        // 6. Close existing writer handle before replacing files on disk
         *writer_guard = None;
 
-        Ok(superseded)
+        // 7. Atomically replace partition.data and partition.idx
+        let log_path = inner.dir.join("partition.data");
+        let idx_path = inner.dir.join("partition.idx");
+
+        if let Err(e) = tmp_file.persist(&log_path) {
+            let is_intact = std::fs::metadata(&log_path).is_ok();
+            if !is_intact {
+                let msg = format!("truncation_replacement_ambiguous: {}", e.error);
+                inner.fenced_reason = Some(msg.clone());
+                return Err(LogError::WriterFenced(msg));
+            }
+            return Err(LogError::Io(e.error));
+        }
+
+        // Persist index (non-fatal if index fails, will rebuild on open)
+        let _ = idx_tmp.persist(&idx_path);
+
+        // 8. Synchronize directory on platforms that support it
+        #[cfg(unix)]
+        {
+            if let Ok(dir_file) = std::fs::File::open(&inner.dir) {
+                let _ = dir_file.sync_all();
+            }
+        }
+
+        // 9. ONLY AFTER installation succeeds, transition in-memory state
+        inner.records = retained_records;
+        inner.next_offset = new_next_offset;
+        inner.high_watermark = new_next_offset;
+        inner.index_entries = retained_index;
+
+        Ok(superseded_records)
     }
 }
 
