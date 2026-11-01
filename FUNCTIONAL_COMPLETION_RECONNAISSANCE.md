@@ -4,18 +4,18 @@
 **Branch:** `main`  
 **Date:** 2026-11-01  
 **Mode:** Functionality-first implementation  
-**Authorizing directive:** Consolidated Functional Completion Push  
+**Authorizing directive:** Consolidated & Final Functional Completion Push  
 
 ---
 
 ## Executive Summary
 
-This reconnaissance report documents the actual system state, source implementation, and functional integration across Kamish following the Consolidated Functional Completion Push.
+This reconnaissance report documents the actual system state, source implementation, and functional integration across Kamish following the Consolidated and Final Functional Completion Pushes.
 
 In accordance with the governing instructions:
 - **No tests were written, no test cases were added, and no test suites or benchmarks were executed.**
 - Verification was conducted exclusively through static analysis and compilation checks via `cargo check --workspace --all-targets` (0 errors across all 14 workspace crates and binaries).
-- Functional gaps across replication, durable acknowledgements, divergence recovery, ownership fencing, daemon wiring, and gateway operational endpoints were implemented and wired directly into executable application paths.
+- Functional gaps across replication provenance, durable acknowledgements, divergence recovery, ownership fencing, circuit breaker integration, backend RBAC, consumer checkpoint fsync, daemon wiring, and gateway operational endpoints were implemented and wired directly into executable application paths.
 
 ---
 
@@ -30,16 +30,16 @@ Every major capability is classified into one of four states:
 | Capability | Status | Source Location | Description & Remaining Gaps |
 | :--- | :---: | :--- | :--- |
 | **1. Broker & Partition Log** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-log/src/lib.rs` | Segmented append-only commit log with fsync durability, CRC32 verification, active lease validation, idempotent producer session deduplication, and atomic outbox reservation. |
-| **2. Durable Storage & Restart Recovery** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-log/src/lib.rs` | Partition log recovery on daemon boot (`try_new_with_tracker`), consumer offset recovery from `consumer_offsets.json`, and automatic outbox backlog refill across all known peers. |
-| **3. Ownership, Lease Renewal & Epoch Fencing** | **IMPLEMENTED** | `crates/kamish-meta/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | External etcd 3.7.3 authority model, 10s lease TTL, 3s renewal, 2s safety margin, monotonic time lease bounds, stale epoch fencing on produce and replication, and background renewal worker. |
-| **4. Promotion, Failover & Divergent History Recovery** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-log/src/quarantine.rs` | `promote_partition` enforces prior owner lease expiration + safety margin before acquiring epoch; `handle_replication` detects history divergence: if sender is authoritative owner with $E_{sender} > E_{local}$, supersedes local suffix by persisting to `QuarantineStore`, truncating local log, and applying authoritative record; rejects if $E_{sender} \le E_{local}$. |
-| **5. Replication Context & Provenance Propagation** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-log/src/lib.rs` | Full `RecordContext` propagation (`producer_id`, `producer_epoch`, `sequence`, `origin_region`, `request_policy`, `replication_targets`, `source_generation`) across outbox ranges, TCP wire payloads, and follower commit logs. |
+| **2. Durable Storage & Restart Recovery** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-log/src/lib.rs` | Partition log recovery on daemon boot (`try_new_with_tracker`), consumer offset recovery from `consumer_offsets.json` with fsync durability on write, and automatic outbox backlog refill across all known peers. |
+| **3. Ownership, Lease Renewal & Epoch Fencing** | **IMPLEMENTED** | `crates/kamish-meta/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | External etcd 3.7.3 authority model, 10s lease TTL, 3s renewal, 2s safety margin, monotonic time lease bounds, stale epoch fencing on produce and replication, and background renewal worker. Single-writer partition file locking enforced via `libc::flock` / `LockFileEx`. |
+| **4. Promotion, Failover & Divergent History Recovery** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-own/src/lib.rs` | `promote_partition` enforces prior owner lease expiration + safety margin before acquiring epoch; `handle_replication` detects history divergence: if sender is authoritative owner with $E_{sender} > E_{local}$, supersedes local suffix by persisting to `QuarantineStore`, truncating local log, and applying authoritative record; rejects if $E_{sender} \le E_{local}$. Bounded to 100,000 quarantine records max. |
+| **5. Replication Context & Provenance Propagation** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `crates/kamish-log/src/lib.rs`, `crates/kamish-outbox/src/lib.rs` | Full `RecordContext` propagation across outbox ranges, wire payloads, and follower logs. Outbox watermark advancement strictly binds to source epoch and source generation (`advance_partition_watermark_with_provenance`), preventing older ACKs from trimming newer work. |
 | **6. Heartbeat-Based Reconciliation** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs`, `cmd/kamish-agent/src/lib.rs`, `cmd/kamish-agent/src/main.rs` | Framed TCP heartbeat RPCs (`HeartbeatRequest` / `HeartbeatResponse`), watermark exchange, autonomous gap detection in `ReplicationAgent::reconcile_peer`, outbox repopulation, startup reconciliation pass, and periodic 500ms retry worker sweep. |
 | **7. Outbox Capacity & Backpressure** | **IMPLEMENTED** | `crates/kamish-outbox/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | Strict byte capacity accounting (`payload.len() + envelope_len + 64`), pre-append atomic capacity reservation across all permitted destination outboxes with RAII rollback on failure, backpressure rejection, and watermark cursor advancement. |
 | **8. Remote Append, Ack & Durability Semantics** | **IMPLEMENTED** | `cmd/kamish-broker/src/lib.rs` | Explicit `AckLevel` enum (`LeaderFsync`, `InRegionQuorum`). In Phase 1, `BrokerServer` operates under `AckLevel::LeaderFsync` (local fsync before ACK). `ProduceResponse` returns explicit `ack_level: Some(AckLevel::LeaderFsync)`. Remote TCP dispatch does not inflate local durability claims. |
-| **9. Cross-Region Replication Guarantees** | **IMPLEMENTED** | `cmd/kamish-agent/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | Fenced cross-region replication via `check_replication_authority`: stale or transferred owners immediately abort replication dispatch. Sovereignty enforcer rejects illegal egress before network transmission. |
-| **10. Sealed Replication & Key Custody** | **BLOCKED** | `crates/kamish-policy/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | Sealed replication fails closed (`BrokerError::PolicyDenied("sealed_mode_requires_secure_enclave")`). Full implementation requires a secure hardware enclave / KMS key custody service and signed sealed-envelope specification. |
-| **11. Gateway Authentication & Broker Integration** | **IMPLEMENTED** | `cmd/kamish-gateway/src/lib.rs`, `cmd/kamish-gateway/src/main.rs` | Axum HTTP/SSE gateway with Argon2 password hashing, session tokens, CSRF protection, and RBAC middleware. Connected directly to real `BrokerServer` for produce, fetch, partition promotion, quarantine inspection, and reconciliation triggering. |
+| **9. Cross-Region Replication Guarantees** | **IMPLEMENTED** | `cmd/kamish-agent/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | Fenced cross-region replication via `check_replication_authority`: stale or transferred owners immediately abort replication dispatch. Sovereignty enforcer rejects illegal egress before network transmission. Linked to `CircuitBreaker` on failure/success. |
+| **10. Sealed Replication & Key Custody** | **BLOCKED** | `crates/kamish-policy/src/lib.rs`, `crates/kamish-seal/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | Sealed replication fails closed (`BrokerError::PolicyDenied("sealed_replication_not_configured")`). XOR-CTR prototype documented as non-production reference. Production sealed replication requires external Hardware Security Module (HSM) / KMS custody and vetted AEAD cipher. |
+| **11. Gateway Authentication & Backend Wire RBAC** | **IMPLEMENTED** | `cmd/kamish-gateway/src/lib.rs`, `cmd/kamish-broker/src/lib.rs` | Axum HTTP/SSE gateway with Argon2 password hashing, session tokens, CSRF protection, and RBAC. Broker TCP listener enforces wire RBAC across all requests (`Produce`, `Fetch`, `CommitOffset`, `FetchOffset`, `Replicate`, `Heartbeat`, `PromotePartition`, `QuarantineDivergentSuffix`). |
 | **12. Dashboard Integration & Operational Visibility** | **IMPLEMENTED** | `cmd/kamish-gateway/src/lib.rs`, `frontend/src/` | Enriched `/api/streams` with real broker high watermarks, durable watermarks, epochs, owner regions, outbox queue depths, and quarantined counts. Enriched `/api/authority` with lease TTL, renewal intervals, and remaining lease duration. Prominent LIVE vs DEMO mode separation. |
 | **13. Documentation & Configuration Consistency** | **IMPLEMENTED** | `docs/CONTRACT.md`, `worktillnow.md`, `project.md` | Consistent contracts, explicit acknowledgement durability semantics, accurate recorded milestones, and zero unverified runtime claims. |
 
@@ -83,7 +83,7 @@ Every major capability is classified into one of four states:
               }
 ```
 
-### 2. Cross-Region Replication Dispatch Path (Outbox -> Authority Check -> WAN TCP -> Follower)
+### 2. Cross-Region Replication Dispatch Path (Outbox -> Authority Check -> Route Selector / CB -> WAN TCP -> Follower)
 ```
 [ReplicationAgent (spawn_retry_worker / step_replication_tcp)]
        │
@@ -94,10 +94,16 @@ Every major capability is classified into one of four states:
        │
        ├─► 2. Drain Outbox Ranges (DestinationOutbox::drain_ranges)
        │
-       ├─► 3. Egress Sovereignty Policy Check (Enforcer::decide)
+       ├─► 3. Route Selection & Circuit Breaker Check (RouteSelector::pick_path)
+       │      └─ If circuit breaker is Open: skip degraded link, fail closed
+       │
+       ├─► 4. Egress Sovereignty Policy Check (Enforcer::decide)
        │      └─ Verify payload class allows egress to target region
        │
-       ├─► 4. Framed TCP Transmission (BrokerClient::replicate)
+       ├─► 5. Framed TCP Transmission (BrokerClient::replicate)
+       │      │
+       │      ├─ If connection/transfer error:
+       │      │    └─ RouteSelector::record_link_failure (trips circuit breaker after threshold)
        │      │
        │      ▼ (ReplicationRequest)
        │ [Follower BrokerServer::handle_replication]
@@ -119,8 +125,10 @@ Every major capability is classified into one of four states:
        │      └─► Offset gap (req.from_offset > local_next):
        │             Reject with offset_gap
        │
-       └─► 5. Advance Outbox Watermark (DestinationOutbox::advance_partition_watermark)
-              └─ Reclaim memory capacity
+       └─► 6. Provenance-Bound Outbox Trimming
+              ├─ RouteSelector::record_link_success (resets failure count / closes circuit breaker)
+              └─ DestinationOutbox::advance_partition_watermark_with_provenance
+                   (trims strictly records where r.epoch <= epoch && r.source_generation <= gen)
 ```
 
 ### 3. Automated Reconciliation Path (Periodic Sweeps / Reconnect / REST API)
@@ -161,29 +169,44 @@ Every major capability is classified into one of four states:
 ## D. Implementation Evidence
 
 ### 1. Files Changed
-1. `cmd/kamish-broker/src/lib.rs` (115 insertions, 35 deletions)
+1. `cmd/kamish-broker/src/lib.rs`
    - Added `AckLevel` enum (`LeaderFsync`, `InRegionQuorum`).
    - Added `ack_level: AckLevel` to `BrokerServer` and `ack_level: Option<AckLevel>` to `ProduceResponse`.
    - Populated explicit ack levels on all produce and idempotent deduplication responses.
    - Enhanced `handle_replication` to quarantine divergent histories when superseded by an authoritative owner with a higher epoch ($E_{sender} > E_{local}$), while fencing stale senders ($E_{sender} \le E_{local}$).
-2. `cmd/kamish-agent/src/lib.rs` (36 insertions, 0 deletions)
+   - Enforced comprehensive wire RBAC across all operations in `handle_stream`.
+   - Verified tenant authorization in `dispatch_with_identity` for checkpoint operations.
+   - Ensured atomic `sync_all` persistence of consumer group offset checkpoints.
+2. `cmd/kamish-agent/src/lib.rs`
    - Implemented `check_replication_authority(&self, topic, partition) -> bool`.
    - Wired authority checks into `execute_task`, `step_replication`, and `step_replication_tcp`.
-3. `cmd/kamish-agent/src/main.rs` (36 insertions, 4 deletions)
+   - Integrated `RouteSelector::record_link_success` and `RouteSelector::record_link_failure` to trip/recover circuit breakers.
+   - Replaced plain watermark advancing with `advance_partition_watermark_with_provenance`.
+3. `cmd/kamish-agent/src/main.rs`
    - Spawned `spawn_retry_worker` in daemon execution loop.
    - Added startup reconciliation pass for registered peers.
    - Wired graceful shutdown handler.
-4. `cmd/kamish-gateway/src/lib.rs` (179 insertions, 9 deletions)
+4. `cmd/kamish-gateway/src/lib.rs`
    - Added operational routes: `POST /api/partitions/promote`, `GET /api/partitions/quarantine`, `POST /api/reconciliation/run`.
    - Wired RBAC security checks for new endpoints.
    - Enriched telemetry handlers (`streams_handler`, `authority_handler`) with real broker states, outbox queue depths, remaining lease times, and quarantine counters.
-5. `worktillnow.md`
-   - Appended Section 33 documenting the Consolidated Functional Completion Push.
+5. `crates/kamish-outbox/src/lib.rs`
+   - Added `advance_partition_watermark_with_provenance` enforcing epoch and source generation bounds on range trimming.
+6. `crates/kamish-own/src/lib.rs`
+   - Enforced maximum upper bound of 100,000 records on `QuarantineStore`.
+7. `crates/kamish-seal/src/lib.rs`
+   - Clarified XOR prototype documentation and defined production AEAD envelope contract.
+8. `worktillnow.md`
+   - Appended Sections 33 and 34.
 
 ### 2. Commits Created
 - `0895dd6bf975e092213f92726e15f7e650a993dd`: `feat(broker): implement explicit ack durability levels and authoritative divergence quarantine`
 - `9f6dd63db484a56c6608211f57e82c8ac07ee9b1`: `feat(agent): enforce ownership fencing on replication dispatch and wire retry worker`
 - `01e183fc026a09c45413a08398c054bb45a5cdc9`: `feat(gateway): add partition promotion, quarantine inspection, and reconciliation endpoints`
+- `5c4b011d331aa5fba45ffbf985e505ea588df815`: `docs: add consolidated functional completion reconnaissance report and section 33`
+- `bb8a75ba703e2fc10f44927cb0f6cf8aebce6eb7`: `feat(outbox,own): bind outbox watermark advancing to source provenance and bound quarantine storage`
+- `7eb18b577328bf7c26a0efbfb8d5e8964c8d48ae`: `feat(agent): integrate circuit breaker observations and provenance-aware outbox advancement`
+- `1908aa3aa2014138e6e5eb67a9a1d43a290514a6`: `feat(broker,seal): enforce comprehensive backend RBAC, fsync consumer checkpoints, and document sealed AEAD contract`
 
 ### 3. Verification Boundary
 - Verification was conducted using `cargo check --workspace --all-targets`.
@@ -202,7 +225,10 @@ Every major capability is classified into one of four states:
   4. Background retry worker and startup reconciliation wiring in replication daemon.
   5. Broker-backed gateway endpoints for promotion, quarantine inspection, and reconciliation.
   6. Live stream telemetry enrichment with outbox queue depths and lease timers.
+  7. Provenance-bound watermark advancing preventing cross-epoch outbox trimming.
+  8. Replication agent circuit breaker integration for degraded/failing links.
+  9. Comprehensive wire RBAC and tenant authorization across all broker requests.
+  10. Crash-safe consumer checkpoint persistence with fsync.
 - **External Dependencies:** External etcd 3.7.3 cluster for production multi-region metadata; KMS / Hardware Enclaves for sealed replication.
 - **Reconnaissance Document Location:** `E:\Kamish\FUNCTIONAL_COMPLETION_RECONNAISSANCE.md`
 - **Testing Confirmation:** **Explicitly confirmed that no tests were written, modified, or executed during this milestone.**
-

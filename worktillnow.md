@@ -3383,3 +3383,43 @@ Milestone FN-03 closes the replication metadata and context preservation gap ide
   - Extended gateway `security_middleware` to enforce operator/admin role authorization for partition promotion and reconciliation endpoints.
   - Enriched `streams_handler` with real-time broker partition states, high watermarks, durable watermarks, epochs, owner regions, outbox queue depths, and quarantined record counts.
   - Enriched `authority_handler` with lease TTL, renewal intervals, safety margins, remaining lease duration in milliseconds, and total quarantined records count.
+
+---
+
+## 34. Final Functional Completion Push: Provenance Watermarks, Circuit Breakers, Backend RBAC, and Checkpoint Durability (2026-11-01)
+
+### 34.1 Provenance-Aware Watermark Advancement & Outbox Trimming
+- **Implementation (`crates/kamish-outbox/src/lib.rs`):**
+  - Added `advance_partition_watermark_with_provenance(&self, topic, partition, epoch, source_generation, new_watermark)`.
+  - Enforced that watermark advances only trim outbox ranges matching or preceding the acknowledged epoch and source generation (`r.epoch <= epoch && r.source_generation <= source_generation`).
+  - Prevents an acknowledgement from an older epoch or prior source generation from inadvertently trimming or suppressing unconfirmed replication records belonging to a subsequent epoch.
+  - Retained `advance_partition_watermark` as a convenience delegate passing maximum bounds.
+
+### 34.2 Replication Pipeline Circuit Breaker Integration
+- **Implementation (`cmd/kamish-agent/src/lib.rs`):**
+  - Connected the link success and failure observations into `AdaptiveRouteSelector` / `CircuitBreaker` (`crates/kamish-route/src/lib.rs`).
+  - In `execute_task`, `step_replication`, and `step_replication_tcp`:
+    - On successful replication ACK: calls `self.router.record_link_success(&target, None)`.
+    - On network connection or replication failure: calls `self.router.record_link_failure(&target, None)`.
+  - Tripping the circuit breaker immediately forces the route selector to skip degraded or unavailable target links, preventing retry starvation and bounding resource consumption during WAN outages.
+  - Wired `advance_partition_watermark_with_provenance` with `task.range.epoch` and `task.range.source_generation` across all transfer completion paths.
+
+### 34.3 Comprehensive Backend Wire RBAC & Checkpoint Tenant Authorization
+- **Implementation (`cmd/kamish-broker/src/lib.rs`):**
+  - Extended `handle_stream` wire RBAC to cover all operations exposed on the broker TCP listener:
+    - `Produce`: requires `Producer` role.
+    - `Fetch`: requires `Consumer` role.
+    - `CommitOffset` & `FetchOffset`: requires `Consumer` role.
+    - `Replicate` & `Heartbeat`: requires `Agent` role.
+    - `PromotePartition` & `QuarantineDivergentSuffix`: requires `Operator` or `Admin` role.
+  - In `dispatch_with_identity`: validated tenant authorization on `CommitOffset` and `FetchOffset` requests, ensuring clients cannot commit or fetch checkpoints for topics owned by other tenants unless holding the `Admin` role.
+
+### 34.4 Durable Consumer Checkpoint Persistence with fsync
+- **Implementation (`cmd/kamish-broker/src/lib.rs`):**
+  - Updated `commit_offset` to explicitly flush and call `f.sync_all()` on the temporary checkpoint file (`consumer_offsets.json.tmp`) before performing an atomic filesystem rename to `consumer_offsets.json`.
+  - Eliminates the crash window where a power failure could leave an uncommitted or corrupted offset checkpoint file.
+
+### 34.5 Bounded Quarantine Growth & Sealed AEAD Specification
+- **Implementation (`crates/kamish-own/src/lib.rs`, `crates/kamish-seal/src/lib.rs`):**
+  - Enforced a hard upper bound of 100,000 records on `QuarantineStore::quarantine_records`, safely draining oldest records if runaway divergence occurs, preventing disk space exhaustion.
+  - Updated `crates/kamish-seal/src/lib.rs` documentation to remove misleading claims regarding XOR prototype confidentiality, defining the required AEAD ciphersuite (ChaCha20-Poly1305 / AES-256-GCM, 96-bit random nonce, topic/partition/epoch AAD binding) and external KMS/HSM key custody boundary.
