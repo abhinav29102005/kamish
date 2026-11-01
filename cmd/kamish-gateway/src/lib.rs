@@ -81,6 +81,8 @@ pub fn app(state: GatewayState) -> Router {
             "/api/reconciliation/run",
             post(trigger_reconciliation_handler),
         )
+        .route("/api/consumer-groups", get(list_consumer_groups_handler))
+        .route("/api/retention", get(retention_status_handler))
         .route("/api/scenarios/run", post(run_scenario_handler))
         .route("/api/mode", get(get_mode_handler).post(set_mode_handler))
         // Server-Sent Events
@@ -896,6 +898,31 @@ async fn list_quarantine_handler(State(state): State<GatewayState>) -> Json<serd
 #[derive(Deserialize)]
 struct TriggerReconciliationRequest {
     target_region: Option<String>,
+}
+
+async fn list_consumer_groups_handler(
+    State(state): State<GatewayState>,
+) -> Json<serde_json::Value> {
+    let groups = state.broker.consumer_groups.list_groups();
+    let count = groups.len();
+    Json(serde_json::json!({
+        "status": "OK",
+        "consumer_groups": groups,
+        "count": count,
+    }))
+}
+
+async fn retention_status_handler(
+    State(state): State<GatewayState>,
+) -> Json<serde_json::Value> {
+    let m = state.broker.retention.metrics();
+    Json(serde_json::json!({
+        "status": "OK",
+        "reclaimed_bytes_total": m.reclaimed_bytes_total.load(std::sync::atomic::Ordering::Relaxed),
+        "reclaimed_records_total": m.reclaimed_records_total.load(std::sync::atomic::Ordering::Relaxed),
+        "last_sweep_timestamp_ms": m.last_sweep_timestamp_ms.load(std::sync::atomic::Ordering::Relaxed),
+        "active_retention_rules": m.active_retention_rules.load(std::sync::atomic::Ordering::Relaxed),
+    }))
 }
 
 async fn trigger_reconciliation_handler(
