@@ -48,6 +48,13 @@ Older CLI/browser/advisory results below retain their original dates and scope.
 - Added broker-level multi-region test `cmd/kamish-broker/tests/multiregion_ownership.rs` proving unregistered streams fail closed and registered owners succeed (noting fail-closed admission is an edge gate, not distributed authority).
 - 108 workspace tests passing, 0 clippy warnings, 0 format diffs. Full unedited logs saved in `audit/phase1_item1_1/`. Both extended gap probes remain intentionally untouched until behavior implementation.
 
+**Phase 1 Decision Gate — Lease Contract (documentation proposal; no runtime behavior changed):**
+- Maintainer selected external etcd 3.7.3 as the Phase 1 metadata authority.
+- Maintainer approved initial lease parameters: 10-second etcd TTL, renewal every 3 seconds, 2-second local safety margin, and 1-second operation timeout.
+- Proposed contract requires a conservative monotonic deadline starting no later than the grant/renewal request, no extension on ambiguous renewal, restart invalidation of cached monotonic lease state, and explicit treatment of in-flight durable appends crossing expiry.
+- These values are initial parameters for implementation/testing, not a safety proof. Audit-cap and global revocation decisions remain open.
+- This is a documentation-only work item. No runtime source, probes, historical audit evidence, or package publication state is changed. Tests are not claimed as run for this documentation proposal.
+
 ---
 
 ## Table of Contents

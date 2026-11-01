@@ -12,8 +12,8 @@ All engineering decisions in this repository are recorded here and continuously 
 | **ADR-0002** | 2026-10-31 | Cargo Workspace & Module Architecture | Accepted | §3.6 (Repository & Module Layout) |
 | **ADR-0003** | 2026-10-31 | Task Audit Ledger & Continuous Spec Checking | Accepted | §1.4.1 (FR-10, FR-13), §3.5.3 (Invariants), §4.11 |
 | **ADR-0004** | 2026-10-31 | Hash-Chained Audit Log Design (`hydra-audit`) | Accepted | §1.4.1 (FR-13), §2.6, §2.7.5, §3.4.1, §4.7.1 |
-| **ADR-0015** | 2026-11-01 | Phase 0 contract and approval gates | **Approved with amendments; parameters/consensus pick pending** | §1.3–1.4, §2.4–2.6, §3.5.3; W01–W08/W11/W12/W28 |
-| **ADR-0016** | 2026-11-01 | Phase 1 consensus candidate review | **Pending maintainer pick** | W01/W02/W05/W08; FR-07/08/13; NFR-01; INV-7 |
+| **ADR-0015** | 2026-11-01 | Phase 0 contract and approval gates | **Approved with amendments; audit/revocation parameters remain pending** | §1.3–1.4, §2.4–2.6, §3.5.3; W01–W08/W11/W12/W28 |
+| **ADR-0016** | 2026-11-01 | Phase 1 consensus candidate review | **External etcd 3.7.3 selected; implementation pending** | W01/W02/W05/W08; FR-07/08/13; NFR-01; INV-7 |
 
 ---
 
@@ -375,10 +375,14 @@ expiry/revocation.
   (recommended), or (b) require immediate-at-publication behavior with an additional
   enforceable fail-stop boundary. Do not silently relabel (a) as (b). All read/
   replication grants need bounds too; a producer lease alone is insufficient.
-- **Lease protocol:** choose duration, renewal margin and clock/pause/reboot safety
-  assumptions after the consensus candidate is picked. Persist outstanding grants
-  across metadata leader changes; the library's own leader lease does not implement
-  Kamish partition ownership. No numeric lease default is authorized here.
+- **Lease protocol:** the maintainer has approved the initial contract parameters
+  recorded in ADR-0016 and `docs/CONTRACT.md`: 10-second etcd lease TTL, renewal
+  every 3 seconds, 2-second local safety margin, and 1-second operation timeout.
+  These are conservative starting parameters, not proof of safety; clock-rate,
+  pause, restart, metadata leader-change, and in-flight append assumptions still
+  require explicit analysis and adversarial tests. Persist outstanding grants
+  across metadata leader changes; etcd's own leases do not by themselves implement
+  Kamish partition ownership.
 
 ### Why D7 is necessary
 
@@ -394,9 +398,11 @@ negative multi-region case, accompanied by positive registered-owner tests.
 
 ### Pending implementation choices
 
-- Maintained Rust Raft library or external service, persistence adapter, license,
-  maintenance evidence and exact dependency/image pins: present the comparison
-  and wait for the maintainer's pick before adoption.
+- **Consensus/metadata authority:** external etcd 3.7.3 has been selected by the
+  maintainer. Adoption remains pending review of the exact etcd client version,
+  transitive dependency graph, image/artifact digest, license notices, TLS
+  configuration, and integration tests. This decision does not claim those
+  checks are complete.
 - Audit signing-key provisioning, authorized metadata placement, checkpoint cadence
   and outage backlog/age budget: not chosen by inventing defaults.
 - Approved time-limited leases: clock/pause/restart and revocation rules require
@@ -420,7 +426,8 @@ have their recorded failures; NFR-01 and INV-2/INV-3 remain open.
 
 ## ADR-0016: Phase 1 consensus candidate review
 
-**Status:** Pending maintainer pick. **Reviewed:** 1 November 2026.
+**Status:** Decision selected; implementation and validation pending.
+**Reviewed:** 1 November 2026.
 
 The [candidate comparison](docs/CONSENSUS_CANDIDATES.md) records primary-source
 license, maintenance and integration evidence for:
@@ -440,9 +447,38 @@ selected, no third-party tests were run and no Kamish runtime/probe changed.
 Version/maintenance observations are dated; code/adapter correctness, artifact
 digests and transitive dependency review remain adoption work.
 
-**Decision request:** maintainer selects the candidate before implementation.
-Separately resolve ADR-0015's lease parameters, audit cap and revocation boundary.
-The order remains W01/W02/W05, then W08; payload quorum comes after Phase 1.
+### Decision
+
+The maintainer selected **external etcd 3.7.3** as Kamish's Phase 1 metadata
+authority. Do not migrate this work item to OpenRaft or raft-rs without a new
+explicit decision. etcd's transactions, durable KV state, and leases are building
+blocks; they do not independently prove the correctness of Kamish's application
+ownership protocol.
+
+### Initial lease parameters approved for implementation and testing
+
+| Parameter | Initial value | Required interpretation |
+| --- | ---: | --- |
+| etcd lease TTL | 10 seconds | Use an exact 10-second grant; do not silently convert an arbitrary millisecond duration by truncation. |
+| Renewal interval | 3 seconds | Schedule renewal from a monotonic clock and retain the existing deadline unless renewal is confirmed safely. |
+| Local safety margin | 2 seconds | Stop admitting new ownership-dependent writes at the conservative local deadline, before the etcd TTL can expire under the specified assumptions. |
+| etcd operation timeout | 1 second | Bound each grant/renewal/ownership-transition operation; a timeout is not evidence that a renewal committed. |
+
+The lease clock must be captured before the lease-grant/renewal request begins,
+or otherwise use a rigorously justified conservative lower bound on remaining
+lease time. The local deadline is not extended by a delayed response, retry,
+watch notification, wall-clock adjustment, or ambiguous RPC result.
+
+The 10/3/2/1-second values are approved initial parameters, not a completed safety
+argument. The implementation must document and test clock-rate assumptions,
+process pauses, restart behavior, etcd leader changes, lease-renewal ambiguity,
+and durable appends crossing the local deadline. If these assumptions cannot
+support the required fencing invariant, stop and return a design decision rather
+than weaken the invariant.
+
+The implementation order remains W01/W02/W05, then W08; payload quorum comes
+after Phase 1. Audit cap and global revocation effectiveness remain separate
+unresolved decisions.
 
 ---
 

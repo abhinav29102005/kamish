@@ -1,8 +1,10 @@
 # Kamish contract — approved Phase 0 amendments
 
 **Status: APPROVED WITH AMENDMENTS — 1 November 2026.** Implementation is pending.
-Consensus selection, lease timing and the audit/revocation parameters explicitly
-identified below remain decision gates; no candidate has been selected.
+External etcd 3.7.3 is selected as the Phase 1 metadata authority. Initial lease
+parameters are approved as a starting contract: 10-second TTL, renewal every
+3 seconds, 2-second local safety margin, and 1-second operation timeout. Audit
+cap and global revocation parameters remain decision gates.
 Baseline revision: `77bb051bfa77e6be80e8d8e5f4ea3cd4dad9eba2`.
 
 This is an approved implementation direction, not a description of completed
@@ -130,9 +132,10 @@ Required lease semantics and evidence:
    lease/fencing protocol, not just a numerically higher epoch. Leader kill,
    quorum loss, delayed renewal, pause/clock error and restart tests must exercise
    actual application grants; a library's internal leader lease is insufficient.
-5. Specify grant duration, renewal lead time, clock/drift/pause bounds and safe
-   expiry across metadata leader changes before implementation. These are
-   unresolved safety parameters, not defaults inferred from the current code.
+5. Use the approved initial timing parameters in §2.3.2 below. They are starting
+   values for implementation and adversarial validation, not proof that the
+   timing model is safe. Document clock-rate, pause, reboot, leader-change and
+   in-flight append assumptions before claiming the ownership/fencing invariant.
 
 Payload commit follows the chosen data-durability protocol under that lease.
 An ACK already sent before expiry/revocation may arrive later; delivery time is
@@ -165,6 +168,54 @@ timestamps:
 4. **Reboot Invalidation**: Monotonic timestamps are process-local and cannot be
    restored across a host or broker restart. Upon restart, all cached leases are
    treated as expired until explicitly renewed or re-granted by the metadata quorum.
+
+### 2.3.2 Initial Lease Timing Parameters (Approved Starting Contract)
+
+The following values are the maintainer-approved starting parameters for the
+external etcd 3.7.3 implementation. They must be represented explicitly in
+configuration/constants and covered by deterministic-clock and integration tests.
+
+| Parameter | Initial value | Normative behavior |
+| --- | ---: | --- |
+| etcd lease TTL | 10 seconds | Grant a 10-second etcd lease. The local protocol must not assume a longer TTL. |
+| Renewal interval | 3 seconds | Attempt renewal on a monotonic schedule, well before the conservative local deadline. |
+| Local safety margin | 2 seconds | Subtract this margin from the conservative lease window; reject new ownership-dependent work after the resulting deadline. |
+| Operation timeout | 1 second | Bound each grant, renewal, and ownership-transition RPC. A timeout or transport error leaves the outcome potentially ambiguous and must not extend local validity. |
+
+#### Deadline calculation and expiry
+
+1. Capture a monotonic timestamp before starting the grant/renewal RPC. Use that
+   timestamp as the conservative start of the lease window, unless an equally
+   conservative, tested lower bound on remaining lease time is available.
+2. Calculate the local deadline no later than
+   `request_start_monotonic + 10 seconds - 2 seconds`. Do not start the full TTL
+   at response receipt, because network transit and server processing have
+   already consumed part of the lease.
+3. Schedule renewal every 3 seconds. A renewal only creates a new local deadline
+   after the implementation has evidence that the renewal succeeded and has
+   calculated a conservative deadline for the renewed lease. Failed, delayed or
+   ambiguous renewal must not extend the existing deadline.
+4. The 1-second operation timeout bounds a single operation; it does not imply
+   that every etcd client keepalive stream has a one-second lifetime. The adapter
+   must specify how it applies the timeout to individual renewal attempts.
+5. Use an exact integral-second etcd TTL for this initial contract. Reject
+   unsupported fractional-second configuration rather than silently truncating
+   milliseconds. The persisted `duration_ms`, etcd TTL, and local deadline must
+   describe the same or a more conservative validity interval.
+6. Wall-clock timestamps are diagnostic only and must never extend local lease
+   validity. Process restart invalidates the monotonic deadline; reacquisition
+   must follow the approved ownership protocol.
+
+#### Safety boundary that remains to be proven
+
+These values are not a standalone proof of safe ownership transfer. Before
+claiming the fencing invariant closed, tests and the design review must address
+clock-rate error, long process/thread pauses, metadata leader changes, lease
+renewal ambiguity, and a durable append or `fsync` that crosses the conservative
+lease deadline. A pre-append check and post-append check alone do not prove that
+an expired owner cannot leave a durable record behind. If the existing storage
+protocol cannot meet the contract, stop for a design decision; do not weaken the
+invariant or report the gap as closed.
 
 ## 3. Acknowledgment contract (W03/W04/W17/W18)
 
