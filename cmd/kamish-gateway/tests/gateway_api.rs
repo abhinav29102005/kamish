@@ -352,11 +352,8 @@ async fn test_real_telemetry_endpoints() {
     assert_eq!(res.status(), StatusCode::OK);
     let json = response_json(res).await;
     assert_eq!(json["active_region"], "EU_WEST");
-    assert_eq!(
-        json["authority_type"],
-        "LOCAL (in-memory; quorum requires etcd)"
-    );
-    assert_eq!(json["consensus_backing"], "LOCAL_IN_MEMORY");
+    assert_eq!(json["authority_type"], "LOCAL_PERSISTENT_STORAGE");
+    assert_eq!(json["consensus_backing"], "LOCAL_FSYNC");
     assert_eq!(json["quorum_backed"], false);
 
     // 4. /api/policy

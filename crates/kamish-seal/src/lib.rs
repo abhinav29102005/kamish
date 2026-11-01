@@ -466,3 +466,177 @@ impl SealEngine {
 
 // Preserve backwards compatibility type alias for existing codebase references
 pub type RegionalKeyService = DevKeyProvider;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_dev_provider() -> DevKeyProvider {
+        let provider = DevKeyProvider::new("us-east-1");
+        provider.provision_key("test-key-1", 1, [0x42u8; 32]);
+        provider.provision_key("test-key-1", 2, [0x43u8; 32]);
+        provider
+    }
+
+    #[test]
+    fn test_chacha20_poly1305_round_trip() {
+        let provider = setup_dev_provider();
+        let payload = b"critical financial transaction record";
+        let envelope = AeadSealEngine::seal(
+            payload,
+            AeadAlgorithm::ChaCha20Poly1305,
+            "orders",
+            0,
+            1,
+            100,
+            "test-key-1",
+            1,
+            &provider,
+        )
+        .expect("sealing failed");
+
+        assert_eq!(envelope.algorithm, AeadAlgorithm::ChaCha20Poly1305);
+        assert_ne!(envelope.ciphertext, payload);
+
+        let decrypted = AeadSealEngine::unseal(&envelope, "us-east-1", &provider)
+            .expect("unsealing failed");
+        assert_eq!(decrypted, payload);
+    }
+
+    #[test]
+    fn test_aes256_gcm_round_trip() {
+        let provider = setup_dev_provider();
+        let payload = b"classified intelligence payload";
+        let envelope = AeadSealEngine::seal(
+            payload,
+            AeadAlgorithm::Aes256Gcm,
+            "telemetry",
+            2,
+            5,
+            200,
+            "test-key-1",
+            2,
+            &provider,
+        )
+        .expect("sealing failed");
+
+        assert_eq!(envelope.algorithm, AeadAlgorithm::Aes256Gcm);
+        assert_ne!(envelope.ciphertext, payload);
+
+        let decrypted = AeadSealEngine::unseal(&envelope, "us-east-1", &provider)
+            .expect("unsealing failed");
+        assert_eq!(decrypted, payload);
+    }
+
+    #[test]
+    fn test_tenant_aad_binding_and_tampering() {
+        let provider = setup_dev_provider();
+        let payload = b"multi-tenant data record";
+
+        let envelope = AeadSealEngine::seal_with_tenant(
+            payload,
+            AeadAlgorithm::ChaCha20Poly1305,
+            Some("tenant-acme"),
+            "events",
+            0,
+            1,
+            1,
+            "test-key-1",
+            1,
+            &provider,
+        )
+        .expect("seal failed");
+
+        // Legitimate unseal with matching tenant
+        let decrypted = AeadSealEngine::unseal(&envelope, "us-east-1", &provider)
+            .expect("unseal failed");
+        assert_eq!(decrypted, payload);
+
+        // Tamper tenant in envelope
+        let mut tampered = envelope.clone();
+        tampered.tenant = Some("tenant-evil".to_string());
+        assert!(matches!(
+            AeadSealEngine::unseal(&tampered, "us-east-1", &provider),
+            Err(SealError::DecryptionFailed)
+        ));
+
+        // Tamper topic
+        let mut tampered_topic = envelope.clone();
+        tampered_topic.topic = "tampered-topic".to_string();
+        assert!(matches!(
+            AeadSealEngine::unseal(&tampered_topic, "us-east-1", &provider),
+            Err(SealError::DecryptionFailed)
+        ));
+
+        // Tamper ciphertext
+        let mut tampered_ct = envelope.clone();
+        let last = tampered_ct.ciphertext.len() - 1;
+        tampered_ct.ciphertext[last] ^= 0x01;
+        assert!(matches!(
+            AeadSealEngine::unseal(&tampered_ct, "us-east-1", &provider),
+            Err(SealError::DecryptionFailed)
+        ));
+    }
+
+    #[test]
+    fn test_cross_border_key_access_denied() {
+        let provider = setup_dev_provider();
+        let payload = b"eu-data-sovereignty";
+        let envelope = AeadSealEngine::seal(
+            payload,
+            AeadAlgorithm::ChaCha20Poly1305,
+            "data",
+            0,
+            1,
+            1,
+            "test-key-1",
+            1,
+            &provider,
+        )
+        .unwrap();
+
+        // Attempt unseal from different region
+        let err = AeadSealEngine::unseal(&envelope, "eu-west-1", &provider)
+            .expect_err("should reject cross-border key access");
+        assert!(matches!(err, SealError::CrossBorderKeyAccessDenied { .. }));
+    }
+
+    #[test]
+    fn test_external_kms_boundary_fails_closed() {
+        let kms_config = ExternalKmsConfig {
+            provider_name: "aws-kms".to_string(),
+            endpoint_url: "https://kms.us-east-1.amazonaws.com".to_string(),
+            key_arn: "arn:aws:kms:us-east-1:123456789012:key/test".to_string(),
+            home_region: "us-east-1".to_string(),
+            key_version: 1,
+            timeout_ms: 5000,
+        };
+        let kms_provider = ExternalKmsProvider::new(kms_config);
+
+        // Fails closed safely when credentials/network KMS are unavailable
+        let res = kms_provider.get_key("arn:aws:kms:us-east-1:123456789012:key/test", 1, "us-east-1");
+        assert!(matches!(res, Err(SealError::KmsProviderError(_))));
+    }
+
+    #[test]
+    fn test_seal_engine_transform_modes() {
+        let provider = setup_dev_provider();
+        let payload = b"hello world";
+
+        // Cleartext
+        let ct = SealEngine::transform(payload, DestinationMode::Cleartext, "test-key-1", "us-east-1", &provider).unwrap();
+        assert_eq!(ct, payload);
+
+        // Deny
+        let denied = SealEngine::transform(payload, DestinationMode::Deny, "test-key-1", "us-east-1", &provider).unwrap();
+        assert!(denied.is_empty());
+
+        // SealedOnly
+        let sealed = SealEngine::transform(payload, DestinationMode::SealedOnly, "test-key-1", "us-east-1", &provider).unwrap();
+        assert_ne!(sealed, payload);
+
+        let unsealed = SealEngine::unseal(&sealed, "us-east-1", &provider).unwrap();
+        assert_eq!(unsealed, payload);
+    }
+}
+

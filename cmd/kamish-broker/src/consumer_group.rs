@@ -501,3 +501,283 @@ pub fn spawn_consumer_group_sweeper_worker(
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_join_group_and_rebalance() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let coordinator = ConsumerGroupCoordinator::new(temp_dir.path());
+
+        let mut topic_counts = HashMap::new();
+        topic_counts.insert("events".to_string(), 4);
+
+        // Member 1 joins
+        let res1 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-alpha".to_string(),
+                    member_id: None,
+                    client_id: "client-1".to_string(),
+                    client_host: Some("127.0.0.1".to_string()),
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["events".to_string()],
+                },
+                &topic_counts,
+            )
+            .expect("member 1 join failed");
+
+        assert_eq!(res1.generation_id, 1);
+        assert_eq!(
+            res1.assigned_partitions.get("events").cloned().unwrap(),
+            vec![0, 1, 2, 3]
+        );
+
+        // Member 2 joins
+        let res2 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-alpha".to_string(),
+                    member_id: None,
+                    client_id: "client-2".to_string(),
+                    client_host: Some("127.0.0.1".to_string()),
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["events".to_string()],
+                },
+                &topic_counts,
+            )
+            .expect("member 2 join failed");
+
+        assert_eq!(res2.generation_id, 2);
+
+        // After rebalance, check description
+        let desc = coordinator.describe_group("grp-alpha").expect("group missing");
+        assert_eq!(desc.generation_id, 2);
+        assert_eq!(desc.members.len(), 2);
+
+        let parts1 = &desc.members[&res1.member_id].assigned_partitions["events"];
+        let parts2 = &desc.members[&res2.member_id].assigned_partitions["events"];
+        assert_eq!(parts1.len() + parts2.len(), 4);
+    }
+
+    #[test]
+    fn test_heartbeat_generation_fencing() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let coordinator = ConsumerGroupCoordinator::new(temp_dir.path());
+
+        let mut topic_counts = HashMap::new();
+        topic_counts.insert("telemetry".to_string(), 2);
+
+        let res1 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-beta".to_string(),
+                    member_id: None,
+                    client_id: "client-1".to_string(),
+                    client_host: None,
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["telemetry".to_string()],
+                },
+                &topic_counts,
+            )
+            .unwrap();
+
+        // Valid heartbeat
+        let hb = coordinator.heartbeat(HeartbeatGroupRequest {
+            group_id: "grp-beta".to_string(),
+            member_id: res1.member_id.clone(),
+            generation_id: res1.generation_id,
+        });
+        assert!(hb.is_ok());
+
+        // Stale generation heartbeat rejected
+        let stale_hb = coordinator.heartbeat(HeartbeatGroupRequest {
+            group_id: "grp-beta".to_string(),
+            member_id: res1.member_id,
+            generation_id: res1.generation_id + 1,
+        });
+        assert!(matches!(stale_hb, Err(BrokerError::EpochFenced { .. })));
+    }
+
+    #[test]
+    fn test_partition_commit_ownership_enforcement() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let coordinator = ConsumerGroupCoordinator::new(temp_dir.path());
+
+        let mut topic_counts = HashMap::new();
+        topic_counts.insert("orders".to_string(), 2);
+
+        let res1 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-gamma".to_string(),
+                    member_id: None,
+                    client_id: "c1".to_string(),
+                    client_host: None,
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["orders".to_string()],
+                },
+                &topic_counts,
+            )
+            .unwrap();
+
+        let res2 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-gamma".to_string(),
+                    member_id: None,
+                    client_id: "c2".to_string(),
+                    client_host: None,
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["orders".to_string()],
+                },
+                &topic_counts,
+            )
+            .unwrap();
+
+        let desc = coordinator.describe_group("grp-gamma").unwrap();
+        let c1_parts = &desc.members[&res1.member_id].assigned_partitions["orders"];
+        let c2_parts = &desc.members[&res2.member_id].assigned_partitions["orders"];
+
+        let c1_owned = c1_parts[0];
+        let c2_owned = c2_parts[0];
+        assert_ne!(c1_owned, c2_owned);
+
+        // c1 committing its own partition succeeds
+        assert!(coordinator
+            .validate_partition_commit(
+                "grp-gamma",
+                Some(&res1.member_id),
+                Some(desc.generation_id),
+                "orders",
+                Some(c1_owned)
+            )
+            .is_ok());
+
+        // c1 committing c2's partition fails with PolicyDenied
+        let err = coordinator
+            .validate_partition_commit(
+                "grp-gamma",
+                Some(&res1.member_id),
+                Some(desc.generation_id),
+                "orders",
+                Some(c2_owned)
+            )
+            .unwrap_err();
+        assert!(matches!(err, BrokerError::PolicyDenied(_)));
+
+        // Commit with wrong generation fails with EpochFenced
+        let err_gen = coordinator
+            .validate_partition_commit(
+                "grp-gamma",
+                Some(&res1.member_id),
+                Some(desc.generation_id - 1),
+                "orders",
+                Some(c1_owned)
+            )
+            .unwrap_err();
+        assert!(matches!(err_gen, BrokerError::EpochFenced { .. }));
+    }
+
+    #[test]
+    fn test_leave_group_and_rebalance() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let coordinator = ConsumerGroupCoordinator::new(temp_dir.path());
+
+        let mut topic_counts = HashMap::new();
+        topic_counts.insert("events".to_string(), 2);
+
+        let res1 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-delta".to_string(),
+                    member_id: None,
+                    client_id: "c1".to_string(),
+                    client_host: None,
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["events".to_string()],
+                },
+                &topic_counts,
+            )
+            .unwrap();
+
+        let res2 = coordinator
+            .join_group(
+                JoinGroupRequest {
+                    group_id: "grp-delta".to_string(),
+                    member_id: None,
+                    client_id: "c2".to_string(),
+                    client_host: None,
+                    session_timeout_ms: 10_000,
+                                        protocol_type: "consumer".to_string(),
+                    subscribed_topics: vec!["events".to_string()],
+                },
+                &topic_counts,
+            )
+            .unwrap();
+
+        assert_eq!(res2.generation_id, 2);
+
+        // c2 leaves
+        let leave_res = coordinator
+            .leave_group(
+                LeaveGroupRequest {
+                    group_id: "grp-delta".to_string(),
+                    member_id: res2.member_id,
+                },
+                &topic_counts,
+            )
+            .unwrap();
+        assert_eq!(leave_res.status, "LEFT");
+
+        let desc = coordinator.describe_group("grp-delta").unwrap();
+        assert_eq!(desc.generation_id, 3);
+        assert_eq!(desc.members.len(), 1);
+        assert_eq!(
+            desc.members[&res1.member_id].assigned_partitions["events"],
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn test_group_persistence_and_reload() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut topic_counts = HashMap::new();
+        topic_counts.insert("events".to_string(), 2);
+
+        let member_id = {
+            let coordinator = ConsumerGroupCoordinator::new(temp_dir.path());
+            let res = coordinator
+                .join_group(
+                    JoinGroupRequest {
+                        group_id: "grp-persist".to_string(),
+                        member_id: None,
+                        client_id: "c1".to_string(),
+                        client_host: None,
+                        session_timeout_ms: 10_000,
+                                                protocol_type: "consumer".to_string(),
+                        subscribed_topics: vec!["events".to_string()],
+                    },
+                    &topic_counts,
+                )
+                .unwrap();
+            res.member_id
+        };
+
+        // Reopen coordinator from the same data_dir
+        let reloaded = ConsumerGroupCoordinator::new(temp_dir.path());
+        let desc = reloaded.describe_group("grp-persist").expect("group should persist");
+        assert_eq!(desc.generation_id, 1);
+        assert!(desc.members.contains_key(&member_id));
+        assert_eq!(desc.members[&member_id].assigned_partitions["events"], vec![0, 1]);
+    }
+}
+
