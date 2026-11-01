@@ -912,9 +912,7 @@ async fn list_consumer_groups_handler(
     }))
 }
 
-async fn retention_status_handler(
-    State(state): State<GatewayState>,
-) -> Json<serde_json::Value> {
+async fn retention_status_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
     let m = state.broker.retention.metrics();
     Json(serde_json::json!({
         "status": "OK",
