@@ -265,7 +265,7 @@ export default function DashboardPage({ onNavigate }) {
               }}
             >
               {isLiveMode
-                ? `LIVE PRODUCE RATE: ${liveThroughputEps === null ? 'N/A (waiting for counter samples)' : `${liveThroughputEps.toFixed(1)} PRODUCE/S`}`
+                ? `LIVE PRODUCE RATE: ${liveThroughputEps === null ? 'N/A (waiting for counter samples)' : `${liveThroughputEps.toFixed(1)} PRODUCE REQUESTS/S`}`
                 : `SIMULATED THROUGHPUT (${(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)`}
             </div>
             <span
