@@ -1,12 +1,12 @@
 use clap::Parser;
 use kamish_audit::AuditLog;
-use kamish_broker::{BrokerConfig, BrokerServer};
+use kamish_broker::{BrokerConfig, BrokerServer, build_server_config};
 use kamish_enforce::Enforcer;
 use kamish_meta::MetadataStore;
-use kamish_policy::PolicyCache;
+use kamish_policy::{PolicyCache, load_trusted_keys_from_file, load_verified_policy_from_file};
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Parser, Debug)]
 #[command(name = "kamish-broker", about = "Kamish Regional Broker Daemon")]
@@ -29,6 +29,18 @@ struct Args {
 
     #[arg(long, value_delimiter = ',')]
     peers: Vec<String>,
+
+    /// Path to signed policy JSON file to verify and load at startup (W11)
+    #[arg(long)]
+    policy: Option<String>,
+
+    /// Path to trusted public keys file (W11)
+    #[arg(long)]
+    trusted_keys: Option<String>,
+
+    /// Minimum durable policy version floor (W11)
+    #[arg(long)]
+    policy_floor: Option<u64>,
 }
 
 #[tokio::main]
@@ -36,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    let config = if let Some(config_path) = args.config {
+    let mut config = if let Some(config_path) = args.config {
         info!(path = %config_path, "Loading broker configuration from file");
         BrokerConfig::from_file(&config_path)?
     } else {
@@ -49,8 +61,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             limits: Default::default(),
             metadata_endpoints: Vec::new(),
             tls: None,
+            topics: Vec::new(),
+            policy_path: args.policy.clone(),
+            trusted_keys_path: args.trusted_keys.clone(),
+            policy_version_floor: args.policy_floor,
         }
     };
+
+    if args.policy.is_some() {
+        config.policy_path = args.policy;
+    }
+    if args.trusted_keys.is_some() {
+        config.trusted_keys_path = args.trusted_keys;
+    }
+    if args.policy_floor.is_some() {
+        config.policy_version_floor = args.policy_floor;
+    }
 
     info!(
         region = %config.region,
@@ -62,11 +88,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     std::fs::create_dir_all(&config.data_dir)?;
+
+    // 1. Durable policy version floor persistence (W11)
+    let floor_file_path = std::path::Path::new(&config.data_dir).join("policy_floor.txt");
+    let mut floor: u64 = if floor_file_path.exists() {
+        let content = std::fs::read_to_string(&floor_file_path)?;
+        content.trim().parse().unwrap_or(0)
+    } else {
+        0
+    };
+    if let Some(cfg_floor) = config.policy_version_floor {
+        floor = std::cmp::max(floor, cfg_floor);
+    }
+    std::fs::write(&floor_file_path, floor.to_string())?;
+
+    // 2. Load and verify trusted keys & policy at boot (W11)
+    let trusted_keys = if let Some(ref keys_path) = config.trusted_keys_path {
+        info!(path = %keys_path, "Loading trusted policy signing keys");
+        load_trusted_keys_from_file(keys_path)?
+    } else {
+        HashSet::new()
+    };
+
+    let mut cache = PolicyCache::new(trusted_keys.clone()).with_version_floor(floor);
+
+    let now_sec = chrono::Utc::now().timestamp();
+    if let Some(ref policy_path) = config.policy_path {
+        info!(path = %policy_path, floor = floor, "Verifying and loading startup sovereignty policy (W11)");
+        let signed_policy =
+            load_verified_policy_from_file(policy_path, &trusted_keys, floor, now_sec)?;
+        let policy_ver = signed_policy.policy.version;
+        cache.update(signed_policy, now_sec)?;
+        if policy_ver > floor {
+            floor = policy_ver;
+            std::fs::write(&floor_file_path, floor.to_string())?;
+        }
+        info!(
+            version = policy_ver,
+            "Verified policy successfully installed into daemon cache"
+        );
+    }
+
+    let policy_cache = Arc::new(RwLock::new(cache));
     let audit_log = AuditLog::open(format!("{}/audit.log", config.data_dir))?;
-    let policy_cache = Arc::new(RwLock::new(PolicyCache::new(HashSet::new())));
     let enforcer = Arc::new(Enforcer::new(&config.region, policy_cache, audit_log));
     let meta = Arc::new(MetadataStore::new());
 
+    let catalog = config.build_catalog();
     let broker = Arc::new(
         BrokerServer::try_new(
             &config.region,
@@ -75,16 +143,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.peers,
             &config.data_dir,
         )?
-        .with_limits(config.limits),
+        .with_limits(config.limits)
+        .with_catalog(catalog),
     );
 
     let bind_addr = format!("{}:{}", config.host, config.port);
-    let (addr, server_task) = broker.start_tcp_listener(&bind_addr).await?;
+    let (addr, server_task) = if let Some(ref tls_cfg) = config.tls {
+        info!(
+            cert = %tls_cfg.cert_path,
+            ca = %tls_cfg.ca_cert_path,
+            require_client_auth = tls_cfg.require_client_auth,
+            "Starting TLS 1.3 mTLS listener (W09)"
+        );
+        let cert_pem = std::fs::read(&tls_cfg.cert_path)?;
+        let key_pem = std::fs::read(&tls_cfg.key_path)?;
+        let ca_pem = std::fs::read(&tls_cfg.ca_cert_path)?;
+        let server_tls_config = build_server_config(
+            &cert_pem,
+            &key_pem,
+            Some(&ca_pem),
+            tls_cfg.require_client_auth,
+        )?;
+        let acceptor = tokio_rustls::TlsAcceptor::from(server_tls_config);
+        broker.start_tls_listener(&bind_addr, acceptor).await?
+    } else {
+        broker.start_tcp_listener(&bind_addr).await?
+    };
 
     info!(
         region = %config.region,
         listen_addr = %addr,
-        "Kamish broker async framed TCP listener active and serving requests."
+        "Kamish broker active and serving requests."
     );
 
     // Wait for shutdown signal
@@ -94,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         res = server_task => {
             if let Err(e) = res {
-                tracing::error!(error = %e, "Broker listener task aborted");
+                error!(error = %e, "Broker listener task aborted");
             }
         }
     }

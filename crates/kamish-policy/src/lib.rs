@@ -38,6 +38,18 @@ pub enum PolicyError {
     )]
     VersionRollback { cached: u64, received: u64 },
 
+    #[error("Policy version {received} is below durable floor {floor}")]
+    VersionBelowFloor { floor: u64, received: u64 },
+
+    #[error("Key '{0}' has been revoked and cannot sign policies")]
+    KeyRevoked(String),
+
+    #[error("Authorizer key '{0}' is not in trusted authorizers list")]
+    UntrustedAuthorizer(String),
+
+    #[error("I/O error: {0}")]
+    Io(String),
+
     #[error("Class '{0}' not found in policy")]
     ClassNotFound(String),
 }
@@ -230,12 +242,95 @@ impl SignedPolicy {
     }
 }
 
-/// Regional policy cache maintaining the latest verified policy and staleness boundaries (§3.3.3).
-#[derive(Clone)]
+/// Notice declaring cryptographic revocation of a signing key (W12).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeyRevocationNotice {
+    pub format_version: u32,
+    pub revoked_key_hex: String,
+    pub reason: String,
+    pub revoked_at_sec: i64,
+    pub authorizer_pubkey_hex: String,
+}
+
+impl KeyRevocationNotice {
+    pub fn new(
+        revoked_key_hex: impl Into<String>,
+        reason: impl Into<String>,
+        revoked_at_sec: i64,
+        authorizer_pubkey_hex: impl Into<String>,
+    ) -> Self {
+        Self {
+            format_version: 1,
+            revoked_key_hex: revoked_key_hex.into(),
+            reason: reason.into(),
+            revoked_at_sec,
+            authorizer_pubkey_hex: authorizer_pubkey_hex.into(),
+        }
+    }
+
+    pub fn canonical_digest(&self) -> Vec<u8> {
+        let mut hasher = Sha256::new();
+        hasher.update(b"kamish-key-revocation-v1\n");
+        hasher.update(self.format_version.to_be_bytes());
+        hasher.update(self.revoked_key_hex.as_bytes());
+        hasher.update(self.reason.as_bytes());
+        hasher.update(self.revoked_at_sec.to_be_bytes());
+        hasher.update(self.authorizer_pubkey_hex.as_bytes());
+        hasher.finalize().to_vec()
+    }
+}
+
+/// Cryptographically signed key revocation statement (W12).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignedKeyRevocation {
+    pub notice: KeyRevocationNotice,
+    pub signature_hex: String,
+}
+
+impl SignedKeyRevocation {
+    pub fn sign(notice: KeyRevocationNotice, signing_key: &SigningKey) -> Self {
+        let digest = notice.canonical_digest();
+        let sig = signing_key.sign(&digest);
+        Self {
+            notice,
+            signature_hex: hex::encode(sig.to_bytes()),
+        }
+    }
+
+    pub fn verify_signature(&self) -> Result<(), PolicyError> {
+        let pubkey_bytes = hex::decode(&self.notice.authorizer_pubkey_hex).map_err(|e| {
+            PolicyError::SignatureError(format!("Invalid authorizer pubkey hex: {}", e))
+        })?;
+        let pubkey_arr: [u8; 32] = pubkey_bytes
+            .try_into()
+            .map_err(|_| PolicyError::SignatureError("Authorizer key must be 32 bytes".into()))?;
+        let verifying_key = VerifyingKey::from_bytes(&pubkey_arr)
+            .map_err(|e| PolicyError::SignatureError(format!("Invalid verifying key: {}", e)))?;
+
+        let sig_bytes = hex::decode(&self.signature_hex)
+            .map_err(|e| PolicyError::SignatureError(format!("Invalid signature hex: {}", e)))?;
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| PolicyError::SignatureError("Signature must be 64 bytes".into()))?;
+        let signature = Signature::from_bytes(&sig_arr);
+
+        let digest = self.notice.canonical_digest();
+        verifying_key.verify(&digest, &signature).map_err(|e| {
+            PolicyError::SignatureError(format!("Revocation signature verification failed: {}", e))
+        })
+    }
+}
+
+/// Regional policy cache maintaining the latest verified policy, durable version floor,
+/// and trusted key lifecycle with revocation tracking (W11 / W12 / §3.3.3).
+#[derive(Clone, Debug)]
 pub struct PolicyCache {
     current: Option<SignedPolicy>,
     highest_seen_version: u64,
+    policy_version_floor: u64,
     trusted_issuer_pubkeys: HashSet<String>,
+    trusted_authorizer_pubkeys: HashSet<String>,
+    revoked_keys: HashSet<String>,
 }
 
 impl PolicyCache {
@@ -243,12 +338,124 @@ impl PolicyCache {
         Self {
             current: None,
             highest_seen_version: 0,
+            policy_version_floor: 0,
+            trusted_authorizer_pubkeys: trusted_issuer_pubkeys.clone(),
             trusted_issuer_pubkeys,
+            revoked_keys: HashSet::new(),
         }
     }
 
-    /// Updates cache with a new policy, enforcing INV-9 (signature valid, issuer trusted, version monotonic).
+    pub fn with_authorizers(mut self, authorizers: HashSet<String>) -> Self {
+        self.trusted_authorizer_pubkeys = authorizers;
+        self
+    }
+
+    pub fn with_version_floor(mut self, floor: u64) -> Self {
+        self.policy_version_floor = floor;
+        if self.highest_seen_version < floor {
+            self.highest_seen_version = floor;
+        }
+        self
+    }
+
+    pub fn set_version_floor(&mut self, floor: u64) {
+        if floor > self.policy_version_floor {
+            self.policy_version_floor = floor;
+        }
+        if self.highest_seen_version < floor {
+            self.highest_seen_version = floor;
+        }
+        if let Some(ref cur) = self.current
+            && cur.policy.version < floor
+        {
+            self.current = None;
+        }
+    }
+
+    pub fn version_floor(&self) -> u64 {
+        self.policy_version_floor
+    }
+
+    pub fn is_key_revoked(&self, pubkey_hex: &str) -> bool {
+        self.revoked_keys.contains(pubkey_hex)
+    }
+
+    pub fn revoked_keys(&self) -> &HashSet<String> {
+        &self.revoked_keys
+    }
+
+    pub fn trusted_issuer_pubkeys(&self) -> &HashSet<String> {
+        &self.trusted_issuer_pubkeys
+    }
+
+    pub fn add_trusted_key(&mut self, pubkey_hex: String) {
+        self.revoked_keys.remove(&pubkey_hex);
+        self.trusted_issuer_pubkeys.insert(pubkey_hex);
+    }
+
+    /// Process a signed key revocation notice (W12).
+    pub fn revoke_key(
+        &mut self,
+        revocation: SignedKeyRevocation,
+        _now_sec: i64,
+    ) -> Result<(), PolicyError> {
+        revocation.verify_signature()?;
+
+        if self
+            .revoked_keys
+            .contains(&revocation.notice.authorizer_pubkey_hex)
+        {
+            return Err(PolicyError::KeyRevoked(format!(
+                "Revocation authorizer {} is itself revoked",
+                revocation.notice.authorizer_pubkey_hex
+            )));
+        }
+
+        if !self
+            .trusted_authorizer_pubkeys
+            .contains(&revocation.notice.authorizer_pubkey_hex)
+        {
+            return Err(PolicyError::UntrustedAuthorizer(
+                revocation.notice.authorizer_pubkey_hex.clone(),
+            ));
+        }
+
+        let key_to_revoke = revocation.notice.revoked_key_hex.clone();
+        self.trusted_issuer_pubkeys.remove(&key_to_revoke);
+        self.revoked_keys.insert(key_to_revoke.clone());
+
+        // Invalidate active policy if signed by the newly revoked key
+        if let Some(ref cur) = self.current
+            && cur.policy.issuer_pubkey_hex == key_to_revoke
+        {
+            self.current = None;
+        }
+        Ok(())
+    }
+
+    /// Key rotation helper: installs new key and optionally revokes the retired key (W12).
+    pub fn rotate_key(
+        &mut self,
+        new_key_hex: String,
+        old_revocation: Option<SignedKeyRevocation>,
+        now_sec: i64,
+    ) -> Result<(), PolicyError> {
+        self.add_trusted_key(new_key_hex);
+        if let Some(revocation) = old_revocation {
+            self.revoke_key(revocation, now_sec)?;
+        }
+        Ok(())
+    }
+
+    /// Updates cache with a new policy, enforcing INV-9 (signature valid, issuer trusted, version monotonic, floor honored).
     pub fn update(&mut self, signed: SignedPolicy, now_sec: i64) -> Result<(), PolicyError> {
+        // 0. Verify issuer is not revoked (W12)
+        if self.revoked_keys.contains(&signed.policy.issuer_pubkey_hex) {
+            return Err(PolicyError::KeyRevoked(
+                signed.policy.issuer_pubkey_hex.clone(),
+            ));
+        }
+
         // 1. Verify issuer is trusted
         if !self
             .trusted_issuer_pubkeys
@@ -273,7 +480,15 @@ impl PolicyCache {
             }
         }
 
-        // 3. Version rollback prevention (INV-9, §3.3.3)
+        // 3. Durable policy version floor check (W11)
+        if signed.policy.version < self.policy_version_floor {
+            return Err(PolicyError::VersionBelowFloor {
+                floor: self.policy_version_floor,
+                received: signed.policy.version,
+            });
+        }
+
+        // 4. Version rollback prevention (INV-9, §3.3.3)
         if signed.policy.version < self.highest_seen_version {
             return Err(PolicyError::VersionRollback {
                 cached: self.highest_seen_version,
@@ -281,7 +496,7 @@ impl PolicyCache {
             });
         }
 
-        // 4. Freshness check
+        // 5. Freshness check
         if !signed.is_fresh(now_sec) {
             return Err(PolicyError::PolicyStale {
                 now_sec,
@@ -301,6 +516,62 @@ impl PolicyCache {
     pub fn highest_seen_version(&self) -> u64 {
         self.highest_seen_version
     }
+}
+
+/// Load trusted public keys from a JSON or line-separated file (W11).
+pub fn load_trusted_keys_from_file<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<HashSet<String>, PolicyError> {
+    let content = std::fs::read_to_string(path.as_ref())
+        .map_err(|e| PolicyError::Io(format!("Failed to read trusted keys file: {}", e)))?;
+    let content_trimmed = content.trim();
+    if content_trimmed.starts_with('[') {
+        let keys: Vec<String> = serde_json::from_str(content_trimmed)?;
+        Ok(keys.into_iter().collect())
+    } else {
+        let keys: HashSet<String> = content
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect();
+        Ok(keys)
+    }
+}
+
+/// Load and cryptographically verify policy from a file against trusted keys and durable version floor (W11).
+pub fn load_verified_policy_from_file<P: AsRef<std::path::Path>>(
+    policy_path: P,
+    trusted_keys: &HashSet<String>,
+    version_floor: u64,
+    now_sec: i64,
+) -> Result<SignedPolicy, PolicyError> {
+    let content = std::fs::read_to_string(policy_path.as_ref())
+        .map_err(|e| PolicyError::Io(format!("Failed to read policy file: {}", e)))?;
+    let signed: SignedPolicy = serde_json::from_str(&content)?;
+
+    if !trusted_keys.contains(&signed.policy.issuer_pubkey_hex) {
+        return Err(PolicyError::SignatureError(
+            "Untrusted policy issuer".into(),
+        ));
+    }
+
+    signed.verify_signature()?;
+
+    if signed.policy.version < version_floor {
+        return Err(PolicyError::VersionBelowFloor {
+            floor: version_floor,
+            received: signed.policy.version,
+        });
+    }
+
+    if !signed.is_fresh(now_sec) {
+        return Err(PolicyError::PolicyStale {
+            now_sec,
+            expiry_sec: signed.expires_at().unwrap_or(signed.policy.issued_at_sec),
+        });
+    }
+
+    Ok(signed)
 }
 
 #[cfg(test)]
@@ -390,5 +661,178 @@ mod tests {
         let signed_v1 = SignedPolicy::sign(doc_v1, &signing_key);
         let err = cache.update(signed_v1, 1100).unwrap_err();
         assert!(matches!(err, PolicyError::VersionRollback { .. }));
+    }
+
+    #[test]
+    fn test_durable_policy_version_floor() {
+        let (signing_key, verifying_key) = make_test_keys();
+        let pubkey_hex = hex::encode(verifying_key.to_bytes());
+
+        let mut trusted = HashSet::new();
+        trusted.insert(pubkey_hex.clone());
+
+        // Cache initialized with a durable floor of 10 (W11)
+        let mut cache = PolicyCache::new(trusted).with_version_floor(10);
+        assert_eq!(cache.version_floor(), 10);
+
+        // Attempting to install version 5 must fail with VersionBelowFloor
+        let doc_v5 = PolicyDocument {
+            policy_id: "pol-1".to_string(),
+            version: 5,
+            issued_at_sec: 1000,
+            ttl_seconds: 3600,
+            issuer_pubkey_hex: pubkey_hex.clone(),
+            classes: HashMap::new(),
+            transit_rules: HashMap::new(),
+        };
+        let signed_v5 = SignedPolicy::sign(doc_v5, &signing_key);
+        let err = cache.update(signed_v5, 1100).unwrap_err();
+        assert!(matches!(
+            err,
+            PolicyError::VersionBelowFloor {
+                floor: 10,
+                received: 5
+            }
+        ));
+
+        // Version 10 or higher must succeed
+        let doc_v10 = PolicyDocument {
+            policy_id: "pol-1".to_string(),
+            version: 10,
+            issued_at_sec: 1000,
+            ttl_seconds: 3600,
+            issuer_pubkey_hex: pubkey_hex.clone(),
+            classes: HashMap::new(),
+            transit_rules: HashMap::new(),
+        };
+        let signed_v10 = SignedPolicy::sign(doc_v10, &signing_key);
+        assert!(cache.update(signed_v10, 1100).is_ok());
+
+        // Advancing floor evicts lower versions
+        cache.set_version_floor(15);
+        assert!(cache.current().is_none());
+    }
+
+    #[test]
+    fn test_key_revocation_and_rotation_protocol() {
+        let (auth_sk, auth_vk) = make_test_keys();
+        let auth_pubkey_hex = hex::encode(auth_vk.to_bytes());
+
+        let (issuer1_sk, issuer1_vk) = make_test_keys();
+        let issuer1_pubkey_hex = hex::encode(issuer1_vk.to_bytes());
+
+        let (issuer2_sk, issuer2_vk) = make_test_keys();
+        let issuer2_pubkey_hex = hex::encode(issuer2_vk.to_bytes());
+
+        let mut trusted = HashSet::new();
+        trusted.insert(issuer1_pubkey_hex.clone());
+
+        let mut authorizers = HashSet::new();
+        authorizers.insert(auth_pubkey_hex.clone());
+
+        let mut cache = PolicyCache::new(trusted).with_authorizers(authorizers);
+
+        // Policy signed by issuer1 installs successfully
+        let doc1 = PolicyDocument {
+            policy_id: "pol-1".to_string(),
+            version: 1,
+            issued_at_sec: 1000,
+            ttl_seconds: 3600,
+            issuer_pubkey_hex: issuer1_pubkey_hex.clone(),
+            classes: HashMap::new(),
+            transit_rules: HashMap::new(),
+        };
+        let signed1 = SignedPolicy::sign(doc1, &issuer1_sk);
+        cache.update(signed1, 1100).unwrap();
+        assert!(cache.current().is_some());
+
+        // Revoke issuer1 key via signed revocation notice (W12)
+        let notice = KeyRevocationNotice::new(
+            &issuer1_pubkey_hex,
+            "Key compromise simulation",
+            1200,
+            &auth_pubkey_hex,
+        );
+        let signed_revocation = SignedKeyRevocation::sign(notice, &auth_sk);
+
+        // Key rotation: install issuer2 and revoke issuer1
+        cache
+            .rotate_key(issuer2_pubkey_hex.clone(), Some(signed_revocation), 1200)
+            .unwrap();
+
+        assert!(cache.is_key_revoked(&issuer1_pubkey_hex));
+        assert!(cache.current().is_none()); // Evicted active policy signed by compromised key!
+
+        // Attempting to install any policy signed by revoked key fails immediately
+        let doc_revoked = PolicyDocument {
+            policy_id: "pol-1".to_string(),
+            version: 2,
+            issued_at_sec: 1250,
+            ttl_seconds: 3600,
+            issuer_pubkey_hex: issuer1_pubkey_hex.clone(),
+            classes: HashMap::new(),
+            transit_rules: HashMap::new(),
+        };
+        let signed_revoked = SignedPolicy::sign(doc_revoked, &issuer1_sk);
+        let err = cache.update(signed_revoked, 1300).unwrap_err();
+        assert!(matches!(err, PolicyError::KeyRevoked(_)));
+
+        // New key issuer2 can sign and install policy successfully
+        let doc2 = PolicyDocument {
+            policy_id: "pol-1".to_string(),
+            version: 2,
+            issued_at_sec: 1250,
+            ttl_seconds: 3600,
+            issuer_pubkey_hex: issuer2_pubkey_hex.clone(),
+            classes: HashMap::new(),
+            transit_rules: HashMap::new(),
+        };
+        let signed2 = SignedPolicy::sign(doc2, &issuer2_sk);
+        assert!(cache.update(signed2, 1300).is_ok());
+    }
+
+    #[test]
+    fn test_load_verified_policy_from_file() {
+        let (signing_key, verifying_key) = make_test_keys();
+        let pubkey_hex = hex::encode(verifying_key.to_bytes());
+
+        let doc = PolicyDocument {
+            policy_id: "pol-boot".to_string(),
+            version: 5,
+            issued_at_sec: 1000,
+            ttl_seconds: 3600,
+            issuer_pubkey_hex: pubkey_hex.clone(),
+            classes: HashMap::new(),
+            transit_rules: HashMap::new(),
+        };
+        let signed = SignedPolicy::sign(doc, &signing_key);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let policy_path = temp_dir.path().join("policy.json");
+        let keys_path = temp_dir.path().join("trusted_keys.json");
+
+        std::fs::write(&policy_path, serde_json::to_string(&signed).unwrap()).unwrap();
+        std::fs::write(
+            &keys_path,
+            serde_json::to_string(&vec![pubkey_hex.clone()]).unwrap(),
+        )
+        .unwrap();
+
+        let trusted = load_trusted_keys_from_file(&keys_path).unwrap();
+        assert!(trusted.contains(&pubkey_hex));
+
+        // Loading with valid floor passes
+        let loaded = load_verified_policy_from_file(&policy_path, &trusted, 5, 1100).unwrap();
+        assert_eq!(loaded.policy.version, 5);
+
+        // Loading with floor higher than policy fails
+        let err = load_verified_policy_from_file(&policy_path, &trusted, 10, 1100).unwrap_err();
+        assert!(matches!(
+            err,
+            PolicyError::VersionBelowFloor {
+                floor: 10,
+                received: 5
+            }
+        ));
     }
 }
