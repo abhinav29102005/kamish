@@ -531,8 +531,11 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     setTelemetryHistory([]);
+    setConnectionStatus(gatewayClient.getConfigError() ? "config_error" : "connecting");
+    setConnectionError(gatewayClient.getConfigError());
     setIsLiveMode(true);
-    await refreshLiveTelemetry();
+    // The isLiveMode effect performs the next telemetry refresh, avoiding
+    // duplicate concurrent requests during the mode transition.
   };
 
   const loginToGateway = async (u: string, p: string) => {
