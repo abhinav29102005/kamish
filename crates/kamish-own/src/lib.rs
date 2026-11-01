@@ -368,6 +368,39 @@ impl QuarantineStore {
     pub fn records(&self) -> Vec<RecordEnvelope> {
         self.inner.read().unwrap().clone()
     }
+
+    /// Explicit retention policy enforcement for quarantine store (§3.1.4, CONTRACT §4.2).
+    /// Prunes the oldest quarantined records if the collection exceeds `max_records`.
+    pub fn prune_quarantine(&self, max_records: usize) -> Result<usize, std::io::Error> {
+        let mut inner = self.inner.write().unwrap();
+        if inner.len() <= max_records {
+            return Ok(0);
+        }
+
+        let pruned_count = inner.len() - max_records;
+        let mut candidate = inner.clone();
+        candidate.drain(0..pruned_count);
+
+        let serialized = serde_json::to_vec(&candidate)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let q_file = self.dir.join("quarantine.data");
+        let mut tmp_file = tempfile::NamedTempFile::new_in(&self.dir)?;
+        tmp_file.write_all(&serialized)?;
+        tmp_file.flush()?;
+        tmp_file.as_file().sync_all()?;
+        tmp_file.persist(&q_file).map_err(|e| e.error)?;
+
+        #[cfg(unix)]
+        {
+            if let Ok(dir_file) = std::fs::File::open(&self.dir) {
+                let _ = dir_file.sync_all();
+            }
+        }
+
+        *inner = candidate;
+        Ok(pruned_count)
+    }
 }
 
 /// Partition ownership coordinator enforcing leases, fencing, and promotion (§3.4.4).

@@ -43,17 +43,20 @@ impl WitnessCheckpointEnvelope {
         signature_hex: impl Into<String>,
         signer_public_key_hex: impl Into<String>,
     ) -> Self {
-        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let topic = stream_topic.into();
+        let hash = tail_hash.into();
+        let short_hash = if hash.len() > 16 { &hash[..16] } else { &hash };
         let req_id = format!(
-            "wit-req-{}-{}-{}",
-            checkpoint_sequence, now_ns, record_count
+            "wit-req-{}-{}-{}-{}",
+            topic, stream_partition, checkpoint_sequence, short_hash
         );
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         Self {
             format_version: 1,
-            stream_topic: stream_topic.into(),
+            stream_topic: topic,
             stream_partition,
             checkpoint_sequence,
-            tail_hash: tail_hash.into(),
+            tail_hash: hash,
             record_count,
             signature_hex: signature_hex.into(),
             signer_public_key_hex: signer_public_key_hex.into(),
@@ -309,19 +312,16 @@ impl WitnessPublisher {
             queue: q.clone(),
         };
         let journal_path = self.data_dir.join("witness_publisher_journal.json");
-        let tmp_path = self.data_dir.join("witness_publisher_journal.json.tmp");
 
-        let serialized = serde_json::to_vec(&state)?;
-        let mut tmp_file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&tmp_path)?;
+        let serialized = serde_json::to_vec_pretty(&state)?;
+        let mut tmp_file = tempfile::NamedTempFile::new_in(&self.data_dir)
+            .map_err(|e| AuditError::WitnessError(format!("Temp journal creation failed: {e}")))?;
         tmp_file.write_all(&serialized)?;
-        tmp_file.sync_all()?;
-        drop(tmp_file);
-
-        let _ = std::fs::rename(&tmp_path, &journal_path);
+        tmp_file.flush()?;
+        tmp_file.as_file().sync_all()?;
+        tmp_file
+            .persist(&journal_path)
+            .map_err(|e| AuditError::WitnessError(format!("Witness journal atomic persist failed: {e}")))?;
         Ok(())
     }
 
