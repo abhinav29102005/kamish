@@ -67,6 +67,20 @@ impl Default for ServerLimits {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// TLS 1.3 configuration parameters for mutual authentication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TlsConfig {
+    pub cert_path: String,
+    pub key_path: String,
+    pub ca_cert_path: String,
+    #[serde(default = "default_true")]
+    pub require_client_auth: bool,
+}
+
 /// Broker daemon configuration loadable from a TOML file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerConfig {
@@ -90,6 +104,9 @@ pub struct BrokerConfig {
 
     #[serde(default)]
     pub metadata_endpoints: Vec<String>,
+
+    #[serde(default)]
+    pub tls: Option<TlsConfig>,
 }
 
 impl Default for BrokerConfig {
@@ -102,6 +119,7 @@ impl Default for BrokerConfig {
             peers: Vec::new(),
             limits: ServerLimits::default(),
             metadata_endpoints: Vec::new(),
+            tls: None,
         }
     }
 }

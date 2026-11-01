@@ -48,6 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             peers: args.peers,
             limits: Default::default(),
             metadata_endpoints: Vec::new(),
+            tls: None,
         }
     };
 
