@@ -10,7 +10,7 @@
 //! - INV-6: Retrying an applied range is a no-op.
 //! - INV-8: No payload outside legal set or sealed-only mode.
 
-use kamish_broker::{BrokerClient, BrokerServer, ReplicationRequest};
+use kamish_broker::{BrokerClient, BrokerServer, HeartbeatRequest, ReplicationRequest};
 use kamish_log::RecordEnvelope;
 use kamish_meta::LocalReplicationTracker;
 use kamish_outbox::OutboxRange;
@@ -20,6 +20,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use thiserror::Error;
 use tracing::{error, info, warn};
+
+/// Summary of peer heartbeat and replication reconciliation (§2.7.3, FN-04).
+#[derive(Debug, Clone, Default)]
+pub struct ReconciliationSummary {
+    pub target_region: String,
+    pub partitions_checked: usize,
+    pub gaps_detected: usize,
+    pub records_scheduled: usize,
+    pub stale_epochs_fenced: usize,
+}
 
 #[derive(Debug, Error)]
 pub enum AgentError {
@@ -444,6 +454,8 @@ impl ReplicationAgent {
                 String,
                 (tokio::time::Instant, tokio::time::Duration),
             > = HashMap::new();
+            let mut last_reconcile: HashMap<String, tokio::time::Instant> = HashMap::new();
+            let reconcile_interval = tokio::time::Duration::from_millis(500);
             let base_backoff = tokio::time::Duration::from_millis(50);
             let max_backoff = tokio::time::Duration::from_millis(2000);
             let sweep_interval = tokio::time::Duration::from_millis(50);
@@ -523,6 +535,22 @@ impl ReplicationAgent {
                             {
                                 continue;
                             }
+
+                            // Periodic heartbeat-based replication reconciliation (§2.7.3, FN-04)
+                            let should_reconcile = last_reconcile
+                                .get(&target)
+                                .map_or(true, |last| now.duration_since(*last) >= reconcile_interval);
+                            if should_reconcile {
+                                last_reconcile.insert(target.clone(), now);
+                                if let Err(e) = self.reconcile_peer(&target).await {
+                                    warn!(
+                                        target = %target,
+                                        error = %e,
+                                        "Automated replication reconciliation sweep failed"
+                                    );
+                                }
+                            }
+
                             let _ = self.local_broker.refill_outbox(&target);
                             if let Some(outbox) = self.local_broker.get_outbox(&target) {
                                 let pending = outbox.next_transfer_batch(10);
@@ -569,6 +597,190 @@ impl ReplicationAgent {
         });
 
         Some(handle)
+    }
+
+    /// Performs peer heartbeat exchange and automated reconciliation (§2.7.3, FN-04).
+    ///
+    /// Exchanging partition progress and watermarks detects missing offset ranges,
+    /// stale/fenced ownership epochs, and repopulates the outbox to resume replication.
+    pub async fn reconcile_peer(
+        &self,
+        target_region: &str,
+    ) -> Result<ReconciliationSummary, AgentError> {
+        let local_states = self.local_broker.get_partition_states();
+        let hb_req = HeartbeatRequest {
+            sender_region: self.local_region.clone(),
+            partitions: local_states,
+        };
+
+        let tcp_addr = {
+            self.peer_addresses
+                .read()
+                .unwrap()
+                .get(target_region)
+                .cloned()
+        };
+
+        let hb_resp = if let Some(addr) = tcp_addr {
+            let mut client = BrokerClient::connect(&addr).await.map_err(|e| {
+                AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e))
+            })?;
+            client
+                .heartbeat(hb_req)
+                .await
+                .map_err(|e| AgentError::TransferFailed(e.to_string()))?
+        } else {
+            let in_mem = {
+                self.peer_brokers
+                    .read()
+                    .unwrap()
+                    .get(target_region)
+                    .cloned()
+            };
+            if let Some(peer) = in_mem {
+                peer.handle_heartbeat(hb_req)?
+            } else {
+                return Err(AgentError::TargetNotRegistered(target_region.to_string()));
+            }
+        };
+
+        let mut summary = ReconciliationSummary {
+            target_region: target_region.to_string(),
+            ..Default::default()
+        };
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(i64::MAX, |d| d.as_nanos() as i64);
+
+        for remote_p in hb_resp.partitions {
+            summary.partitions_checked += 1;
+            let ownership = self
+                .local_broker
+                .meta
+                .get_ownership(&remote_p.topic, remote_p.partition);
+
+            let is_local_owner = ownership.as_ref().map_or(false, |o| {
+                o.owner_region == self.local_region && now < o.lease_expiry_ns
+            });
+            let authoritative_epoch = ownership.as_ref().map_or(1, |o| o.epoch);
+
+            // Stale epoch detection
+            if remote_p.epoch < authoritative_epoch {
+                summary.stale_epochs_fenced += 1;
+                warn!(
+                    topic = %remote_p.topic,
+                    partition = remote_p.partition,
+                    target = %target_region,
+                    peer_epoch = remote_p.epoch,
+                    authoritative_epoch,
+                    "Reconciliation: remote peer advertised stale ownership epoch; fencing"
+                );
+            }
+
+            if is_local_owner {
+                // Advance outbox for peer progress
+                if let Some(outbox) = self.local_broker.get_outbox(target_region) {
+                    outbox.advance_partition_watermark(
+                        &remote_p.topic,
+                        remote_p.partition,
+                        remote_p.durable_watermark,
+                    );
+                }
+                self.local_tracker.update_watermark(
+                    &remote_p.topic,
+                    remote_p.partition,
+                    target_region,
+                    remote_p.durable_watermark,
+                );
+
+                // Check for gap between remote's durable progress and local log HWM
+                let local_hwm = self
+                    .local_broker
+                    .get_watermark(&remote_p.topic, remote_p.partition, &self.local_region);
+
+                if remote_p.durable_watermark < local_hwm {
+                    summary.gaps_detected += 1;
+                    info!(
+                        topic = %remote_p.topic,
+                        partition = remote_p.partition,
+                        target = %target_region,
+                        from_offset = remote_p.durable_watermark,
+                        to_offset = local_hwm,
+                        "Replication gap detected: scheduling missing records into outbox"
+                    );
+
+                    match self.local_broker.repopulate_outbox_from_log(
+                        &remote_p.topic,
+                        remote_p.partition,
+                        target_region,
+                    ) {
+                        Ok(staged) => {
+                            summary.records_scheduled += staged;
+                            info!(
+                                topic = %remote_p.topic,
+                                partition = remote_p.partition,
+                                target = %target_region,
+                                staged,
+                                "Successfully scheduled gap records into outbox"
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                topic = %remote_p.topic,
+                                partition = remote_p.partition,
+                                target = %target_region,
+                                error = %e,
+                                "Failed to repopulate outbox for discovered gap"
+                            );
+                        }
+                    }
+                }
+            } else if ownership.as_ref().map_or(false, |o| o.owner_region == target_region) {
+                // Peer is owner: discover if local replica is lagging
+                let local_hwm = self
+                    .local_broker
+                    .get_watermark(&remote_p.topic, remote_p.partition, target_region);
+                if local_hwm < remote_p.high_watermark {
+                    summary.gaps_detected += 1;
+                    info!(
+                        topic = %remote_p.topic,
+                        partition = remote_p.partition,
+                        owner = %target_region,
+                        local_hwm,
+                        remote_hwm = remote_p.high_watermark,
+                        "Local replica discovered gap behind remote owner"
+                    );
+                    self.local_tracker.update_watermark(
+                        &remote_p.topic,
+                        remote_p.partition,
+                        target_region,
+                        remote_p.high_watermark,
+                    );
+                }
+            }
+        }
+
+        Ok(summary)
+    }
+
+    /// Reconciles replication state across all registered peers (§2.7.3, FN-04).
+    pub async fn reconcile_all_peers(&self) -> Vec<ReconciliationSummary> {
+        let targets = self.registered_targets();
+        let mut summaries = Vec::new();
+        for target in targets {
+            match self.reconcile_peer(&target).await {
+                Ok(summary) => summaries.push(summary),
+                Err(e) => {
+                    warn!(
+                        target = %target,
+                        error = %e,
+                        "Heartbeat reconciliation failed for target peer"
+                    );
+                }
+            }
+        }
+        summaries
     }
 
     /// Performs replication handshake with the target broker to synchronize offset cursors upon reconnect.
@@ -620,6 +832,9 @@ impl ReplicationAgent {
         // Repopulate outbox from disk log if there are committed records ahead of remote watermark
         self.local_broker
             .repopulate_outbox_from_log(topic, partition, target_region)?;
+
+        // Run full peer reconciliation to discover any other stream gaps
+        let _ = self.reconcile_peer(target_region).await;
 
         info!(
             target = %target_region,

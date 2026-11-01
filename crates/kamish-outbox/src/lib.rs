@@ -139,12 +139,18 @@ impl OutboxRange {
         self
     }
     pub fn byte_size(&self) -> usize {
-        self.payload.len() + 64
+        let env_len = self.envelope_payload.as_ref().map_or(0, |e| e.len());
+        self.payload.len() + env_len + 64
     }
 
     /// Computes the exact capacity required in an outbox for a range with the given payload length.
     pub fn required_capacity(payload_len: usize) -> usize {
         payload_len + 64
+    }
+
+    /// Computes the exact capacity required in an outbox for a range with both payload and envelope bytes.
+    pub fn required_capacity_with_envelope(payload_len: usize, envelope_len: usize) -> usize {
+        payload_len + envelope_len + 64
     }
 }
 

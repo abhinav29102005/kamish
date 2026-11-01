@@ -260,6 +260,32 @@ pub struct ReplicationResponse {
     pub reason: String,
 }
 
+/// Progress and watermark metadata for a single partition stream (§2.7.3, FN-04).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PartitionWatermark {
+    pub topic: String,
+    pub partition: u32,
+    pub epoch: u64,
+    pub high_watermark: u64,
+    pub durable_watermark: u64,
+}
+
+/// Request for peer heartbeat and watermark reconciliation (§2.7.3, FN-04).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatRequest {
+    pub sender_region: String,
+    #[serde(default)]
+    pub partitions: Vec<PartitionWatermark>,
+}
+
+/// Response containing receiver's partition progress and watermark states (§2.7.3, FN-04).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatResponse {
+    pub ack_region: String,
+    #[serde(default)]
+    pub partitions: Vec<PartitionWatermark>,
+}
+
 /// Durable consumer-group offset commit request (W22).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitOffsetRequest {
@@ -302,6 +328,7 @@ pub enum BrokerRequest {
         partition: u32,
         agreed_watermark: u64,
     },
+    Heartbeat(HeartbeatRequest),
     Ping,
 }
 
@@ -315,6 +342,7 @@ pub enum BrokerResponse {
     Watermark {
         durable_watermark: u64,
     },
+    Heartbeat(HeartbeatResponse),
     OffsetCommitted {
         group_id: String,
         topic: String,
@@ -1462,7 +1490,6 @@ impl BrokerServer {
         committed_env.context = Some(context.clone());
         let committed_checksum = committed_env.expected_checksum().unwrap_or(committed_env.checksum);
         committed_env.checksum = committed_checksum;
-        let envelope_bytes = serde_json::to_vec(&committed_env).ok();
 
         // 5. Commit all reserved outbox ranges (§3.B)
         for (peer, reservation, is_sealed) in reservations {
@@ -1476,7 +1503,7 @@ impl BrokerServer {
                 payload: req.payload.clone(),
                 is_sealed,
                 source_generation: source_gen,
-                envelope_payload: envelope_bytes.clone(),
+                envelope_payload: None,
                 context: Some(context.clone()),
                 policy_version: decision.policy_version,
                 checksum: Some(committed_checksum),
@@ -1807,6 +1834,98 @@ impl BrokerServer {
         self.outboxes.read().unwrap().get(target_region).cloned()
     }
 
+    /// Returns the progress and watermark states for all local partitions (§2.7.3, FN-04).
+    pub fn get_partition_states(&self) -> Vec<PartitionWatermark> {
+        let mut states = Vec::new();
+        let streams = self.logs.keys();
+        for (topic, partition) in streams {
+            if let Some(log) = self.logs.get(&(topic.clone(), partition)) {
+                let ownership = self.meta.get_ownership(&topic, partition);
+                let epoch = ownership.as_ref().map_or_else(|| log.current_epoch(), |o| o.epoch);
+                let hwm = log.high_watermark();
+                states.push(PartitionWatermark {
+                    topic,
+                    partition,
+                    epoch,
+                    high_watermark: hwm,
+                    durable_watermark: hwm,
+                });
+            }
+        }
+        states
+    }
+
+    /// Handles peer heartbeat and watermark reconciliation (§2.7.3, FN-04).
+    ///
+    /// Validates ownership epochs, guards against stale owners, updates tracked watermarks,
+    /// advances outboxes, and reports local partition watermarks.
+    pub fn handle_heartbeat(&self, req: HeartbeatRequest) -> Result<HeartbeatResponse, BrokerError> {
+        let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+        let mut response_partitions = Vec::new();
+
+        if req.partitions.is_empty() {
+            response_partitions = self.get_partition_states();
+        } else {
+            for p in &req.partitions {
+                let ownership = self.meta.get_ownership(&p.topic, p.partition);
+                let local_epoch = ownership.as_ref().map_or_else(
+                    || {
+                        self.logs
+                            .get(&(p.topic.clone(), p.partition))
+                            .map_or(1, |l| l.current_epoch())
+                    },
+                    |o| o.epoch,
+                );
+                let is_local_owner = ownership.as_ref().map_or(false, |o| {
+                    o.owner_region == self.region && now < o.lease_expiry_ns
+                });
+
+                // Epoch fencing validation:
+                if let Some(ref o) = ownership {
+                    if p.epoch < o.epoch {
+                        tracing::warn!(
+                            topic = %p.topic,
+                            partition = p.partition,
+                            sender = %req.sender_region,
+                            peer_epoch = p.epoch,
+                            current_epoch = o.epoch,
+                            "Peer heartbeat received with stale epoch"
+                        );
+                    }
+                }
+
+                let log_opt = self.logs.get(&(p.topic.clone(), p.partition));
+                let hwm = log_opt.as_ref().map_or(0, |l| l.high_watermark());
+
+                // If local broker is the owner and sender made progress, advance outbox and watermark
+                if is_local_owner && p.durable_watermark > 0 {
+                    if let Some(outbox) = self.get_outbox(&req.sender_region) {
+                        outbox.advance_partition_watermark(&p.topic, p.partition, p.durable_watermark);
+                    }
+                    self.local_tracker.update_watermark(
+                        &p.topic,
+                        p.partition,
+                        &req.sender_region,
+                        p.durable_watermark,
+                    );
+                }
+
+                response_partitions.push(PartitionWatermark {
+                    topic: p.topic.clone(),
+                    partition: p.partition,
+                    epoch: local_epoch,
+                    high_watermark: hwm,
+                    durable_watermark: hwm,
+                });
+            }
+        }
+
+        Ok(HeartbeatResponse {
+            ack_region: self.region.clone(),
+            partitions: response_partitions,
+        })
+    }
+
     /// Sets the byte capacity for a specific destination outbox.
     pub fn set_outbox_capacity(&self, target_region: &str, max_bytes: usize) {
         let outbox = self.get_or_create_outbox(target_region);
@@ -1877,7 +1996,6 @@ impl BrokerServer {
                     if send_decision.mode != DestinationMode::Cleartext {
                         continue; // Never reconstruct plaintext as a sealed range.
                     }
-                    let envelope_bytes = serde_json::to_vec(&record).ok();
                     let range = OutboxRange {
                         topic: topic.to_string(),
                         partition,
@@ -1891,7 +2009,7 @@ impl BrokerServer {
                             .context
                             .as_ref()
                             .map_or(1, |c| c.source_generation),
-                        envelope_payload: envelope_bytes,
+                        envelope_payload: None,
                         context: record.context.clone(),
                         policy_version: record.policy_version,
                         checksum: Some(record.checksum),
@@ -2087,6 +2205,10 @@ impl BrokerServer {
                     partition,
                     quarantined_count,
                 },
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::Heartbeat(h) => match self.handle_heartbeat(h) {
+                Ok(res) => BrokerResponse::Heartbeat(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
             BrokerRequest::Ping => BrokerResponse::Pong,
@@ -2477,6 +2599,21 @@ impl BrokerClient {
         match self.send_request(BrokerRequest::Ping).await? {
             BrokerResponse::Pong => Ok(true),
             _ => Ok(false),
+        }
+    }
+
+    pub async fn heartbeat(
+        &mut self,
+        req: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, Box<dyn std::error::Error + Send + Sync>> {
+        match self.send_request(BrokerRequest::Heartbeat(req)).await? {
+            BrokerResponse::Heartbeat(h) => Ok(h),
+            BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unexpected response: {:?}", other),
+            )
+            .into()),
         }
     }
 

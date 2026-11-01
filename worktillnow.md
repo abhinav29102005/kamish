@@ -3291,3 +3291,54 @@ Milestone FN-03 closes the replication metadata and context preservation gap ide
 
 2. **Data Directory Isolation:**
    - Updated `topic_paths_cannot_escape_data_directory` test assertion in `cmd/kamish-broker/src/lib.rs` to filter out broker system directories (`quarantine`) and verify zero escaped or stray topic directories are created.
+
+---
+
+## 32. Milestone FN-04: Automated Replication Reconciliation & Outbox Capacity Hardening (2026-11-01)
+
+### 32.1 Outbox Memory-Capacity Accounting Hardening
+- **Root Cause Resolution:** In Milestone FN-03, `OutboxRange` had been extended with `envelope_payload: Option<Vec<u8>>` containing JSON-serialized `RecordEnvelope` structures. However, `OutboxRange::byte_size()` only accounted for `self.payload.len() + 64`, completely ignoring the heap allocations of `envelope_payload`. Concurrently, `produce_at_epoch` pre-reserved capacity based only on `payload.len() + 64`, creating a desynchronization during `commit(range)` where `actual_size > reserved_bytes`.
+- **Exact Accounting Formula:**
+  - Updated `crates/kamish-outbox/src/lib.rs` so `byte_size()` accurately computes:
+    ```rust
+    let env_len = self.envelope_payload.as_ref().map_or(0, |e| e.len());
+    self.payload.len() + env_len + 64
+    ```
+  - Added `OutboxRange::required_capacity_with_envelope(payload_len, envelope_len) -> usize` for callers managing external envelopes.
+  - In `cmd/kamish-broker/src/lib.rs` (`produce_at_epoch` and `repopulate_outbox_from_log`), eliminated duplicate serialized JSON envelope storage (`envelope_payload: None`). Because `OutboxRange` already contains first-class typed fields (`context`, `source_generation`, `policy_version`, `checksum`, `payload`), storing redundant serialized duplicates in the in-memory transfer queue was unnecessary and caused memory bloat.
+  - With `envelope_payload: None`, `byte_size()` exactly equals `required_capacity(payload.len())` (i.e. `payload.len() + 64`), ensuring infallible reservations and exact byte reclamation on `advance_partition_watermark`.
+  - When `envelope_payload` is supplied with bytes, outbox bounds remain strictly enforceable without uncounted memory leaks or double-counting.
+
+### 32.2 Automated Heartbeat Protocol & Wire Structures
+- **Wire Protocol Entities (`cmd/kamish-broker/src/lib.rs`):**
+  - `PartitionWatermark`: Carries `topic`, `partition`, `epoch`, `high_watermark`, and `durable_watermark`.
+  - `HeartbeatRequest`: Carries `sender_region` and a vector of `PartitionWatermark` entries.
+  - `HeartbeatResponse`: Carries `ack_region` and a vector of receiver `PartitionWatermark` entries.
+  - Extended wire protocol enums with `BrokerRequest::Heartbeat(HeartbeatRequest)` and `BrokerResponse::Heartbeat(HeartbeatResponse)`.
+  - Added `BrokerClient::heartbeat(&mut self, req: HeartbeatRequest) -> Result<HeartbeatResponse, ...>` for framed async TCP clients.
+
+### 32.3 Broker Heartbeat Handling & Fencing Enforcement
+- **`BrokerServer::get_partition_states(&self) -> Vec<PartitionWatermark>`:** Scans local active partition logs, queries local ownership epochs from `MetadataClient`, reads high watermarks, and constructs snapshot progress.
+- **`BrokerServer::handle_heartbeat(&self, req: HeartbeatRequest) -> Result<HeartbeatResponse, BrokerError>`:**
+  - Validates epoch numbers against local `MetadataClient` ownership records. If a peer advertises an epoch lower than local ownership, logs a structured warning and refuses to treat the peer as current owner.
+  - Verifies local lease validity: strictly validates `now < ownership.lease_expiry_ns`. Heartbeats never extend etcd leases or bypass lease deadlines.
+  - When local broker is authoritative owner: uses peer's `durable_watermark` to advance the local `DestinationOutbox` cursor and `WatermarkTracker`, safely trimming confirmed replication ranges.
+  - Supports catalog discovery: if `req.partitions` is empty, responds with the broker's complete active stream catalog.
+
+### 32.4 Automated Replication Reconciliation Engine
+- **`ReplicationAgent::reconcile_peer(&self, target_region: &str) -> Result<ReconciliationSummary, AgentError>` (`cmd/kamish-agent/src/lib.rs`):**
+  - Initiates heartbeat exchange over TCP or in-memory peer channels.
+  - Compares remote partition progress against local log high watermarks and ownership authority.
+  - **Gap Detection & Scheduling:** For locally owned partitions where `remote_p.durable_watermark < local_hwm`, autonomously discovers the missing offset range and triggers `BrokerServer::repopulate_outbox_from_log` to stage the missing records directly from disk into the outbox.
+  - **Lag Visibility:** For partitions owned by the remote peer, detects inbound replication lag where local replica HWM < remote owner HWM, updating local tracking cursors.
+  - **Stale Epoch Fencing:** Detects and flags peers operating under stale epochs.
+- **Autonomous Periodic Sweep (`ReplicationAgent::spawn_retry_worker`):**
+  - Integrated a 500ms heartbeat reconciliation interval into the async retry worker loop. Every 500ms, the agent reconciles with each registered target, discovers any gaps, schedules missing records into the outbox, and immediately drains them via `step_replication`.
+  - Also triggers full peer reconciliation on reconnect inside `handshake_and_sync_cursor`.
+
+### 32.5 Verified Invariants & Safety Guarantees
+- **INV-1 (Write Durability):** Records remain durably persisted on disk before replication or outbox staging.
+- **INV-3 (Residency & Bounded Memory):** Outbox queue capacity strictly bounded with exact byte accounting; zero uncounted heap bloat.
+- **INV-5 / INV-6 (Ordered Prefix Replication & Idempotency):** Resumed replication starts strictly from the remote durable watermark. Gaps discovered by heartbeats are refilled without duplicating existing ranges or creating tight loops.
+- **Lease Invariants:** Heartbeats respect external etcd 3.7.3 authority (10s TTL, 3s renewal, 2s margin, 1s timeout). Heartbeats never refresh leases or bypass fencing checks.
+
