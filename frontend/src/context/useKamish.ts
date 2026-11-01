@@ -10,6 +10,7 @@ export interface KamishContextType {
   links: LinkState[];
   telemetryHistory: TelemetrySample[];
   currentTelemetry: TelemetrySample;
+  liveThroughputEps: number | null;
   auditLedger: AuditRecord[];
   auditError: string | null;
   recentEvents: StreamEvent[];
