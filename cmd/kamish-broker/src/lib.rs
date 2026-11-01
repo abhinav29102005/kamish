@@ -46,7 +46,7 @@ pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig, TopicConfig
 pub use consumer_group::{
     ConsumerGroup, ConsumerGroupCoordinator, GroupMember, GroupState, GroupSummary,
     HeartbeatGroupRequest, HeartbeatGroupResponse, JoinGroupRequest, JoinGroupResponse,
-    LeaveGroupRequest, LeaveGroupResponse,
+    LeaveGroupRequest, LeaveGroupResponse, spawn_consumer_group_sweeper_worker,
 };
 pub use metrics::BrokerMetricsRegistry;
 pub use retention::{
@@ -712,10 +712,12 @@ impl BrokerServer {
 
     /// Commits consumer group offset with crash-safe durable persistence (W22).
     pub fn commit_offset(&self, req: CommitOffsetRequest) -> Result<u64, BrokerError> {
-        self.consumer_groups.validate_commit(
+        self.consumer_groups.validate_partition_commit(
             &req.group_id,
             req.member_id.as_deref(),
             req.generation_id,
+            &req.topic,
+            Some(req.partition),
         )?;
 
         let mut checkpoints = self.consumer_checkpoints.write().unwrap();
@@ -2501,6 +2503,20 @@ impl BrokerServer {
                 }
             }
             BrokerRequest::JoinGroup(req) => {
+                if let Some(id) = identity {
+                    let catalog = self.catalog.read().unwrap();
+                    for topic in &req.subscribed_topics {
+                        if let Some(topic_meta) = catalog.get_topic(topic)
+                            && !id.is_authorized_for_tenant(&topic_meta.owner_tenant)
+                        {
+                            return BrokerResponse::Error(format!(
+                                "Tenant authorization mismatch: client tenant '{}' cannot join group '{}' subscribing to topic '{}' owned by '{}'",
+                                id.tenant, req.group_id, topic, topic_meta.owner_tenant
+                            ));
+                        }
+                    }
+                }
+
                 let topic_counts: HashMap<String, u32> = {
                     let cat = self.catalog.read().unwrap();
                     req.subscribed_topics

@@ -272,12 +272,24 @@ impl ConsumerGroupCoordinator {
         })
     }
 
-    /// Validates generation fencing on consumer commit operations.
+    /// Validates generation fencing and partition assignment ownership on consumer commit operations.
     pub fn validate_commit(
         &self,
         group_id: &str,
         member_id: Option<&str>,
         generation_id: Option<u32>,
+    ) -> Result<(), BrokerError> {
+        self.validate_partition_commit(group_id, member_id, generation_id, "", None)
+    }
+
+    /// Validates generation fencing and ensures the committing member holds assignment authority for the partition.
+    pub fn validate_partition_commit(
+        &self,
+        group_id: &str,
+        member_id: Option<&str>,
+        generation_id: Option<u32>,
+        topic: &str,
+        partition: Option<u32>,
     ) -> Result<(), BrokerError> {
         if let (Some(member), Some(expected_gen)) = (member_id, generation_id) {
             let groups = self.groups.read().unwrap();
@@ -288,10 +300,26 @@ impl ConsumerGroupCoordinator {
                         attempted: expected_gen as u64,
                     });
                 }
-                if !group.members.contains_key(member) {
-                    return Err(BrokerError::NotFound(format!(
+                let member_record = group.members.get(member).ok_or_else(|| {
+                    BrokerError::NotFound(format!(
                         "Member '{member}' not recognized in group '{group_id}'"
-                    )));
+                    ))
+                })?;
+
+                // Validate partition ownership if partition is specified
+                if let Some(p) = partition
+                    && !topic.is_empty()
+                {
+                    let is_assigned = member_record
+                        .assigned_partitions
+                        .get(topic)
+                        .map(|parts| parts.contains(&p))
+                        .unwrap_or(false);
+                    if !is_assigned {
+                        return Err(BrokerError::PolicyDenied(format!(
+                            "Partition ownership violation: member '{member}' is not assigned {topic}:{p} in group '{group_id}'"
+                        )));
+                    }
                 }
             }
         }
@@ -440,4 +468,36 @@ impl ConsumerGroupCoordinator {
         std::fs::rename(&tmp_path, &dest_path)?;
         Ok(())
     }
+}
+
+/// Spawns a background task running periodic consumer group heartbeat sweeps,
+/// automatically evicting dead members and advancing the group generation.
+pub fn spawn_consumer_group_sweeper_worker(
+    coordinator: Arc<ConsumerGroupCoordinator>,
+    broker: Arc<crate::BrokerServer>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    sweep_interval: std::time::Duration,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(sweep_interval);
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let topic_counts: HashMap<String, u32> = {
+                        let cat = broker.catalog.read().unwrap();
+                        cat.topics.values().map(|t| (t.topic.clone(), t.partitions)).collect()
+                    };
+                    if let Err(e) = coordinator.sweep_expired_members(&topic_counts) {
+                        tracing::warn!(error = %e, "Consumer group expiration sweep failed");
+                    }
+                }
+                changed = shutdown_rx.changed() => {
+                    if changed.is_err() || *shutdown_rx.borrow() {
+                        tracing::info!("Consumer group sweeper shutting down");
+                        break;
+                    }
+                }
+            }
+        }
+    })
 }

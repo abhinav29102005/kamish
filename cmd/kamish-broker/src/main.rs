@@ -226,6 +226,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::time::Duration::from_secs(60),
     );
 
+    // Start consumer group session expiration sweeper worker (§5.1, Workstream C)
+    let (cg_shutdown_tx, cg_shutdown_rx) = tokio::sync::watch::channel(false);
+    let cg_task = kamish_broker::spawn_consumer_group_sweeper_worker(
+        broker.consumer_groups.clone(),
+        broker.clone(),
+        cg_shutdown_rx,
+        std::time::Duration::from_secs(5),
+    );
+
     // Start in-region quorum heartbeat worker if replica group is configured
     let (quorum_shutdown_tx, quorum_shutdown_rx) = tokio::sync::watch::channel(false);
     let quorum_task = kamish_broker::spawn_quorum_heartbeat_worker(
@@ -274,8 +283,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = witness_shutdown_tx.send(true);
             let _ = renewal_task.await;
             let _ = retention_shutdown_tx.send(true);
+            let _ = cg_shutdown_tx.send(true);
             let _ = witness_task.await;
             let _ = retention_task.await;
+            let _ = cg_task.await;
             let _ = quorum_shutdown_tx.send(true);
             if let Some(task) = quorum_task {
                 let _ = task.await;
@@ -289,8 +300,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = witness_shutdown_tx.send(true);
             let _ = renewal_task.await;
             let _ = retention_shutdown_tx.send(true);
+            let _ = cg_shutdown_tx.send(true);
             let _ = witness_task.await;
             let _ = retention_task.await;
+            let _ = cg_task.await;
             let _ = quorum_shutdown_tx.send(true);
             if let Some(task) = quorum_task {
                 let _ = task.await;

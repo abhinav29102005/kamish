@@ -75,6 +75,7 @@ export function evaluatePrerequisites(system) {
 
 export function createRunManifest({
   system = 'kamish',
+  ackLevel = 'LeaderFsync',
   producers = 4,
   recordSizeBytes = 1024,
   targetRateMsgSec = 5000,
@@ -106,7 +107,9 @@ export function createRunManifest({
     },
     durability_level:
       system === 'kamish'
-        ? 'LeaderFsync (local NVMe fsync before producer ACK; async durable WAN outbox replication)'
+        ? ackLevel === 'InRegionQuorum'
+          ? 'InRegionQuorum (primary-backup 2-of-3 synchronous NVMe fsync before producer ACK; async durable WAN outbox replication)'
+          : 'LeaderFsync (local NVMe fsync before producer ACK; async durable WAN outbox replication)'
         : system === 'kafka_mirrormaker2'
         ? 'acks=all (min.insync.replicas=2) with MirrorMaker 2 Connect'
         : 'writeQuorum=3, ackQuorum=2 with built-in geo-replication',

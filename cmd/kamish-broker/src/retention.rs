@@ -75,6 +75,26 @@ impl RetentionCoordinator {
         consumer_checkpoints: &HashMap<(String, String, u32), u64>,
         outboxes: &HashMap<String, DestinationOutbox>,
     ) -> Result<Option<RetentionReclaimResult>, BrokerError> {
+        self.evaluate_and_reclaim_with_quorum(
+            topic,
+            partition,
+            log,
+            consumer_checkpoints,
+            outboxes,
+            None,
+        )
+    }
+
+    /// Calculates safe reclamation watermark with optional quorum commit index boundary.
+    pub fn evaluate_and_reclaim_with_quorum(
+        &self,
+        topic: &str,
+        partition: u32,
+        log: &PartitionLog,
+        consumer_checkpoints: &HashMap<(String, String, u32), u64>,
+        outboxes: &HashMap<String, DestinationOutbox>,
+        quorum_commit_index: Option<u64>,
+    ) -> Result<Option<RetentionReclaimResult>, BrokerError> {
         let policy = match self.get_policy(topic) {
             Some(p) => p,
             None => return Ok(None), // Retention disabled by default if no policy is set (§1.6, §4)
@@ -106,13 +126,16 @@ impl RetentionCoordinator {
         }
 
         // 3. Compute the strict safe reclamation ceiling: data beyond this boundary
-        // is still actively needed by either local consumer groups or replication followers.
+        // is still actively needed by either local consumer groups, uncommitted quorum, or replication followers.
         let mut safe_ceiling = hwm;
         if let Some(c_off) = min_consumer_offset {
             safe_ceiling = safe_ceiling.min(c_off);
         }
         if let Some(o_wm) = min_outbox_watermark {
             safe_ceiling = safe_ceiling.min(o_wm);
+        }
+        if let Some(q_commit) = quorum_commit_index {
+            safe_ceiling = safe_ceiling.min(q_commit);
         }
 
         if safe_ceiling <= floor {
@@ -201,10 +224,22 @@ pub fn spawn_retention_worker(
 
                     for (topic, partitions) in topics_meta {
                         for p in 0..partitions {
-                            if let Some(log) = broker.get_log(&topic, p)
-                                && let Err(e) = coordinator.evaluate_and_reclaim(&topic, p, &log, &checkpoints, &outboxes)
-                            {
-                                tracing::warn!(topic = %topic, partition = p, error = %e, "Retention evaluation failed");
+                            if let Some(log) = broker.get_log(&topic, p) {
+                                let quorum_commit = if broker.quorum.is_configured() {
+                                    Some(broker.quorum.get_commit_index(&topic, p))
+                                } else {
+                                    None
+                                };
+                                if let Err(e) = coordinator.evaluate_and_reclaim_with_quorum(
+                                    &topic,
+                                    p,
+                                    &log,
+                                    &checkpoints,
+                                    &outboxes,
+                                    quorum_commit,
+                                ) {
+                                    tracing::warn!(topic = %topic, partition = p, error = %e, "Retention evaluation failed");
+                                }
                             }
                         }
                     }

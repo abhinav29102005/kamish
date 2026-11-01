@@ -906,7 +906,9 @@ impl PartitionLog {
             });
         }
 
-        let effective_target = reclaim_before_offset.min(inner.high_watermark);
+        // Preserve active segment tail: retain at least the latest record to preserve segment metadata
+        let max_reclaimable = inner.high_watermark.saturating_sub(1);
+        let effective_target = reclaim_before_offset.min(max_reclaimable);
         let split_idx = inner
             .records
             .partition_point(|r| r.base_offset < effective_target);
