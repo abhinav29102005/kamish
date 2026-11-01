@@ -69,6 +69,25 @@ Older CLI/browser/advisory results below retain their original dates and scope.
 - **W19 Degraded Link Tracking:** Broker tracks WAN degradation states (`set_wan_degraded`, `is_wan_degraded`).
 - 100% of workspace tests and 17/17 independent probes passing; full audit report saved in `audit/phase3_completion/REPORT.md`.
 
+**Functionality-First Phase — Broker Daemon, Lease Renewal (FN-01) & Failover Promotion with Quarantine Routing (FN-02):**
+- **Broker Daemon & Proactive Lease Renewal (FN-01):**
+  - Implemented background lease renewal worker in `BrokerServer` running on 1s interval.
+  - Automatically renews owned partitions through atomic metadata authority renewal protocol.
+  - Evicts fenced partitions when lease renewals fail or epochs advance.
+  - Provided clean background task cancellation via `renewal_shutdown`.
+- **Partition Failover Promotion & Quarantine Routing (FN-02, §3.1.3, §3.1.4, W20):**
+  - Exposed `promote_partition` API on `BrokerServer` enforcing `DeploymentMode::MultiRegion`.
+  - Enforced candidate eligibility via E8 policy (`AuditAction::Promote`).
+  - Enforced prior owner lease expiration + 200ms clock drift buffer (§4.7.2 R6, §3.4.4).
+  - Enforced replica watermark progress against `required_watermark` before promotion (INV-3).
+  - Atomically bumped partition ownership epoch (`current_epoch + 1`) via atomic CAS on `MetadataAuthority`.
+  - Automatically registered promoted partitions into proactive lease renewal worker.
+  - Implemented `PartitionLog::truncate_to_offset` in `crates/kamish-log`: rewrites `partition.data` via atomic tempfile rename, resets sparse index, and extracts superseded records.
+  - Implemented `quarantine_divergent_suffix` on `BrokerServer` routing divergent records into `QuarantineStore`.
+  - Extended wire protocol with `PromotePartition` / `QuarantineDivergentSuffix` requests and responses.
+  - Extended `KamishAdminClient` and `kamish-ctl` with `promote` command.
+  - Verified with 4 comprehensive tests in `cmd/kamish-broker/tests/partition_promotion_and_quarantine.rs`.
+
 ## Table of Contents
 
 1. [Executive handover](#1-executive-handover)

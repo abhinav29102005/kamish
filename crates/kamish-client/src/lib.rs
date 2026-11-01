@@ -394,6 +394,66 @@ impl KamishAdminClient {
             _ => Err(ClientError::UnexpectedResponse),
         }
     }
+
+    /// Triggers partition failover promotion on a candidate broker (§3.1.3, FN-02).
+    pub async fn promote_partition(
+        &self,
+        topic: &str,
+        partition: u32,
+        class_id: Option<String>,
+        required_watermark: Option<u64>,
+    ) -> Result<(String, u64), ClientError> {
+        let req = BrokerRequest::PromotePartition {
+            topic: topic.to_string(),
+            partition,
+            class_id,
+            required_watermark,
+        };
+
+        let mut client = self.client.lock().await;
+        let resp = client
+            .send_request(req)
+            .await
+            .map_err(|e| ClientError::Network(e.to_string()))?;
+
+        match resp {
+            BrokerResponse::PartitionPromoted {
+                owner_region,
+                epoch,
+                ..
+            } => Ok((owner_region, epoch)),
+            BrokerResponse::Error(err) => Err(ClientError::BrokerRejection(err)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
+    }
+
+    /// Truncates and quarantines divergent uncommitted log records on a superseded broker (§3.1.4, FN-02).
+    pub async fn quarantine_divergent_suffix(
+        &self,
+        topic: &str,
+        partition: u32,
+        agreed_watermark: u64,
+    ) -> Result<usize, ClientError> {
+        let req = BrokerRequest::QuarantineDivergentSuffix {
+            topic: topic.to_string(),
+            partition,
+            agreed_watermark,
+        };
+
+        let mut client = self.client.lock().await;
+        let resp = client
+            .send_request(req)
+            .await
+            .map_err(|e| ClientError::Network(e.to_string()))?;
+
+        match resp {
+            BrokerResponse::SuffixQuarantined {
+                quarantined_count, ..
+            } => Ok(quarantined_count),
+            BrokerResponse::Error(err) => Err(ClientError::BrokerRejection(err)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
+    }
 }
 
 #[cfg(test)]

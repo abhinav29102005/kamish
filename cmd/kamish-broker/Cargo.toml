@@ -12,6 +12,7 @@ kamish-enforce = { path = "../../crates/kamish-enforce" }
 kamish-log = { path = "../../crates/kamish-log" }
 kamish-meta = { path = "../../crates/kamish-meta" }
 kamish-outbox = { path = "../../crates/kamish-outbox" }
+kamish-own = { path = "../../crates/kamish-own" }
 thiserror = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }

@@ -824,6 +824,48 @@ impl PartitionLog {
         let mut guard = self.writer_lock.lock().unwrap();
         *guard = Some(writer);
     }
+
+    /// Truncates the log to `new_next_offset`, removing all records with `base_offset >= new_next_offset`.
+    /// Returns the removed records (superseded suffix) for quarantine routing (§3.1.4, W20).
+    pub fn truncate_to_offset(&self, new_next_offset: u64) -> Result<Vec<RecordEnvelope>, LogError> {
+        let mut writer_guard = self.writer_lock.lock().unwrap();
+        let mut inner = self.inner.write().unwrap();
+
+        if new_next_offset >= inner.next_offset {
+            return Ok(Vec::new());
+        }
+
+        let superseded = inner.records.split_off(new_next_offset as usize);
+        inner.next_offset = new_next_offset;
+        inner.high_watermark = new_next_offset;
+        inner.index_entries.retain(|e| e.base_offset < new_next_offset);
+
+        // Rewrite on-disk partition.data cleanly up to new_next_offset
+        let log_path = inner.dir.join("partition.data");
+        let tmp_path = inner.dir.join("partition.data.tmp");
+        {
+            let mut tmp_file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&tmp_path)?;
+            for rec in &inner.records {
+                let serialized = serde_json::to_vec(rec)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let len_bytes = (serialized.len() as u32).to_be_bytes();
+                tmp_file.write_all(&len_bytes)?;
+                tmp_file.write_all(&serialized)?;
+            }
+            tmp_file.flush()?;
+            tmp_file.sync_all()?;
+        }
+        std::fs::rename(&tmp_path, &log_path)?;
+
+        // Reset the writer handle so subsequent appends reopen or seek to new end
+        *writer_guard = None;
+
+        Ok(superseded)
+    }
 }
 
 pub fn bincode_deserialize_envelope(

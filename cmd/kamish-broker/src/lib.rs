@@ -24,6 +24,7 @@ use kamish_meta::{
     SystemMonotonicClock,
 };
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
+use kamish_own::{OwnershipError, QuarantineStore};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -66,6 +67,9 @@ pub enum BrokerError {
 
     #[error("Authority error: {0}")]
     Authority(String),
+
+    #[error("Ownership error: {0}")]
+    Ownership(#[from] OwnershipError),
 
     #[error("Broker data directory {0:?} is locked by another running process (W14)")]
     DataDirectoryLocked(PathBuf),
@@ -185,6 +189,17 @@ pub enum BrokerRequest {
     },
     CommitOffset(CommitOffsetRequest),
     FetchOffset(FetchOffsetRequest),
+    PromotePartition {
+        topic: String,
+        partition: u32,
+        class_id: Option<String>,
+        required_watermark: Option<u64>,
+    },
+    QuarantineDivergentSuffix {
+        topic: String,
+        partition: u32,
+        agreed_watermark: u64,
+    },
     Ping,
 }
 
@@ -209,6 +224,18 @@ pub enum BrokerResponse {
         topic: String,
         partition: u32,
         offset: Option<u64>,
+    },
+    PartitionPromoted {
+        topic: String,
+        partition: u32,
+        owner_region: String,
+        epoch: u64,
+        lease_expiry_ns: i64,
+    },
+    SuffixQuarantined {
+        topic: String,
+        partition: u32,
+        quarantined_count: usize,
     },
     Pong,
     Error(String),
@@ -307,6 +334,7 @@ pub struct BrokerServer {
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
     pub clock: Arc<dyn MonotonicClock>,
     pub catalog: Arc<RwLock<TenantCatalog>>,
+    pub quarantine: QuarantineStore,
     consumer_checkpoints: ConsumerCheckpoints,
     degraded_links: Arc<RwLock<HashSet<String>>>,
     owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
@@ -387,6 +415,7 @@ impl BrokerServer {
         }
 
         let catalog = Arc::new(RwLock::new(TenantCatalog::new()));
+        let quarantine = QuarantineStore::open(data_dir_buf.join("quarantine"))?;
         let (renewal_tx, _) = tokio::sync::watch::channel(false);
         let broker = Self {
             region: region_str,
@@ -405,6 +434,7 @@ impl BrokerServer {
             outboxes: Arc::new(RwLock::new(outboxes_map)),
             clock: Arc::new(SystemMonotonicClock::new()),
             catalog,
+            quarantine,
             consumer_checkpoints: Arc::new(RwLock::new(HashMap::new())),
             degraded_links: Arc::new(RwLock::new(HashSet::new())),
             owned_partitions: Arc::new(RwLock::new(HashSet::new())),
@@ -418,7 +448,7 @@ impl BrokerServer {
         {
             let mut ckpt = broker.consumer_checkpoints.write().unwrap();
             for (k, v) in map {
-                let parts: Vec<&str> = k.split(":").collect();
+                let parts: Vec<&str> = k.split(':').collect();
                 if parts.len() == 3
                     && let Ok(p) = parts[2].parse::<u32>()
                 {
@@ -728,6 +758,220 @@ impl BrokerServer {
         let _ = self.renewal_shutdown.send(true);
     }
 
+    /// Returns a reference to the local quarantine store (§1.7, §3.1.4).
+    pub fn quarantine(&self) -> &QuarantineStore {
+        &self.quarantine
+    }
+
+    /// Promotes this broker replica to become the authoritative partition owner following regional failover (§3.1.3, §3.4.4).
+    ///
+    /// Invariants & Lifecycle:
+    /// 1. Requires `DeploymentMode::MultiRegion`.
+    /// 2. Stream must be registered in metadata.
+    /// 3. Existing owner lease must be expired + clock drift buffer (§4.7.2 R6, §3.4.4).
+    /// 4. Candidate region must be eligible under policy E8 (`Enforcer::decide(AuditAction::Promote)`).
+    /// 5. Candidate must hold an active replica log up to `required_watermark` if specified (INV-3).
+    /// 6. Commits new epoch (`current_epoch + 1`) via atomic CAS on MetadataAuthority (INV-7) under 10s lease (CONTRACT.md §2.3.2).
+    /// 7. Upon successful CAS, registers partition in proactive lease renewal.
+    /// 8. If candidate's local log has divergent speculative records beyond `required_watermark`,
+    ///    they are truncated from the active log and durably routed to `QuarantineStore`.
+    /// 9. Fails closed on any error, never creating assumed uncommitted ownership.
+    pub fn promote_partition(
+        &self,
+        topic: &str,
+        partition: u32,
+        class_id: Option<&str>,
+        required_watermark: Option<u64>,
+    ) -> Result<PartitionOwnership, BrokerError> {
+        Self::validate_topic(topic)?;
+
+        // 1. Must be in MultiRegion deployment mode
+        if self.meta.deployment_mode() != DeploymentMode::MultiRegion {
+            return Err(BrokerError::PolicyDenied(
+                "promotion_requires_multi_region_mode".into(),
+            ));
+        }
+
+        // 2. Partition must be registered in metadata
+        let stream = StreamId::new(topic, partition);
+        let current_ownership = match self.meta.get_ownership(topic, partition) {
+            Some(o) => o,
+            None => {
+                return Err(BrokerError::PolicyDenied(
+                    "unregistered_stream_cannot_be_promoted".into(),
+                ));
+            }
+        };
+
+        // If candidate already holds active valid lease for this partition, return current ownership
+        let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        if current_ownership.owner_region == self.region && current_ownership.is_lease_valid(now_ns) {
+            return Ok(current_ownership);
+        }
+
+        // 3. Lease safety check with clock drift buffer (§4.7.2 R6, §3.4.4)
+        let max_clock_drift_ms = 200i64;
+        let safe_expiry_ns = current_ownership.lease_expiry_ns + (max_clock_drift_ms * 1_000_000);
+        if now_ns < safe_expiry_ns {
+            return Err(BrokerError::PolicyDenied(format!(
+                "prior_owner_lease_active: expires at {}, current time is {}",
+                safe_expiry_ns, now_ns
+            )));
+        }
+
+        // 4. Resolve class_id and perform E8 Promotion Policy Check
+        let resolved_class = match class_id {
+            Some(c) => c.to_string(),
+            None => {
+                let catalog = self.catalog.read().unwrap();
+                catalog
+                    .get_topic(topic)
+                    .and_then(|t| t.allowed_classes.iter().next().cloned())
+                    .unwrap_or_else(|| "general".to_string())
+            }
+        };
+
+        let enf_req = EnforcementRequest::new(
+            AuditAction::Promote,
+            &resolved_class,
+            &current_ownership.owner_region,
+            &self.region,
+        );
+        let decision = self.enforcer.decide(enf_req);
+        if !decision.allowed {
+            return Err(BrokerError::PolicyDenied(format!(
+                "promotion_denied_by_policy: region '{}' not eligible for class '{}' ({})",
+                self.region, resolved_class, decision.reason
+            )));
+        }
+
+        // 5. Replica progress verification (INV-3)
+        let operation = self
+            .partition_operations
+            .get_or_insert_with((topic.to_string(), partition), || {
+                Arc::new(Mutex::new(()))
+            });
+        let _operation = operation.lock().unwrap();
+
+        let log = self.get_or_create_log(topic, partition, current_ownership.epoch)?;
+        let local_hwm = log.high_watermark();
+
+        if let Some(req_wm) = required_watermark {
+            if local_hwm < req_wm {
+                return Err(BrokerError::PolicyDenied(format!(
+                    "candidate_watermark_behind: candidate has {local_hwm}, required {req_wm}"
+                )));
+            }
+        }
+
+        // 6. Commit bumped epoch via atomic CAS on MetadataAuthority (INV-7)
+        let new_epoch = current_ownership.epoch + 1;
+        let lease_duration_ms = 10_000i64; // Normative 10-second lease (CONTRACT.md §2.3.2)
+        let new_ownership = self.meta
+            .compare_and_swap_epoch(
+                &stream,
+                current_ownership.epoch,
+                new_epoch,
+                &self.region,
+                lease_duration_ms,
+            )
+            .map_err(|e| match e {
+                kamish_meta::MetaError::StaleEpoch { current, proposed } => {
+                    BrokerError::EpochFenced {
+                        current,
+                        attempted: proposed,
+                    }
+                }
+                kamish_meta::MetaError::LeaseConflict { .. } => {
+                    BrokerError::PolicyDenied("prior_owner_lease_active".into())
+                }
+                other => BrokerError::Authority(other.to_string()),
+            })?;
+
+        // 7. Update local ownership and active lease renewal registry
+        self.owned_partitions
+            .write()
+            .unwrap()
+            .insert((topic.to_string(), partition));
+
+        // 8. If required_watermark was specified and candidate had speculative records beyond it,
+        // isolate divergent records to QuarantineStore
+        if let Some(req_wm) = required_watermark {
+            if local_hwm > req_wm {
+                let superseded = log.truncate_to_offset(req_wm)?;
+                if !superseded.is_empty() {
+                    tracing::warn!(
+                        topic = %topic,
+                        partition = partition,
+                        count = superseded.len(),
+                        agreed_watermark = req_wm,
+                        "Quarantined speculative records beyond agreed frontier upon promotion"
+                    );
+                    self.quarantine.quarantine_records(superseded)?;
+                }
+            }
+        }
+
+        tracing::info!(
+            topic = %topic,
+            partition = partition,
+            epoch = new_epoch,
+            region = %self.region,
+            "Successfully promoted broker replica to authoritative partition owner"
+        );
+
+        Ok(new_ownership)
+    }
+
+    /// Reconciles a local partition log against an agreed watermark / common prefix (§3.1.4, W20).
+    ///
+    /// If the local log contains records beyond `agreed_watermark`, those divergent suffix
+    /// records are atomically truncated from the partition log and moved into the `QuarantineStore`.
+    ///
+    /// Returns the number of quarantined records.
+    pub fn quarantine_divergent_suffix(
+        &self,
+        topic: &str,
+        partition: u32,
+        agreed_watermark: u64,
+    ) -> Result<usize, BrokerError> {
+        let operation = self
+            .partition_operations
+            .get_or_insert_with((topic.to_string(), partition), || {
+                Arc::new(Mutex::new(()))
+            });
+        let _operation = operation.lock().unwrap();
+
+        let log = self.get_or_create_log(topic, partition, 1)?;
+        let local_hwm = log.high_watermark();
+
+        if local_hwm <= agreed_watermark {
+            return Ok(0);
+        }
+
+        let superseded = log.truncate_to_offset(agreed_watermark)?;
+        let count = superseded.len();
+        if !superseded.is_empty() {
+            tracing::warn!(
+                topic = %topic,
+                partition = partition,
+                count = count,
+                agreed_watermark = agreed_watermark,
+                "Quarantining divergent log suffix from superseded owner"
+            );
+            self.quarantine.quarantine_records(superseded)?;
+        }
+
+        // If this broker was previously renewing this partition, verify if we are still owner
+        if let Some(ownership) = self.meta.get_ownership(topic, partition) {
+            if ownership.owner_region != self.region {
+                self.unregister_owned_partition(topic, partition);
+            }
+        }
+
+        Ok(count)
+    }
+
     /// Handles record ingestion without explicit client identity.
     pub fn produce(&self, req: ProduceRequest) -> Result<ProduceResponse, BrokerError> {
         self.produce_with_identity(req, None)
@@ -928,7 +1172,7 @@ impl BrokerServer {
                 || first
                     .context
                     .as_ref()
-                    .is_none_or(|context| context.request_policy != request_policy))
+                    .is_some_and(|context| context.request_policy != request_policy))
         {
             return Ok(ProduceResponse {
                 base_offset: 0,
@@ -1036,18 +1280,22 @@ impl BrokerServer {
                 .map_or(1, |g| g.generation),
         };
         if let Some(first) = log.read(0, 1).first() {
-            let mut original = first.context.as_ref().unwrap().replication_targets.clone();
-            let mut proposed = context.replication_targets.clone();
-            original.sort();
-            proposed.sort();
-            if original != proposed {
-                return Ok(ProduceResponse {
-                    base_offset: 0,
-                    count: 0,
-                    committed_epoch: epoch,
-                    sovereignty_allowed: false,
-                    denial_reason: "stream_destinations_changed_requires_new_topic".into(),
-                });
+            if let Some(ref first_ctx) = first.context {
+                if first_ctx.origin_region == self.region {
+                    let mut original = first_ctx.replication_targets.clone();
+                    let mut proposed = context.replication_targets.clone();
+                    original.sort();
+                    proposed.sort();
+                    if original != proposed {
+                        return Ok(ProduceResponse {
+                            base_offset: 0,
+                            count: 0,
+                            committed_epoch: epoch,
+                            sovereignty_allowed: false,
+                            denial_reason: "stream_destinations_changed_requires_new_topic".into(),
+                        });
+                    }
+                }
             }
         }
         let offset = log.append_with_context(
@@ -1578,6 +1826,40 @@ impl BrokerServer {
                     offset,
                 }
             }
+            BrokerRequest::PromotePartition {
+                topic,
+                partition,
+                class_id,
+                required_watermark,
+            } => {
+                match self.promote_partition(
+                    &topic,
+                    partition,
+                    class_id.as_deref(),
+                    required_watermark,
+                ) {
+                    Ok(ownership) => BrokerResponse::PartitionPromoted {
+                        topic: ownership.topic,
+                        partition: ownership.partition,
+                        owner_region: ownership.owner_region,
+                        epoch: ownership.epoch,
+                        lease_expiry_ns: ownership.lease_expiry_ns,
+                    },
+                    Err(e) => BrokerResponse::Error(e.to_string()),
+                }
+            }
+            BrokerRequest::QuarantineDivergentSuffix {
+                topic,
+                partition,
+                agreed_watermark,
+            } => match self.quarantine_divergent_suffix(&topic, partition, agreed_watermark) {
+                Ok(quarantined_count) => BrokerResponse::SuffixQuarantined {
+                    topic,
+                    partition,
+                    quarantined_count,
+                },
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
             BrokerRequest::Ping => BrokerResponse::Pong,
         }
     }
@@ -1966,6 +2248,46 @@ impl BrokerClient {
         match self.send_request(BrokerRequest::Ping).await? {
             BrokerResponse::Pong => Ok(true),
             _ => Ok(false),
+        }
+    }
+
+    pub async fn promote_partition(
+        &mut self,
+        topic: impl Into<String>,
+        partition: u32,
+        class_id: Option<String>,
+        required_watermark: Option<u64>,
+    ) -> Result<BrokerResponse, Box<dyn std::error::Error + Send + Sync>> {
+        self.send_request(BrokerRequest::PromotePartition {
+            topic: topic.into(),
+            partition,
+            class_id,
+            required_watermark,
+        })
+        .await
+    }
+
+    pub async fn quarantine_divergent_suffix(
+        &mut self,
+        topic: impl Into<String>,
+        partition: u32,
+        agreed_watermark: u64,
+    ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        match self
+            .send_request(BrokerRequest::QuarantineDivergentSuffix {
+                topic: topic.into(),
+                partition,
+                agreed_watermark,
+            })
+            .await?
+        {
+            BrokerResponse::SuffixQuarantined { quarantined_count, .. } => Ok(quarantined_count),
+            BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
+            other => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unexpected response: {:?}", other),
+            )
+            .into()),
         }
     }
 }

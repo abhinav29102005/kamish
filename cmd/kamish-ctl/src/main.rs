@@ -102,6 +102,20 @@ enum Commands {
         #[arg(short = 'j', long, default_value_t = 1)]
         concurrency: usize,
     },
+
+    /// Trigger regional partition failover promotion on a candidate broker (FN-02, §3.1.3)
+    Promote {
+        #[arg(short, long, default_value = "127.0.0.1:9092")]
+        addr: String,
+        #[arg(short, long, default_value = "telemetry")]
+        topic: String,
+        #[arg(short, long, default_value_t = 0)]
+        partition: u32,
+        #[arg(short, long)]
+        class_id: Option<String>,
+        #[arg(long)]
+        min_watermark: Option<u64>,
+    },
 }
 
 #[cfg(test)]
@@ -119,6 +133,7 @@ mod cli_tests {
             "watermark",
             "demo",
             "benchmark",
+            "promote",
         ] {
             let error = Cli::try_parse_from(["kamish-ctl", command, "--help"]).unwrap_err();
             assert_eq!(
@@ -711,6 +726,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             println!(
                 "\x1b[1;32m[PASS] Ingestion latency confirmed sub-millisecond and fully isolated from WAN link degradation!\x1b[0m\n"
+            );
+        }
+
+        Commands::Promote {
+            addr,
+            topic,
+            partition,
+            class_id,
+            min_watermark,
+        } => {
+            println!(
+                "\x1b[1;34m[kamish-ctl]\x1b[0m Requesting partition failover promotion at {} for {}:{}...",
+                addr, topic, partition
+            );
+            let admin = KamishAdminClient::connect(&addr).await?;
+            let (new_owner, epoch) = admin
+                .promote_partition(&topic, partition, class_id, min_watermark)
+                .await?;
+            println!(
+                "\x1b[1;32m[kamish-ctl]\x1b[0m  Partition promoted successfully: new owner '{}', epoch {} (FN-02, §3.1.3).",
+                new_owner, epoch
             );
         }
     }
