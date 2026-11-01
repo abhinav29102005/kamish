@@ -344,19 +344,29 @@ impl ReplicationAgent {
         };
 
         if let Some(addr) = tcp_addr {
-            let mut client = BrokerClient::connect(&addr).await.map_err(|e| {
-                AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e))
-            })?;
-            let res = client
-                .replicate(rep_req)
-                .await
-                .map_err(|e| AgentError::TransferFailed(e.to_string()))?;
+            let mut client = match BrokerClient::connect(&addr).await {
+                Ok(c) => c,
+                Err(e) => {
+                    self.router.record_link_failure(&task.target_region, None);
+                    return Err(AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e)));
+                }
+            };
+            let res = match client.replicate(rep_req).await {
+                Ok(r) => r,
+                Err(e) => {
+                    self.router.record_link_failure(&task.target_region, None);
+                    return Err(AgentError::TransferFailed(e.to_string()));
+                }
+            };
 
             if res.accepted {
+                self.router.record_link_success(&task.target_region, None);
                 if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                    outbox.advance_partition_watermark(
+                    outbox.advance_partition_watermark_with_provenance(
                         &task.range.topic,
                         task.range.partition,
+                        task.range.epoch,
+                        task.range.source_generation,
                         res.applied_watermark,
                     );
                 }
@@ -370,9 +380,11 @@ impl ReplicationAgent {
             } else {
                 if res.reason.contains("offset_gap") || res.reason.contains("partial_overlap") {
                     if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                        outbox.advance_partition_watermark(
+                        outbox.advance_partition_watermark_with_provenance(
                             &task.range.topic,
                             task.range.partition,
+                            task.range.epoch,
+                            task.range.source_generation,
                             res.applied_watermark,
                         );
                     }
@@ -415,10 +427,13 @@ impl ReplicationAgent {
                 .await
                 .map_err(|e| AgentError::TransferFailed(e.to_string()))??;
             if res.accepted {
+                self.router.record_link_success(&task.target_region, None);
                 if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                    outbox.advance_partition_watermark(
+                    outbox.advance_partition_watermark_with_provenance(
                         &task.range.topic,
                         task.range.partition,
+                        task.range.epoch,
+                        task.range.source_generation,
                         res.applied_watermark,
                     );
                 }
@@ -432,9 +447,11 @@ impl ReplicationAgent {
             } else {
                 if res.reason.contains("offset_gap") || res.reason.contains("partial_overlap") {
                     if let Some(outbox) = self.local_broker.get_outbox(&task.target_region) {
-                        outbox.advance_partition_watermark(
+                        outbox.advance_partition_watermark_with_provenance(
                             &task.range.topic,
                             task.range.partition,
+                            task.range.epoch,
+                            task.range.source_generation,
                             res.applied_watermark,
                         );
                     }
@@ -943,10 +960,13 @@ impl ReplicationAgent {
 
             let rep_res = peer_broker.handle_replication(rep_req)?;
             if rep_res.accepted {
+                self.router.record_link_success(target_region, None);
                 // 3. Advance local outbox watermark and trim applied range (INV-5, INV-6)
-                outbox.advance_partition_watermark(
+                outbox.advance_partition_watermark_with_provenance(
                     &range.topic,
                     range.partition,
+                    range.epoch,
+                    range.source_generation,
                     rep_res.applied_watermark,
                 );
                 self.local_tracker.update_watermark(
@@ -962,9 +982,11 @@ impl ReplicationAgent {
             } else if rep_res.reason.contains("offset_gap")
                 || rep_res.reason.contains("partial_overlap")
             {
-                outbox.advance_partition_watermark(
+                outbox.advance_partition_watermark_with_provenance(
                     &range.topic,
                     range.partition,
+                    range.epoch,
+                    range.source_generation,
                     rep_res.applied_watermark,
                 );
                 self.local_tracker.update_watermark(
@@ -1082,10 +1104,16 @@ impl ReplicationAgent {
             let rep_req = build_replication_request(&self.local_region, target_region, &range);
 
             let start = std::time::Instant::now();
-            let rep_res = client
-                .replicate(rep_req)
-                .await
-                .map_err(|e| AgentError::TargetNotRegistered(e.to_string()))?;
+            let rep_res = match client.replicate(rep_req).await {
+                Ok(r) => {
+                    self.router.record_link_success(target_region, None);
+                    r
+                }
+                Err(e) => {
+                    self.router.record_link_failure(target_region, None);
+                    return Err(AgentError::TargetNotRegistered(e.to_string()));
+                }
+            };
             let rtt_ms = start.elapsed().as_secs_f64() * 1000.0;
 
             if let Some(m) = self.link_metrics.write().unwrap().get_mut(target_region) {
@@ -1093,9 +1121,11 @@ impl ReplicationAgent {
             }
 
             if rep_res.accepted {
-                outbox.advance_partition_watermark(
+                outbox.advance_partition_watermark_with_provenance(
                     &range.topic,
                     range.partition,
+                    range.epoch,
+                    range.source_generation,
                     rep_res.applied_watermark,
                 );
                 self.local_tracker.update_watermark(
@@ -1111,9 +1141,11 @@ impl ReplicationAgent {
             } else if rep_res.reason.contains("offset_gap")
                 || rep_res.reason.contains("partial_overlap")
             {
-                outbox.advance_partition_watermark(
+                outbox.advance_partition_watermark_with_provenance(
                     &range.topic,
                     range.partition,
+                    range.epoch,
+                    range.source_generation,
                     rep_res.applied_watermark,
                 );
                 self.local_tracker.update_watermark(
