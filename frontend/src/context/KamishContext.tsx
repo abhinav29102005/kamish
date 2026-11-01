@@ -408,16 +408,17 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       const outboxPending = streams.outbox_totals?.pending_count ?? 0;
 
-      if (streams.streams.length > 0) {
-        const stream0 = streams.streams[0];
-        const lagUs = stream0.replication_lags["US_EAST"] || 0;
-        setCurrentTelemetry((prev) => ({
-          ...prev,
-          replicationLag: lagUs,
-          remoteWatermark: lagUs,
-          outboxDepth: outboxPending,
-        }));
-      }
+      const stream0 = streams.streams[0];
+      const lagUs = stream0?.replication_lags?.["US_EAST"];
+      setCurrentTelemetry((prev) => ({
+        ...prev,
+        ...(typeof lagUs === "number" ? { replicationLag: lagUs } : {}),
+        // This is a gateway-reported queue metric. Throughput and latency are not
+        // exposed by this endpoint and must not retain demo defaults in Live mode.
+        outboxDepth: outboxPending,
+        throughputEps: 0,
+        p99LatencyMs: 0,
+      }));
 
       setNodes((prev) => {
         const currentRegion = (status.region || "EU_WEST") as RegionId;
@@ -444,7 +445,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               sourceRegion: (e.source_region as RegionId) || (status.region as RegionId) || 'EU_WEST',
               targetRegion: (e.target_region as RegionId) || 'US_EAST',
               policyVersion: e.policy_version ?? 1,
-              outcome: (e.outcome as any) || 'AllowCleartext',
+              outcome: (e.outcome as any) || 'Unknown',
               reason: e.reason || 'Live broker audit ledger entry',
               prevHash: e.prev_hash || '',
               hash: e.hash || '',
@@ -520,16 +521,18 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(timer);
   }, [isLiveMode]);
 
+  // This switch controls the frontend execution surface only. Demo mode is a
+  // browser-local simulation and must never mutate the broker's server-side mode.
   const toggleMode = async () => {
-    const nextMode = isLiveMode ? "DEMO" : "LIVE";
-    try {
-      if (gatewayClient.isAuthenticated()) {
-        await gatewayClient.setMode(nextMode);
-      }
-      setIsLiveMode(nextMode === "LIVE");
-    } catch {
-      setIsLiveMode(nextMode === "LIVE");
+    if (isLiveMode) {
+      setIsLiveMode(false);
+      setConnectionError(null);
+      return;
     }
+
+    setTelemetryHistory([]);
+    setIsLiveMode(true);
+    await refreshLiveTelemetry();
   };
 
   const loginToGateway = async (u: string, p: string) => {
