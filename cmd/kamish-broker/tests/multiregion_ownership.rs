@@ -414,10 +414,12 @@ fn test_broker_restart_requires_explicit_reacquisition() {
 
     // Simulate broker crash and restart: lease was revoked/expired on shutdown.
     meta.revoke_lease(&stream_id, 0).unwrap();
+    let enforcer = broker.enforcer.clone();
+    drop(broker); // Release physical writer lock on shutdown (W14)
 
     let restarted_broker = BrokerServer::new(
         "region-a",
-        broker.enforcer.clone(),
+        enforcer,
         meta.clone(),
         vec!["region-b".into()],
         dir.path(),

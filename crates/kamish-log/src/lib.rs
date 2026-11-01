@@ -357,6 +357,40 @@ impl PartitionLock {
             }
         }
 
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            #[link(name = "kernel32")]
+            unsafe extern "system" {
+                fn LockFileEx(
+                    hFile: *mut std::ffi::c_void,
+                    dwFlags: u32,
+                    dwReserved: u32,
+                    nNumberOfBytesToLockLow: u32,
+                    nNumberOfBytesToLockHigh: u32,
+                    lpOverlapped: *mut std::ffi::c_void,
+                ) -> i32;
+            }
+            const LOCKFILE_FAIL_IMMEDIATELY: u32 = 0x00000001;
+            const LOCKFILE_EXCLUSIVE_LOCK: u32 = 0x00000002;
+
+            let handle = file.as_raw_handle();
+            let mut overlapped = std::mem::MaybeUninit::<[u8; 32]>::zeroed();
+            let ret = unsafe {
+                LockFileEx(
+                    handle,
+                    LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                    0,
+                    1,
+                    0,
+                    overlapped.as_mut_ptr() as *mut std::ffi::c_void,
+                )
+            };
+            if ret == 0 {
+                return Err(LogError::LockedByAnotherProcess(dir.to_path_buf()));
+            }
+        }
+
         Ok(Self { _file: file })
     }
 }

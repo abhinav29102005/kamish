@@ -4,7 +4,7 @@
 **Baseline Commit:** `27cbc49b25ee473d0a1b630e01476f5718dfd122`  
 **Audit Baseline:** `audit/milestone_5_4_metadata_ownership/` (Immutable)  
 **Remediation Verdict:** **PASSED — ALL 7 CONSTRAINTS SATISFIED & VERIFIED**  
-**Workspace Test Result:** 158 passed; 0 failed; 0 ignored (Exit Code: 0)  
+**Workspace Test Result:** 176 passed; 0 failed; 0 ignored (Exit Code: 0)  
 **Clippy & Formatting Quality Gates:** 0 errors, 0 warnings (`-D warnings` clean), 100% rustfmt compliant  
 
 ---
@@ -123,18 +123,20 @@ Result: **158 passed; 0 failed; 0 ignored; 100% passed**
 | `kamish-agent` (`tests/replication_liveness_remediation.rs`) | 9 | PASS |
 | `kamish-audit` (lib) | 4 | PASS |
 | `kamish-audit` (`tests/integrity_contract.rs`) | 5 | PASS |
-| `kamish-broker` (lib) | 17 | PASS |
+| `kamish-broker` (lib) | 25 | PASS |
 | `kamish-broker` (`tests/admission_control_race.rs`) | 1 | PASS |
 | `kamish-broker` (`tests/multiregion_ownership.rs`) | 3 | PASS |
 | `kamish-broker` (`tests/outbox_commit_resilience.rs`) | 7 | PASS |
 | `kamish-broker` (`tests/reservation_lifecycle_and_crash.rs`) | 6 | PASS |
+| `kamish-broker` (`tests/server_limits_and_locks.rs`) | 5 | PASS |
 | `kamish-broker` (`tests/three_region_convergence_audit.rs`) | 5 | PASS |
+| `kamish-broker` (`tests/tls_mutual_auth.rs`) | 5 | PASS |
 | `kamish-checkers` (lib) | 2 | PASS |
 | `kamish-client` (lib) | 1 | PASS |
 | `kamish-ctl` (bin) | 1 | PASS |
 | `kamish-enforce` (lib) | 4 | PASS |
 | `kamish-enforce` (`tests/red_team_residency.rs`) | 6 | PASS |
-| `kamish-log` (lib) | 5 | PASS |
+| `kamish-log` (lib) | 6 | PASS |
 | `kamish-log` (`tests/adversarial_durability.rs`) | 4 | PASS |
 | `kamish-log` (`tests/append_io_failures.rs`) | 13 | PASS |
 | `kamish-log` (`tests/record_context.rs`) | 3 | PASS |
@@ -149,7 +151,7 @@ Result: **158 passed; 0 failed; 0 ignored; 100% passed**
 | `kamish-route` (lib) | 1 | PASS |
 | `kamish-route` (`tests/route_safety.rs`) | 5 | PASS |
 | `kamish-seal` (lib) | 1 | PASS |
-| **Total Workspace Test Count** | **158** | **PASS (0 failed)** |
+| **Total Workspace Test Count** | **176** | **PASS (0 failed)** |
 
 ---
 
@@ -165,3 +167,4 @@ Result: **158 passed; 0 failed; 0 ignored; 100% passed**
 3. **Handling `lease_expired_outcome_unknown`:**
    - When a producer receives `lease_expired_outcome_unknown`, the producer MUST NOT assume the record was lost.
    - Idempotent producers must resend the record with the same `(producer_id, sequence_base)`. The broker's session deduplication will recognize committed records and prevent duplicate appending.
+
