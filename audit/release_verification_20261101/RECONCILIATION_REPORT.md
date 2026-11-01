@@ -66,7 +66,7 @@ On branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`, frontend
    - Corrected the reconciliation response type to match backend fields: `targets_reconciled`, `gaps_discovered`, and `records_scheduled_into_outbox`.
    - When in Live mode, `produceCustomEvent` dispatches real records via `gatewayClient.produce` and `verifyAuditLedgerIntegrity` invokes real `gatewayClient.verifyAudit`.
    - When in Demo mode, local WebCrypto SHA-256 hash chains and chaos scenario simulations are explicitly tagged `[DEMO]`; the UI mode switch does not mutate the broker's server-side mode.
-   - Dashboard decision aggregates, throughput, and p99 latency display `N/A` because the gateway API does not expose those aggregates; demo telemetry is not reused in Live mode.
+   - Live produce rate is derived from consecutive samples of the Prometheus successful-produce counter. Accepted/denied decision aggregates and p99 latency display `N/A` because the gateway does not expose those metrics; demo telemetry is not reused in Live mode.
    - Gateway-reported outbox pending count is displayed only when the gateway is connected. Synthetic 10Hz node countdown is suppressed during Live mode.
 
 4. **Production Reverse Proxy Template:**
@@ -86,7 +86,7 @@ On branch `audit/evidence-contract-frontend-reconciliation-2026-11-01`, frontend
 - [x] Added deployment-configurable gateway base URL (`VITE_KAMISH_GATEWAY_URL`) and Vite development proxy.
 - [x] Created same-origin reverse-proxy example (`frontend/nginx.conf.example`).
 - [x] Replaced implicit loopback CORS allowances with exact configured-origin matching; local development uses the same-origin Vite proxy.
-- [x] Removed demo-derived values from Live dashboard aggregates where no backend metric exists; unavailable decision aggregates, throughput, and p99 latency display `N/A`.
+- [x] Removed demo-derived values from Live dashboard aggregates; live produce rate is counter-derived, while unavailable accepted/denied aggregates and p99 latency display `N/A`.
 - [x] Kept the UI Demo/Live selector local to the frontend rather than mutating broker server-side mode.
 - [x] Aligned the frontend reconciliation response contract with actual gateway JSON fields.
 - [x] Updated `frontend/README.md` to reflect hybrid architecture and deployment options.
