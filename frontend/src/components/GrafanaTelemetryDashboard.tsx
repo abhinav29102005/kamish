@@ -196,7 +196,7 @@ export const GrafanaTelemetryDashboard: React.FC = () => {
 
   const invariants = [
     { id: 'INV-1', desc: 'Offsets dense & monotonic', verify: 'OrderingChecker verified' },
-    { id: 'INV-2', desc: 'Majority in-region fsync', verify: 'Local fsync quorum verified' },
+    { id: 'INV-2', desc: 'Local in-region fsync', verify: 'Local single-broker fsync (clustered quorum requires etcd)' },
     { id: 'INV-3', desc: 'Leader holds acked records', verify: 'Failover lease locked' },
     { id: 'INV-4', desc: 'Reads bounded by HWM', verify: 'Contract tested' },
     { id: 'INV-5', desc: 'Exact offset mirror match', verify: 'Watermark synced' },

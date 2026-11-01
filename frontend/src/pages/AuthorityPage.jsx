@@ -27,7 +27,9 @@ export default function AuthorityPage() {
       } else {
         // Fallback demo state
         setAuthority({
-          authority_type: "etcd 3.7.3 (External with mTLS)",
+          authority_type: "LOCAL (in-memory; quorum requires etcd)",
+          consensus_backing: "LOCAL_IN_MEMORY",
+          quorum_backed: false,
           active_region: "EU_WEST",
           monotonic_clock_ms: 1729482100000,
           ownerships: [
@@ -77,7 +79,7 @@ export default function AuthorityPage() {
             METADATA AUTHORITY & SOVEREIGN POLICY
           </h1>
           <p style={{ fontFamily: "var(--font-mono)", color: "#a855f7", margin: "0.5rem 0 0" }}>
-            etcd 3.7.3 Consensus Authority · Monotonic Lease Epochs · Signed Policy Floor
+            Metadata Authority (LOCAL in-memory; quorum requires etcd) · Monotonic Lease Epochs · Signed Policy Floor
           </p>
         </div>
 
@@ -109,7 +111,7 @@ export default function AuthorityPage() {
             AUTHORITY BACKEND
           </span>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "1.2rem", fontWeight: 700, color: "#38bdf8", display: "block", marginTop: "0.25rem" }}>
-            {authority?.authority_type || "etcd 3.7.3 External"}
+            {authority?.authority_type || "LOCAL (in-memory; quorum requires etcd)"}
           </span>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "#10b981", marginTop: "0.5rem", display: "block" }}>
             ● Active Region: {authority?.active_region || "EU_WEST"}

@@ -50,7 +50,9 @@ impl BrokerMetricsRegistry {
         let mut out = String::with_capacity(4096);
 
         // Produce metrics
-        out.push_str("# HELP kamish_produce_requests_total Total produce requests received by broker.\n");
+        out.push_str(
+            "# HELP kamish_produce_requests_total Total produce requests received by broker.\n",
+        );
         out.push_str("# TYPE kamish_produce_requests_total counter\n");
         out.push_str(&format!(
             "kamish_produce_requests_total{{region=\"{}\",status=\"success\"}} {}\n",
@@ -63,7 +65,9 @@ impl BrokerMetricsRegistry {
             self.produce_error_total.load(Ordering::Relaxed)
         ));
 
-        out.push_str("# HELP kamish_produce_bytes_total Total payload bytes committed by broker.\n");
+        out.push_str(
+            "# HELP kamish_produce_bytes_total Total payload bytes committed by broker.\n",
+        );
         out.push_str("# TYPE kamish_produce_bytes_total counter\n");
         out.push_str(&format!(
             "kamish_produce_bytes_total{{region=\"{}\"}} {}\n",
@@ -72,7 +76,9 @@ impl BrokerMetricsRegistry {
         ));
 
         // Fetch metrics
-        out.push_str("# HELP kamish_fetch_requests_total Total fetch requests handled by broker.\n");
+        out.push_str(
+            "# HELP kamish_fetch_requests_total Total fetch requests handled by broker.\n",
+        );
         out.push_str("# TYPE kamish_fetch_requests_total counter\n");
         out.push_str(&format!(
             "kamish_fetch_requests_total{{region=\"{}\",status=\"success\"}} {}\n",
@@ -86,7 +92,9 @@ impl BrokerMetricsRegistry {
         ));
 
         // Outbox queue gauges
-        out.push_str("# HELP kamish_outbox_queued_bytes Current bytes staged in destination outboxes.\n");
+        out.push_str(
+            "# HELP kamish_outbox_queued_bytes Current bytes staged in destination outboxes.\n",
+        );
         out.push_str("# TYPE kamish_outbox_queued_bytes gauge\n");
         let outboxes = broker.get_all_outboxes();
         for (peer, ob) in &outboxes {
@@ -108,7 +116,9 @@ impl BrokerMetricsRegistry {
         ));
 
         // Consumer Group metrics
-        out.push_str("# HELP kamish_consumer_groups_total Total consumer groups registered with broker.\n");
+        out.push_str(
+            "# HELP kamish_consumer_groups_total Total consumer groups registered with broker.\n",
+        );
         out.push_str("# TYPE kamish_consumer_groups_total gauge\n");
         let group_summaries = broker.consumer_groups.list_groups();
         out.push_str(&format!(
@@ -117,7 +127,9 @@ impl BrokerMetricsRegistry {
             group_summaries.len()
         ));
 
-        out.push_str("# HELP kamish_consumer_offset_commits_total Total offset commits accepted.\n");
+        out.push_str(
+            "# HELP kamish_consumer_offset_commits_total Total offset commits accepted.\n",
+        );
         out.push_str("# TYPE kamish_consumer_offset_commits_total counter\n");
         out.push_str(&format!(
             "kamish_consumer_offset_commits_total{{region=\"{}\"}} {}\n",

@@ -288,7 +288,7 @@ async fn test_role_based_access_control() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Auditor CAN trigger audit verify -> 200
+    // Auditor CAN trigger audit verify -> 503 SERVICE_UNAVAILABLE (until real on-disk verification in Step 4)
     let req = Request::builder()
         .method(Method::POST)
         .uri("/api/audit/verify")
@@ -297,7 +297,7 @@ async fn test_role_based_access_control() {
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     // Auditor CANNOT produce -> 403
     let req = Request::builder()
@@ -369,17 +369,16 @@ async fn test_real_telemetry_endpoints() {
     let json = response_json(res).await;
     assert_eq!(json["policy_version_floor"], 1);
 
-    // 5. /api/checkers
+    // 5. /api/checkers -> 503 SERVICE_UNAVAILABLE (until real in Step 4)
     let req = Request::builder()
         .uri("/api/checkers")
         .header(header::COOKIE, format!("kamish_session={session}"))
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let json = response_json(res).await;
-    assert_eq!(json["history_checker"]["status"], "PASS");
-    assert_eq!(json["canary_scanner"]["status"], "PASS");
+    assert_eq!(json["status"], "UNAVAILABLE");
 
     // 6. /api/routing
     let req = Request::builder()
@@ -540,11 +539,10 @@ async fn test_audit_verify_hash_chain() {
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     let json = response_json(res).await;
-    assert_eq!(json["verification_result"], "PASS");
-    assert_eq!(json["anchored_boundary"], true);
-    assert_eq!(json["zero_tamper_detected"], true);
+    assert_eq!(json["verification_result"], "UNAVAILABLE");
+    assert_eq!(json["operation"], "checkpoint_existence_check_only");
 }
 
 #[tokio::test]

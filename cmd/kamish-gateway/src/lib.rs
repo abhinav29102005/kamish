@@ -557,7 +557,9 @@ async fn audit_handler(State(state): State<GatewayState>) -> Json<serde_json::Va
     }))
 }
 
-async fn verify_audit_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
+async fn verify_audit_handler(
+    State(state): State<GatewayState>,
+) -> (StatusCode, Json<serde_json::Value>) {
     let owned = state.broker.owned_partitions();
     let mut verified_count = 0;
     for (topic, partition) in &owned {
@@ -567,32 +569,30 @@ async fn verify_audit_handler(State(state): State<GatewayState>) -> Json<serde_j
         }
     }
 
-    Json(serde_json::json!({
-        "verification_result": "PASS",
-        "anchored_boundary": true,
-        "total_streams_audited": owned.len(),
-        "total_checkpoints_verified": verified_count,
-        "cryptographic_signatures_valid": true,
-        "zero_tamper_detected": true,
-    }))
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "verification_result": "UNAVAILABLE",
+            "operation": "checkpoint_existence_check_only",
+            "error": "Full on-disk cryptographic hash chain verification not yet wired; full disk verification will be wired in Step 4",
+            "total_streams_checked": owned.len(),
+            "checkpoints_present": verified_count,
+        })),
+    )
 }
 
-async fn checkers_handler(State(_state): State<GatewayState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "history_checker": {
-            "status": "PASS",
-            "loss_violations": 0,
-            "duplicate_violations": 0,
-            "ordering_gaps": 0,
-            "epoch_conflicts": 0,
-        },
-        "canary_scanner": {
-            "status": "PASS",
-            "active_canary_tokens_monitored": ["SECRET_CANARY_TOKEN_999"],
-            "positive_control_verified": true,
-            "storage_leak_detected": false,
-        }
-    }))
+async fn checkers_handler(
+    State(_state): State<GatewayState>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(serde_json::json!({
+            "status": "UNAVAILABLE",
+            "error": "Live segment invariant checkers not yet executed; full execution will be wired in Step 4",
+            "history_checker": null,
+            "canary_scanner": null,
+        })),
+    )
 }
 
 async fn routing_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
