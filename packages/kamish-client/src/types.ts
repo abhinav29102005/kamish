@@ -44,11 +44,40 @@ export interface ProduceRequest extends SendRequest {
   sequence: number;
 }
 
+export type AckLevel = 'LeaderFsync' | 'InRegionQuorum';
+
 export interface ProduceResult {
   baseOffset: bigint;
   count: number;
   committedEpoch: bigint;
   reason: string;
+  ackLevel?: AckLevel;
+}
+
+export type ReplicaRole = 'Follower' | 'Candidate' | 'Leader';
+
+export interface PeerReplicaStatus {
+  node_id: string;
+  address: string;
+  is_voter: boolean;
+  connected: boolean;
+  last_ack_ms: number;
+  match_offset: number;
+}
+
+export interface QuorumStatusResponse {
+  configured: boolean;
+  group_id?: string;
+  region: string;
+  local_node_id: string;
+  role: ReplicaRole;
+  current_term: number;
+  leader_id?: string;
+  quorum_size: number;
+  total_voters: number;
+  ack_level: AckLevel;
+  commit_indices: Record<string, number>;
+  peers: PeerReplicaStatus[];
 }
 
 export interface FetchRequest extends StreamRef {

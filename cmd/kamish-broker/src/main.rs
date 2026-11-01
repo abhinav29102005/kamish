@@ -41,6 +41,14 @@ struct Args {
     /// Minimum durable policy version floor (W11)
     #[arg(long)]
     policy_floor: Option<u64>,
+
+    /// In-region replica node ID
+    #[arg(long)]
+    node_id: Option<String>,
+
+    /// Acknowledgment durability level (LeaderFsync or InRegionQuorum)
+    #[arg(long)]
+    ack_level: Option<String>,
 }
 
 #[tokio::main]
@@ -65,6 +73,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             policy_path: args.policy.clone(),
             trusted_keys_path: args.trusted_keys.clone(),
             policy_version_floor: args.policy_floor,
+            node_id: args.node_id.clone(),
+            ack_level: args.ack_level.as_ref().map(|s| {
+                if s.eq_ignore_ascii_case("InRegionQuorum") || s.eq_ignore_ascii_case("quorum") {
+                    kamish_broker::AckLevel::InRegionQuorum
+                } else {
+                    kamish_broker::AckLevel::LeaderFsync
+                }
+            }),
+            replica_group: None,
         }
     };
 
@@ -161,7 +178,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &config.data_dir,
         )?
         .with_limits(config.limits)
-        .with_catalog(catalog),
+        .with_catalog(catalog)
+        .with_replica_group(config.replica_group.clone())
+        .with_ack_level(config.ack_level.unwrap_or(kamish_broker::AckLevel::LeaderFsync)),
     );
 
     // Start proactive lease renewal worker conforming to CONTRACT.md §2.3.2 (10s TTL, 3s interval, 1s timeout)
@@ -186,6 +205,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         broker.clone(),
         retention_shutdown_rx,
         std::time::Duration::from_secs(60),
+    );
+
+    // Start in-region quorum heartbeat worker if replica group is configured
+    let (quorum_shutdown_tx, quorum_shutdown_rx) = tokio::sync::watch::channel(false);
+    let quorum_task = kamish_broker::spawn_quorum_heartbeat_worker(
+        broker.quorum.clone(),
+        broker.clone(),
+        quorum_shutdown_rx,
     );
 
     let bind_addr = format!("{}:{}", config.host, config.port);
@@ -230,6 +257,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = retention_shutdown_tx.send(true);
             let _ = witness_task.await;
             let _ = retention_task.await;
+            let _ = quorum_shutdown_tx.send(true);
+            if let Some(task) = quorum_task {
+                let _ = task.await;
+            }
         }
         res = server_task => {
             if let Err(e) = res {
@@ -241,6 +272,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = retention_shutdown_tx.send(true);
             let _ = witness_task.await;
             let _ = retention_task.await;
+            let _ = quorum_shutdown_tx.send(true);
+            if let Some(task) = quorum_task {
+                let _ = task.await;
+            }
         }
     }
 

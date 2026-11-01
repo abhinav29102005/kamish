@@ -83,6 +83,7 @@ pub fn app(state: GatewayState) -> Router {
         )
         .route("/api/consumer-groups", get(list_consumer_groups_handler))
         .route("/api/retention", get(retention_status_handler))
+        .route("/api/quorum", get(quorum_status_handler))
         .route("/api/scenarios/run", post(run_scenario_handler))
         .route("/api/mode", get(get_mode_handler).post(set_mode_handler))
         // Server-Sent Events
@@ -921,6 +922,14 @@ async fn retention_status_handler(State(state): State<GatewayState>) -> Json<ser
         "last_sweep_timestamp_ms": m.last_sweep_timestamp_ms.load(std::sync::atomic::Ordering::Relaxed),
         "active_retention_rules": m.active_retention_rules.load(std::sync::atomic::Ordering::Relaxed),
     }))
+}
+
+async fn quorum_status_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
+    let status = state.broker.quorum.status(&state.broker);
+    Json(serde_json::to_value(status).unwrap_or(serde_json::json!({
+        "status": "ERROR",
+        "message": "Failed to serialize quorum status"
+    })))
 }
 
 async fn trigger_reconciliation_handler(

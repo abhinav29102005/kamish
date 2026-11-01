@@ -139,6 +139,15 @@ pub struct BrokerConfig {
 
     #[serde(default)]
     pub policy_version_floor: Option<u64>,
+
+    #[serde(default)]
+    pub node_id: Option<String>,
+
+    #[serde(default)]
+    pub ack_level: Option<crate::AckLevel>,
+
+    #[serde(default)]
+    pub replica_group: Option<kamish_own::ReplicaGroupConfig>,
 }
 
 impl Default for BrokerConfig {
@@ -156,6 +165,9 @@ impl Default for BrokerConfig {
             policy_path: None,
             trusted_keys_path: None,
             policy_version_floor: None,
+            node_id: None,
+            ack_level: None,
+            replica_group: None,
         }
     }
 }
