@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex, RwLock};
 pub mod catalog;
 pub mod config;
 pub mod consumer_group;
+pub mod retention;
 pub mod tls;
 pub use catalog::{TenantCatalog, TopicMetadata};
 pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig, TopicConfig};
@@ -41,6 +42,9 @@ pub use consumer_group::{
     ConsumerGroup, ConsumerGroupCoordinator, GroupMember, GroupState, GroupSummary,
     HeartbeatGroupRequest, HeartbeatGroupResponse, JoinGroupRequest, JoinGroupResponse,
     LeaveGroupRequest, LeaveGroupResponse,
+};
+pub use retention::{
+    spawn_retention_worker, RetentionCoordinator, RetentionMetrics, TopicRetentionPolicy,
 };
 use std::pin::Pin;
 use thiserror::Error;
@@ -514,6 +518,7 @@ pub struct BrokerServer {
     pub key_provider: Option<Arc<dyn kamish_seal::KeyProvider>>,
     pub witness_publisher: Arc<kamish_audit::WitnessPublisher>,
     pub consumer_groups: Arc<ConsumerGroupCoordinator>,
+    pub retention: Arc<RetentionCoordinator>,
 }
 
 impl BrokerServer {
@@ -623,6 +628,7 @@ impl BrokerServer {
                 10_000,
             )),
             consumer_groups: Arc::new(ConsumerGroupCoordinator::new(&data_dir_buf)),
+            retention: Arc::new(RetentionCoordinator::new()),
         };
 
         // Load existing consumer checkpoints from disk (W22)
@@ -723,6 +729,36 @@ impl BrokerServer {
         self.connection_semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
         self.limits = limits;
         self
+    }
+
+    /// Returns a copy of all committed consumer checkpoints across all groups and topics.
+    pub fn get_all_consumer_checkpoints(&self) -> HashMap<(String, String, u32), u64> {
+        self.consumer_checkpoints.read().unwrap().clone()
+    }
+
+    /// Returns a copy of all registered destination outbox channels.
+    pub fn get_all_outboxes(&self) -> HashMap<String, DestinationOutbox> {
+        self.outboxes.read().unwrap().clone()
+    }
+
+    /// Configures topic-level retention rules (retention_ms, retention_bytes) for historical log pruning.
+    pub fn with_topic_retention(
+        self,
+        topic: impl Into<String>,
+        retention_ms: Option<u64>,
+        retention_bytes: Option<u64>,
+    ) -> Self {
+        self.retention.set_policy(TopicRetentionPolicy {
+            topic: topic.into(),
+            retention_ms,
+            retention_bytes,
+        });
+        self
+    }
+
+    /// Returns a copy of the active partition log if open.
+    pub fn get_log(&self, topic: &str, partition: u32) -> Option<kamish_log::PartitionLog> {
+        self.logs.get(&(topic.to_string(), partition))
     }
 
     /// Attaches an authorized tenant and topic catalog (W10 / W13).

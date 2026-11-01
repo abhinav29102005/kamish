@@ -179,6 +179,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::time::Duration::from_secs(5),
     );
 
+    // Start automated safe segment retention worker (§4, Workstream D)
+    let (retention_shutdown_tx, retention_shutdown_rx) = tokio::sync::watch::channel(false);
+    let retention_task = kamish_broker::spawn_retention_worker(
+        broker.retention.clone(),
+        broker.clone(),
+        retention_shutdown_rx,
+        std::time::Duration::from_secs(60),
+    );
+
     let bind_addr = format!("{}:{}", config.host, config.port);
     let (addr, server_task) = if let Some(ref tls_cfg) = config.tls {
         info!(
@@ -218,7 +227,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             broker.stop_lease_renewal();
             let _ = witness_shutdown_tx.send(true);
             let _ = renewal_task.await;
+            let _ = retention_shutdown_tx.send(true);
             let _ = witness_task.await;
+            let _ = retention_task.await;
         }
         res = server_task => {
             if let Err(e) = res {
@@ -227,7 +238,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             broker.stop_lease_renewal();
             let _ = witness_shutdown_tx.send(true);
             let _ = renewal_task.await;
+            let _ = retention_shutdown_tx.send(true);
             let _ = witness_task.await;
+            let _ = retention_task.await;
         }
     }
 

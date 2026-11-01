@@ -434,9 +434,18 @@ pub struct SparseIndexEntry {
     pub position: u64,
 }
 
+/// Result of storage reclamation under topic retention policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RetentionReclaimResult {
+    pub reclaimed_records: usize,
+    pub reclaimed_bytes: u64,
+    pub new_base_offset_floor: u64,
+}
+
 struct PartitionLogInner {
     dir: PathBuf,
     current_epoch: u64,
+    base_offset_floor: u64,
     next_offset: u64,
     high_watermark: u64,
     records: Vec<RecordEnvelope>,
@@ -541,10 +550,13 @@ impl PartitionLog {
             }
         }
 
+        let base_offset_floor = records.first().map(|r| r.base_offset).unwrap_or(0);
+
         Ok(Self {
             inner: Arc::new(RwLock::new(PartitionLogInner {
                 dir: dir_buf,
                 current_epoch: initial_epoch.max(recovered_epoch),
+                base_offset_floor,
                 next_offset,
                 high_watermark,
                 records,
@@ -772,29 +784,47 @@ impl PartitionLog {
     /// Fetches records starting at `start_offset`, capped strictly by the High-Water Mark (INV-4).
     pub fn read(&self, start_offset: u64, max_records: usize) -> Vec<RecordEnvelope> {
         let inner = self.inner.read().unwrap();
-        if start_offset >= inner.high_watermark {
+        let effective_start = start_offset.max(inner.base_offset_floor);
+        if effective_start >= inner.high_watermark || inner.records.is_empty() {
             return Vec::new();
         }
 
-        let count = std::cmp::min(max_records, (inner.high_watermark - start_offset) as usize);
+        let rel_start = (effective_start - inner.base_offset_floor) as usize;
+        if rel_start >= inner.records.len() {
+            return Vec::new();
+        }
 
-        inner.records[start_offset as usize..start_offset as usize + count].to_vec()
+        let count = std::cmp::min(max_records, inner.records.len() - rel_start);
+        inner.records[rel_start..rel_start + count].to_vec()
     }
 
     /// Sequential consumer reads between `[start_offset, end_offset)`.
     pub fn read_range(&self, start_offset: u64, end_offset: u64) -> Vec<RecordEnvelope> {
         let inner = self.inner.read().unwrap();
-        if start_offset >= inner.high_watermark || start_offset >= end_offset {
+        let effective_start = start_offset.max(inner.base_offset_floor);
+        if effective_start >= inner.high_watermark || effective_start >= end_offset || inner.records.is_empty() {
             return Vec::new();
         }
 
-        let effective_end = std::cmp::min(end_offset, inner.high_watermark) as usize;
-        let start = start_offset as usize;
-        inner.records[start..effective_end].to_vec()
+        let rel_start = (effective_start - inner.base_offset_floor) as usize;
+        if rel_start >= inner.records.len() {
+            return Vec::new();
+        }
+
+        let effective_end = std::cmp::min(end_offset, inner.high_watermark);
+        if effective_end <= effective_start {
+            return Vec::new();
+        }
+        let rel_end = (effective_end - inner.base_offset_floor) as usize;
+        inner.records[rel_start..rel_end.min(inner.records.len())].to_vec()
     }
 
     pub fn next_offset(&self) -> u64 {
         self.inner.read().unwrap().next_offset
+    }
+
+    pub fn base_offset_floor(&self) -> u64 {
+        self.inner.read().unwrap().base_offset_floor
     }
 
     pub fn current_epoch(&self) -> u64 {
@@ -829,15 +859,122 @@ impl PartitionLog {
     /// Used to safely prepare divergent suffixes for quarantine before truncating (§3.1.4, W20).
     pub fn read_suffix(&self, from_offset: u64) -> Vec<RecordEnvelope> {
         let inner = self.inner.read().unwrap();
-        if from_offset >= inner.next_offset {
+        let effective_start = from_offset.max(inner.base_offset_floor);
+        if effective_start >= inner.next_offset || inner.records.is_empty() {
             return Vec::new();
         }
-        let idx = from_offset as usize;
-        if idx < inner.records.len() {
-            inner.records[idx..].to_vec()
+        let rel_start = (effective_start - inner.base_offset_floor) as usize;
+        if rel_start < inner.records.len() {
+            inner.records[rel_start..].to_vec()
         } else {
             Vec::new()
         }
+    }
+
+    /// Safely reclaims historical records prior to `reclaim_before_offset` if they have been
+    /// fully committed and acknowledged by all active consumer groups and replication watermarks.
+    /// Uses crash-safe atomic file replacement with temporary file sync_all (§3.1, W15/W16).
+    pub fn reclaim_prefix_before_offset(
+        &self,
+        reclaim_before_offset: u64,
+    ) -> Result<RetentionReclaimResult, LogError> {
+        let mut writer_guard = self.writer_lock.lock().unwrap();
+        let mut inner = self.inner.write().unwrap();
+
+        if let Some(ref reason) = inner.fenced_reason {
+            return Err(LogError::WriterFenced(reason.clone()));
+        }
+
+        if reclaim_before_offset <= inner.base_offset_floor || inner.records.is_empty() {
+            return Ok(RetentionReclaimResult {
+                reclaimed_records: 0,
+                reclaimed_bytes: 0,
+                new_base_offset_floor: inner.base_offset_floor,
+            });
+        }
+
+        let effective_target = reclaim_before_offset.min(inner.high_watermark);
+        let split_idx = inner.records.partition_point(|r| r.base_offset < effective_target);
+
+        if split_idx == 0 {
+            return Ok(RetentionReclaimResult {
+                reclaimed_records: 0,
+                reclaimed_bytes: 0,
+                new_base_offset_floor: inner.base_offset_floor,
+            });
+        }
+
+        let retained_records = inner.records[split_idx..].to_vec();
+        let reclaimed_records_count = split_idx;
+        let mut reclaimed_bytes = 0u64;
+        for r in &inner.records[..split_idx] {
+            reclaimed_bytes += r.payload.len() as u64 + 64;
+        }
+
+        // Write replacement partition.data using tempfile and sync_all
+        let mut tmp_file = tempfile::NamedTempFile::new_in(&inner.dir)?;
+        for rec in &retained_records {
+            let serialized = serde_json::to_vec(rec)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let len_bytes = (serialized.len() as u32).to_be_bytes();
+            tmp_file.write_all(&len_bytes)?;
+            tmp_file.write_all(&serialized)?;
+        }
+        tmp_file.flush()?;
+        tmp_file.as_file().sync_all()?;
+
+        // Recompute sparse index for retained records
+        let mut new_index = Vec::new();
+        for (i, rec) in retained_records.iter().enumerate() {
+            if i % 10 == 0 || i == retained_records.len() - 1 {
+                new_index.push(SparseIndexEntry {
+                    base_offset: rec.base_offset,
+                    position: i as u64,
+                });
+            }
+        }
+
+        let idx_serialized = serde_json::to_vec(&new_index)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut tmp_idx = tempfile::NamedTempFile::new_in(&inner.dir)?;
+        tmp_idx.write_all(&idx_serialized)?;
+        tmp_idx.flush()?;
+        tmp_idx.as_file().sync_all()?;
+
+        // Drop current writer handle before rename
+        *writer_guard = None;
+
+        let log_path = inner.dir.join("partition.data");
+        let idx_path = inner.dir.join("partition.idx");
+
+        tmp_file.persist(&log_path).map_err(|e| {
+            let reason = format!("Retention atomic data replacement failed: {e}");
+            inner.fenced_reason = Some(reason.clone());
+            LogError::Io(e.error)
+        })?;
+
+        tmp_idx.persist(&idx_path).map_err(|e| {
+            let reason = format!("Retention atomic index replacement failed: {e}");
+            inner.fenced_reason = Some(reason.clone());
+            LogError::Io(e.error)
+        })?;
+
+        #[cfg(unix)]
+        {
+            let dir_file = File::open(&inner.dir)?;
+            dir_file.sync_all()?;
+        }
+
+        let new_floor = retained_records.first().map(|r| r.base_offset).unwrap_or(inner.next_offset);
+        inner.base_offset_floor = new_floor;
+        inner.records = retained_records;
+        inner.index_entries = new_index;
+
+        Ok(RetentionReclaimResult {
+            reclaimed_records: reclaimed_records_count,
+            reclaimed_bytes,
+            new_base_offset_floor: new_floor,
+        })
     }
 
     /// Truncates the log to `new_next_offset`, removing all records with `base_offset >= new_next_offset`.
