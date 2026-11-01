@@ -15,6 +15,7 @@
 //! - Non-production DevKeyProvider explicitly isolated from production paths.
 
 use kamish_policy::DestinationMode;
+use rand::rngs::OsRng;
 use rand::RngCore;
 use ring::aead::{AES_256_GCM, Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use serde::{Deserialize, Serialize};
@@ -161,7 +162,7 @@ impl KeyProvider for DevKeyProvider {
 /// Encapsulates the endpoint, authentication, and key ARN for cloud hardware security modules
 /// (e.g. AWS KMS, Google Cloud KMS, HashiCorp Vault). In this release, without live credentials,
 /// this provider validates configuration and fails closed safely.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExternalKmsConfig {
     pub provider_name: String,
     pub endpoint_url: String,
@@ -239,6 +240,8 @@ pub struct SealedEnvelope {
     pub partition: u32,
     pub epoch: u64,
     pub policy_version: u64,
+    #[serde(default)]
+    pub tenant: Option<String>,
 }
 
 /// Builds Associated Authenticated Data (AAD) binding to cryptographic envelope.
@@ -255,6 +258,27 @@ pub fn compute_aead_aad(
         topic, partition, epoch, policy_version, key_id, key_version
     )
     .into_bytes()
+}
+
+/// Builds Associated Authenticated Data (AAD) with optional tenant context binding.
+pub fn compute_aead_aad_with_tenant(
+    tenant: Option<&str>,
+    topic: &str,
+    partition: u32,
+    epoch: u64,
+    policy_version: u64,
+    key_id: &str,
+    key_version: u32,
+) -> Vec<u8> {
+    if let Some(t) = tenant {
+        format!(
+            "kamish-aead-v2:{}:{}:{}:{}:{}:{}:{}",
+            t, topic, partition, epoch, policy_version, key_id, key_version
+        )
+        .into_bytes()
+    } else {
+        compute_aead_aad(topic, partition, epoch, policy_version, key_id, key_version)
+    }
 }
 
 /// Authenticated Encryption Engine implementing ChaCha20-Poly1305 and AES-256-GCM.
@@ -274,11 +298,39 @@ impl AeadSealEngine {
         key_version: u32,
         key_provider: &dyn KeyProvider,
     ) -> Result<SealedEnvelope, SealError> {
+        Self::seal_with_tenant(
+            payload,
+            algorithm,
+            None,
+            topic,
+            partition,
+            epoch,
+            policy_version,
+            key_id,
+            key_version,
+            key_provider,
+        )
+    }
+
+    /// Encrypts and authenticates payload with tenant binding and the requested AEAD algorithm.
+    #[allow(clippy::too_many_arguments)]
+    pub fn seal_with_tenant(
+        payload: &[u8],
+        algorithm: AeadAlgorithm,
+        tenant: Option<&str>,
+        topic: &str,
+        partition: u32,
+        epoch: u64,
+        policy_version: u64,
+        key_id: &str,
+        key_version: u32,
+        key_provider: &dyn KeyProvider,
+    ) -> Result<SealedEnvelope, SealError> {
         let raw_key = key_provider.get_key(key_id, key_version, key_provider.home_region())?;
 
-        // 1. Generate 96-bit cryptographically secure random nonce
+        // 1. Generate 96-bit cryptographically secure random nonce via OS CSPRNG
         let mut nonce_bytes = [0u8; 12];
-        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        OsRng.fill_bytes(&mut nonce_bytes);
 
         // 2. Select cipher algorithm
         let ring_alg = match algorithm {
@@ -291,9 +343,16 @@ impl AeadSealEngine {
             .map_err(|e| SealError::CryptoError(format!("UnboundKey error: {e:?}")))?;
         let key = LessSafeKey::new(unbound_key);
 
-        // 4. Construct AAD
-        let aad_bytes =
-            compute_aead_aad(topic, partition, epoch, policy_version, key_id, key_version);
+        // 4. Construct AAD with tenant binding
+        let aad_bytes = compute_aead_aad_with_tenant(
+            tenant,
+            topic,
+            partition,
+            epoch,
+            policy_version,
+            key_id,
+            key_version,
+        );
         let aad = Aad::from(&aad_bytes);
 
         // 5. Encrypt in-place with tag appended
@@ -316,6 +375,7 @@ impl AeadSealEngine {
             partition,
             epoch,
             policy_version,
+            tenant: tenant.map(|t| t.to_string()),
         })
     }
 
@@ -337,7 +397,8 @@ impl AeadSealEngine {
             .map_err(|e| SealError::CryptoError(format!("UnboundKey error: {e:?}")))?;
         let key = LessSafeKey::new(unbound_key);
 
-        let aad_bytes = compute_aead_aad(
+        let aad_bytes = compute_aead_aad_with_tenant(
+            envelope.tenant.as_deref(),
             &envelope.topic,
             envelope.partition,
             envelope.epoch,

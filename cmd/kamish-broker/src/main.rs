@@ -82,8 +82,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }),
             replica_group: None,
+            kms: None,
         }
     };
+
+    if let Some(ref s) = args.ack_level {
+        config.ack_level = Some(if s.eq_ignore_ascii_case("InRegionQuorum") || s.eq_ignore_ascii_case("quorum") {
+            kamish_broker::AckLevel::InRegionQuorum
+        } else {
+            kamish_broker::AckLevel::LeaderFsync
+        });
+    }
 
     if args.policy.is_some() {
         config.policy_path = args.policy;
@@ -169,19 +178,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let catalog = config.build_catalog();
-    let broker = Arc::new(
-        BrokerServer::try_new(
-            &config.region,
-            enforcer,
-            meta,
-            config.peers,
-            &config.data_dir,
-        )?
-        .with_limits(config.limits)
-        .with_catalog(catalog)
-        .with_replica_group(config.replica_group.clone())
-        .with_ack_level(config.ack_level.unwrap_or(kamish_broker::AckLevel::LeaderFsync)),
-    );
+    let mut broker_builder = BrokerServer::try_new(
+        &config.region,
+        enforcer,
+        meta,
+        config.peers,
+        &config.data_dir,
+    )?
+    .with_limits(config.limits)
+    .with_catalog(catalog)
+    .with_replica_group(config.replica_group.clone())
+    .with_ack_level(config.ack_level.unwrap_or(kamish_broker::AckLevel::LeaderFsync));
+
+    if let Some(ref kms_cfg) = config.kms {
+        info!(
+            provider = %kms_cfg.provider_name,
+            endpoint = %kms_cfg.endpoint_url,
+            "Configuring external KMS provider boundary for sealed replication"
+        );
+        let provider = Arc::new(kamish_seal::ExternalKmsProvider::new(kms_cfg.clone()));
+        broker_builder = broker_builder.with_key_provider(provider);
+    }
+
+    let broker = Arc::new(broker_builder);
 
     // Start proactive lease renewal worker conforming to CONTRACT.md §2.3.2 (10s TTL, 3s interval, 1s timeout)
     let renewal_task = broker.start_lease_renewal_worker(

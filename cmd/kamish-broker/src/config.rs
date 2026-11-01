@@ -148,6 +148,9 @@ pub struct BrokerConfig {
 
     #[serde(default)]
     pub replica_group: Option<kamish_own::ReplicaGroupConfig>,
+
+    #[serde(default)]
+    pub kms: Option<kamish_seal::ExternalKmsConfig>,
 }
 
 impl Default for BrokerConfig {
@@ -168,6 +171,7 @@ impl Default for BrokerConfig {
             node_id: None,
             ack_level: None,
             replica_group: None,
+            kms: None,
         }
     }
 }
