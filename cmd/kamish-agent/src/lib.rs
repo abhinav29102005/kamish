@@ -1135,6 +1135,8 @@ mod tests {
                 class_id: "global-stream".to_string(),
                 payload: b"p1".to_vec(),
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             },
         );
         let task2 = ReplicationTask::new(
@@ -1148,6 +1150,8 @@ mod tests {
                 class_id: "global-stream".to_string(),
                 payload: b"p2".to_vec(),
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             },
         );
         let task3 = ReplicationTask::new(
@@ -1161,6 +1165,8 @@ mod tests {
                 class_id: "global-stream".to_string(),
                 payload: b"p3".to_vec(),
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             },
         );
 

@@ -410,6 +410,7 @@ fn test_sync_failure_state_a_record_persisted_on_disk_recovers_and_deduplicates(
         origin_region: "eu-west".into(),
         request_policy: "strict".into(),
         replication_targets: vec!["us-east".into()],
+        source_generation: 1,
     };
     let o0 = log
         .append_with_context(1, "orders", 1, b"order-0".to_vec(), Some(ctx0))
@@ -435,6 +436,7 @@ fn test_sync_failure_state_a_record_persisted_on_disk_recovers_and_deduplicates(
         origin_region: "eu-west".into(),
         request_policy: "strict".into(),
         replication_targets: vec!["us-east".into()],
+        source_generation: 1,
     };
 
     let err = log

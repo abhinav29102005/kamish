@@ -8,6 +8,7 @@ fn context() -> RecordContext {
         origin_region: "eu".into(),
         request_policy: "StrictLocal".into(),
         replication_targets: vec![],
+        source_generation: 1,
     }
 }
 

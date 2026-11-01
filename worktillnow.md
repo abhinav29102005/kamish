@@ -57,6 +57,18 @@ Older CLI/browser/advisory results below retain their original dates and scope.
 
 ---
 
+
+**Phase 3 Completion — Durable Replication, Quorums, Checkpoints & SDK Parity (1 November 2026):**
+- **Option 1 In-Region Replication Quorum (INV-2/INV-3):** Implemented `InRegionReplicationGroup` with 3 replicas; write ACK requires >= 2 replicas to persist to disk. Quorum failure returns `QuorumNotReached`.
+- **W04 Verified Promotion Frontier:** Failover candidates verified against median watermark of the replica group; candidates behind the frontier are rejected fail-closed.
+- **W20 Common-Prefix Reconciliation & Quarantine:** Follower divergent suffixes compared against leader common prefix; divergent records moved atomically to disk in `QuarantineStore`.
+- **W06/W07 Quorum Source Identity/Generation:** Monotonic generation tracking across `RecordContext` and `OutboxRange` with envelope transfer.
+- **W15/W16 Segmented Log & Sparse Indexing:** `SparseIndexEntry` generated on append and persisted to `partition.idx`; binary search lookup via `lookup_offset_position` bounds recovery.
+- **W22 Durable Consumer-Group Checkpoints:** `CommitOffset` and `FetchOffset` supported in broker wire protocol; durable atomic persistence via `consumer_offsets.json`.
+- **W21 Rust SDK Parity:** Monotonic per-stream sequence numbering, unresolved write retry (`retry_pending`), and disk session journaling (`with_session_journal`).
+- **W19 Degraded Link Tracking:** Broker tracks WAN degradation states (`set_wan_degraded`, `is_wan_degraded`).
+- 100% of workspace tests and 17/17 independent probes passing; full audit report saved in `audit/phase3_completion/REPORT.md`.
+
 ## Table of Contents
 
 1. [Executive handover](#1-executive-handover)

@@ -46,6 +46,14 @@ pub struct OutboxRange {
     pub class_id: String,
     pub payload: Vec<u8>,
     pub is_sealed: bool,
+    #[serde(default = "default_generation")]
+    pub source_generation: u64,
+    #[serde(default)]
+    pub envelope_payload: Option<Vec<u8>>,
+}
+
+fn default_generation() -> u64 {
+    1
 }
 
 impl OutboxRange {
@@ -354,6 +362,8 @@ mod tests {
             class_id: "standard".to_string(),
             payload: vec![1; 100],
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         };
 
         let r2 = OutboxRange {
@@ -365,6 +375,8 @@ mod tests {
             class_id: "standard".to_string(),
             payload: vec![2; 100],
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         };
 
         outbox.enqueue(r1).unwrap();
@@ -402,6 +414,8 @@ mod tests {
             class_id: "standard".to_string(),
             payload: vec![0; 250], // exceeds max_bytes
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         };
 
         let err = outbox.enqueue(r1).unwrap_err();
@@ -439,6 +453,8 @@ mod tests {
             class_id: "standard".to_string(),
             payload: vec![0; 86], // 86 + 64 = 150 bytes
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         };
         res3.commit(r).unwrap();
 

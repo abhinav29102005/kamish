@@ -30,6 +30,8 @@ chrono = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
+kamish-own = { path = "../../crates/kamish-own" }
+kamish-client = { path = "../../crates/kamish-client" }
 tempfile = "3.17"
 rcgen = { workspace = true }
 chrono = { workspace = true }

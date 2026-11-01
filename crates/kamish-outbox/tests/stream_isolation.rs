@@ -10,6 +10,8 @@ fn range(partition: u32) -> OutboxRange {
         class_id: "class".into(),
         payload: vec![0; 36],
         is_sealed: false,
+        source_generation: 1,
+        envelope_payload: None,
     }
 }
 

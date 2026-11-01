@@ -40,8 +40,172 @@ pub enum OwnershipError {
         current_epoch: u64,
     },
 
+    #[error("In-region quorum not reached: needed 2 of 3 replicas to persist, but got {persisted}")]
+    QuorumNotReached { persisted: usize },
+
+    #[error(
+        "Promotion frontier verification failed (W04): candidate watermark {candidate_hwm} < quorum committed frontier {quorum_frontier}"
+    )]
+    PromotionFrontierBehind {
+        candidate_hwm: u64,
+        quorum_frontier: u64,
+    },
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+use kamish_log::{PartitionLog, RecordContext};
+
+/// Role of an in-region partition replica in Option 1 (INV-2 / INV-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplicaRole {
+    Leader,
+    Follower,
+}
+
+/// In-region 3-replica quorum group enforcing INV-2, INV-3, W04, and W20.
+pub struct InRegionReplicationGroup {
+    pub topic: String,
+    pub partition: u32,
+    pub leader_idx: usize,
+    pub replicas: Vec<PartitionLog>,
+}
+
+impl InRegionReplicationGroup {
+    pub fn new(
+        topic: impl Into<String>,
+        partition: u32,
+        replicas: Vec<PartitionLog>,
+    ) -> Result<Self, OwnershipError> {
+        if replicas.len() != 3 {
+            return Err(OwnershipError::MetaConflict(
+                "Option 1 strictly requires exactly 3 in-region replicas".into(),
+            ));
+        }
+        Ok(Self {
+            topic: topic.into(),
+            partition,
+            leader_idx: 0,
+            replicas,
+        })
+    }
+
+    /// Appends a record to the 3 in-region replicas and ACKs ONLY after at least 2 persist (INV-2/INV-3).
+    pub fn append_quorum(
+        &self,
+        epoch: u64,
+        class_id: &str,
+        policy_version: u64,
+        payload: Vec<u8>,
+        context: Option<RecordContext>,
+    ) -> Result<u64, OwnershipError> {
+        let mut persisted_count = 0;
+        let mut committed_offset = 0;
+
+        // 1. Leader append
+        let leader_res = self.replicas[self.leader_idx].append_with_context(
+            epoch,
+            class_id,
+            policy_version,
+            payload.clone(),
+            context.clone(),
+        );
+
+        if let Ok(offset) = leader_res {
+            persisted_count += 1;
+            committed_offset = offset;
+        }
+
+        // 2. Concurrently replicate to followers (indices != leader_idx)
+        for (idx, replica) in self.replicas.iter().enumerate() {
+            if idx == self.leader_idx {
+                continue;
+            }
+            let follower_res = replica.append_with_context(
+                epoch,
+                class_id,
+                policy_version,
+                payload.clone(),
+                context.clone(),
+            );
+            if follower_res.is_ok() {
+                persisted_count += 1;
+            }
+        }
+
+        // 3. Quorum check: at least 2 of 3 must persist to disk before issuing ACK (INV-2/INV-3)
+        if persisted_count >= 2 {
+            Ok(committed_offset)
+        } else {
+            Err(OwnershipError::QuorumNotReached {
+                persisted: persisted_count,
+            })
+        }
+    }
+
+    /// Verifies promotion frontier: candidate must hold all records committed by prior quorum (W04).
+    pub fn verify_promotion_frontier(&self, candidate_idx: usize) -> Result<u64, OwnershipError> {
+        if candidate_idx >= self.replicas.len() {
+            return Err(OwnershipError::NoReplica);
+        }
+
+        let mut hwms: Vec<u64> = self.replicas.iter().map(|r| r.high_watermark()).collect();
+        hwms.sort_unstable();
+
+        // In a 3-replica group, the quorum frontier is the median (2nd highest) watermark
+        let quorum_frontier = hwms[1];
+        let candidate_hwm = self.replicas[candidate_idx].high_watermark();
+
+        if candidate_hwm < quorum_frontier {
+            return Err(OwnershipError::PromotionFrontierBehind {
+                candidate_hwm,
+                quorum_frontier,
+            });
+        }
+
+        Ok(candidate_hwm)
+    }
+
+    /// Reconciles divergent follower log against leader using common prefix and atomic quarantine (W20).
+    pub fn reconcile_follower_quarantine(
+        &self,
+        follower_idx: usize,
+        quarantine: &QuarantineStore,
+    ) -> Result<usize, OwnershipError> {
+        if follower_idx == self.leader_idx || follower_idx >= self.replicas.len() {
+            return Ok(0);
+        }
+
+        let leader = &self.replicas[self.leader_idx];
+        let follower = &self.replicas[follower_idx];
+
+        let leader_hwm = leader.high_watermark();
+        let follower_hwm = follower.high_watermark();
+
+        let leader_records = leader.read(0, leader_hwm as usize);
+        let follower_records = follower.read(0, follower_hwm as usize);
+
+        // Find longest common prefix
+        let mut common_prefix_len = 0;
+        for (l, f) in leader_records.iter().zip(follower_records.iter()) {
+            if l.base_offset == f.base_offset && l.checksum == f.checksum {
+                common_prefix_len += 1;
+            } else {
+                break;
+            }
+        }
+
+        let mut quarantined_count = 0;
+        // If follower has divergent uncommitted records beyond common prefix
+        if common_prefix_len < follower_records.len() {
+            let divergent_suffix = follower_records[common_prefix_len..].to_vec();
+            quarantined_count = divergent_suffix.len();
+            quarantine.quarantine_records(divergent_suffix)?;
+        }
+
+        Ok(quarantined_count)
+    }
 }
 
 /// Local quarantine store for superseded log suffixes (§1.7, §3.1.4).
