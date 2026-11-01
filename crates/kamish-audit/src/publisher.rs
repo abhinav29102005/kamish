@@ -319,9 +319,9 @@ impl WitnessPublisher {
         tmp_file.write_all(&serialized)?;
         tmp_file.flush()?;
         tmp_file.as_file().sync_all()?;
-        tmp_file
-            .persist(&journal_path)
-            .map_err(|e| AuditError::WitnessError(format!("Witness journal atomic persist failed: {e}")))?;
+        tmp_file.persist(&journal_path).map_err(|e| {
+            AuditError::WitnessError(format!("Witness journal atomic persist failed: {e}"))
+        })?;
         Ok(())
     }
 

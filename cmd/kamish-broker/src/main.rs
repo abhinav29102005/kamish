@@ -87,11 +87,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if let Some(ref s) = args.ack_level {
-        config.ack_level = Some(if s.eq_ignore_ascii_case("InRegionQuorum") || s.eq_ignore_ascii_case("quorum") {
-            kamish_broker::AckLevel::InRegionQuorum
-        } else {
-            kamish_broker::AckLevel::LeaderFsync
-        });
+        config.ack_level = Some(
+            if s.eq_ignore_ascii_case("InRegionQuorum") || s.eq_ignore_ascii_case("quorum") {
+                kamish_broker::AckLevel::InRegionQuorum
+            } else {
+                kamish_broker::AckLevel::LeaderFsync
+            },
+        );
     }
 
     if args.policy.is_some() {
@@ -189,10 +191,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .with_catalog(catalog)
     .with_replica_group(config.replica_group.clone())
     .with_ack_level(
-            config
-                .ack_level
-                .unwrap_or(kamish_broker::AckLevel::LeaderFsync),
-        );
+        config
+            .ack_level
+            .unwrap_or(kamish_broker::AckLevel::LeaderFsync),
+    );
 
     if let Some(ref kms_cfg) = config.kms {
         info!(

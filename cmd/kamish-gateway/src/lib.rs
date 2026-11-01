@@ -589,7 +589,8 @@ async fn authority_handler(State(state): State<GatewayState>) -> Json<serde_json
     let total_quarantined = state.broker.quarantine().count();
     let is_quorum_configured = state.broker.quorum.is_configured();
     let is_quorum_active = state.broker.ack_level == kamish_broker::AckLevel::InRegionQuorum;
-    let is_multi_region = state.broker.meta.deployment_mode() == kamish_meta::DeploymentMode::MultiRegion;
+    let is_multi_region =
+        state.broker.meta.deployment_mode() == kamish_meta::DeploymentMode::MultiRegion;
 
     let (authority_type, consensus_backing) = if is_quorum_configured && is_quorum_active {
         ("IN_REGION_QUORUM_CONSENSUS", "PRIMARY_BACKUP_QUORUM")

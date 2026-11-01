@@ -1749,7 +1749,9 @@ impl BrokerServer {
                 .quorum_appends_total
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         } else {
-            let _ = self.quorum.advance_commit_index(&req.topic, req.partition, target_hwm);
+            let _ = self
+                .quorum
+                .advance_commit_index(&req.topic, req.partition, target_hwm);
         }
 
         Ok(ProduceResponse {
