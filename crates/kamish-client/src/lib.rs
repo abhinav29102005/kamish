@@ -309,6 +309,8 @@ impl KamishConsumer {
             topic: topic.to_string(),
             partition,
             offset,
+            generation_id: None,
+            member_id: None,
         });
 
         let mut client = self.client.lock().await;

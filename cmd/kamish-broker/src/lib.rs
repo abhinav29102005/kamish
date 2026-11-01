@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex, RwLock};
 pub mod catalog;
 pub mod config;
 pub mod consumer_group;
+pub mod metrics;
 pub mod retention;
 pub mod tls;
 pub use catalog::{TenantCatalog, TopicMetadata};
@@ -43,6 +44,7 @@ pub use consumer_group::{
     HeartbeatGroupRequest, HeartbeatGroupResponse, JoinGroupRequest, JoinGroupResponse,
     LeaveGroupRequest, LeaveGroupResponse,
 };
+pub use metrics::BrokerMetricsRegistry;
 pub use retention::{
     spawn_retention_worker, RetentionCoordinator, RetentionMetrics, TopicRetentionPolicy,
 };
@@ -519,6 +521,7 @@ pub struct BrokerServer {
     pub witness_publisher: Arc<kamish_audit::WitnessPublisher>,
     pub consumer_groups: Arc<ConsumerGroupCoordinator>,
     pub retention: Arc<RetentionCoordinator>,
+    pub metrics: Arc<BrokerMetricsRegistry>,
 }
 
 impl BrokerServer {
@@ -629,6 +632,7 @@ impl BrokerServer {
             )),
             consumer_groups: Arc::new(ConsumerGroupCoordinator::new(&data_dir_buf)),
             retention: Arc::new(RetentionCoordinator::new()),
+            metrics: Arc::new(BrokerMetricsRegistry::new()),
         };
 
         // Load existing consumer checkpoints from disk (W22)

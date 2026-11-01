@@ -58,6 +58,7 @@ pub fn app(state: GatewayState) -> Router {
         .route("/api/auth/logout", post(logout_handler))
         .route("/api/auth/me", get(me_handler))
         // Status & Real Telemetry
+        .route("/metrics", get(metrics_handler))
         .route("/api/status", get(status_handler))
         .route("/api/streams", get(streams_handler))
         .route("/api/authority", get(authority_handler))
@@ -153,7 +154,7 @@ async fn security_middleware(
     }
 
     // Public endpoints that do not require authentication
-    if path == "/api/auth/login" {
+    if path == "/api/auth/login" || path == "/metrics" {
         let mut resp = next.run(req).await;
         apply_security_headers(resp.headers_mut(), origin_opt.as_deref());
         return Ok(resp);
@@ -327,6 +328,15 @@ async fn me_handler(
 // ---------------------------------------------------------------------------
 // Handlers: Real Broker Data & Telemetry
 // ---------------------------------------------------------------------------
+
+async fn metrics_handler(State(state): State<GatewayState>) -> impl IntoResponse {
+    let prometheus_text = state.broker.metrics.render_prometheus(&state.broker);
+    (
+        axum::http::StatusCode::OK,
+        [("content-type", "text/plain; version=0.0.4; charset=utf-8")],
+        prometheus_text,
+    )
+}
 
 async fn status_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
     let region = state.broker.region.clone();
