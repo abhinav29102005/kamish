@@ -103,7 +103,11 @@ impl SealEngine {
                 // Key must be retrieved from the home key service
                 let key = key_service.get_key(key_id, key_service.home_region())?;
 
-                // Simple robust XOR-CTR + HMAC-SHA256 authenticated encryption
+                // NOTE: Reference mock prototype for destination mode state transitions (§3.4.5).
+                // Does NOT provide production cryptographic confidentiality. Production sealed replication
+                // requires a vetted AEAD cipher (e.g. ChaCha20-Poly1305 / AES-256-GCM) with 96-bit random
+                // nonces, AAD binding topic/partition/epoch, and hardware KMS/HSM custody.
+                // In the production broker, sealed replication fails closed.
                 let mut ciphertext = Vec::with_capacity(payload.len());
                 for (i, byte) in payload.iter().enumerate() {
                     let keystream_byte = key[i % 32] ^ ((i as u8).wrapping_mul(31));

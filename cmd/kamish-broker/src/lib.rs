@@ -648,7 +648,7 @@ impl BrokerServer {
             req.offset,
         );
 
-        // Durable checkpoint persistence (W22)
+        // Durable checkpoint persistence with fsync (W22, CONTRACT §3.1)
         let offsets_file = self.data_dir.join("consumer_offsets.json");
         let tmp_file = self.data_dir.join("consumer_offsets.json.tmp");
         let serialized_map: HashMap<String, u64> = checkpoints
@@ -656,7 +656,11 @@ impl BrokerServer {
             .map(|((g, t, p), off)| (format!("{}:{}:{}", g, t, p), *off))
             .collect();
         if let Ok(bytes) = serde_json::to_vec(&serialized_map) {
-            let _ = std::fs::write(&tmp_file, &bytes);
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::File::create(&tmp_file) {
+                let _ = f.write_all(&bytes);
+                let _ = f.sync_all();
+            }
             let _ = std::fs::rename(&tmp_file, &offsets_file);
         }
         Ok(req.offset)
@@ -2234,6 +2238,19 @@ impl BrokerServer {
                 let group_id = c.group_id.clone();
                 let topic = c.topic.clone();
                 let partition = c.partition;
+
+                if let Some(id) = identity {
+                    let catalog = self.catalog.read().unwrap();
+                    if let Some(topic_meta) = catalog.get_topic(&topic) {
+                        if !id.is_authorized_for_tenant(&topic_meta.owner_tenant) {
+                            return BrokerResponse::Error(format!(
+                                "Tenant authorization mismatch: client tenant '{}' cannot commit checkpoint for topic '{}' owned by '{}'",
+                                id.tenant, topic, topic_meta.owner_tenant
+                            ));
+                        }
+                    }
+                }
+
                 match self.commit_offset(c) {
                     Ok(offset) => BrokerResponse::OffsetCommitted {
                         group_id,
@@ -2245,6 +2262,18 @@ impl BrokerServer {
                 }
             }
             BrokerRequest::FetchOffset(f) => {
+                if let Some(id) = identity {
+                    let catalog = self.catalog.read().unwrap();
+                    if let Some(topic_meta) = catalog.get_topic(&f.topic) {
+                        if !id.is_authorized_for_tenant(&topic_meta.owner_tenant) {
+                            return BrokerResponse::Error(format!(
+                                "Tenant authorization mismatch: client tenant '{}' cannot fetch checkpoint for topic '{}' owned by '{}'",
+                                id.tenant, f.topic, topic_meta.owner_tenant
+                            ));
+                        }
+                    }
+                }
+
                 let offset = self.fetch_offset(&f);
                 BrokerResponse::OffsetFetched {
                     group_id: f.group_id,
@@ -2484,7 +2513,7 @@ impl BrokerServer {
                 }
             };
 
-            // Per-client identity & role enforcement (W09/W13):
+            // Per-client identity & role enforcement (W09/W10/W13):
             if let Some(ref identity) = client_identity {
                 match &req {
                     BrokerRequest::Produce(_) if !identity.has_role("Producer") => {
@@ -2509,9 +2538,38 @@ impl BrokerServer {
                         writer.flush().await?;
                         continue;
                     }
-                    BrokerRequest::Replicate(_) if !identity.has_role("Agent") => {
+                    BrokerRequest::CommitOffset(_) | BrokerRequest::FetchOffset(_)
+                        if !identity.has_role("Consumer") =>
+                    {
+                        let err_resp = BrokerResponse::Error(format!(
+                            "Authorization denied: principal {:?} lacks Consumer role for offset checkpoints",
+                            identity.principal
+                        ));
+                        let mut serialized = serde_json::to_vec(&err_resp)?;
+                        serialized.push(b'\n');
+                        writer.write_all(&serialized).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+                    BrokerRequest::Replicate(_) | BrokerRequest::Heartbeat(_)
+                        if !identity.has_role("Agent") =>
+                    {
                         let err_resp = BrokerResponse::Error(format!(
                             "Authorization denied: principal {:?} lacks Agent role (W09)",
+                            identity.principal
+                        ));
+                        let mut serialized = serde_json::to_vec(&err_resp)?;
+                        serialized.push(b'\n');
+                        writer.write_all(&serialized).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+                    BrokerRequest::PromotePartition { .. }
+                    | BrokerRequest::QuarantineDivergentSuffix { .. }
+                        if !identity.has_role("Operator") && !identity.has_role("Admin") =>
+                    {
+                        let err_resp = BrokerResponse::Error(format!(
+                            "Authorization denied: principal {:?} lacks Operator or Admin role for partition management",
                             identity.principal
                         ));
                         let mut serialized = serde_json::to_vec(&err_resp)?;
