@@ -11,15 +11,17 @@
 | Prepared | 1 November 2026 |
 | Project | **Kamish**, originally documented as **Hydra Stream** |
 | Repository | `https://github.com/abhinav29102005/kamish` |
-| Verified Release Revision | `3bab180` (rebased on `6c0562e`) |
+| Tested Source Revision | `3bab180` (reported 261/261 passing) |
+| Documentation/Evidence Revision | `aa5d652` |
+| Release Candidate Revision | **Not yet designated** |
 | Workspace Verification Run | `run-verification-20261101-113645` |
 | Last recorded comprehensive validation | `audit/release_verification_20261101/REPORT.md` |
 | Rust workspace version | `0.1.0` |
 | Node SDK version | `0.1.0-alpha.1` |
 | Automated tests passing | **261 / 261 (100% PASS)** |
-| Development status | **Verified distributed event broker and regional replication system** |
-| Public-production release status | **APPROVED / RELEASE READY** |
-| Current phase | **Verification & Hardening Phase Complete — Release Ready** |
+| Development status | **Local automated verification reported passing; external/deployed claims scoped in reconciliation report** |
+| Public-production release status | **Not established by local verification alone** |
+| Current phase | **Evidence/contract reconciliation; deployed frontend/backend integration pending** |
 
 **LOCAL VERIFICATION RESULT (Run ID: `run-verification-20261101-113645`; source revision `3bab180`):**
 - Completed exhaustive workspace verification across all 15 crates and integration test suites.
