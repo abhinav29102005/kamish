@@ -19,8 +19,9 @@ use kamish_log::{
     LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager,
 };
 use kamish_meta::{
-    DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, PartitionOwnership,
-    PolicyEngine, RegionId, ResidencyPolicy, StreamEvent, StreamId,
+    DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, MonotonicClock,
+    PartitionOwnership, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent, StreamId,
+    SystemMonotonicClock,
 };
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
@@ -244,6 +245,7 @@ pub struct BrokerServer {
     sessions: Arc<StripedStore<(String, u32), SessionManager>>,
     partition_operations: Arc<StripedStore<(String, u32), PartitionLock>>,
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
+    pub clock: Arc<dyn MonotonicClock>,
 }
 
 impl BrokerServer {
@@ -329,6 +331,7 @@ impl BrokerServer {
             sessions: Arc::new(StripedStore::new()),
             partition_operations: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
+            clock: Arc::new(SystemMonotonicClock::new()),
         };
         for entry in std::fs::read_dir(&broker.data_dir)? {
             let entry = entry?;
@@ -365,6 +368,12 @@ impl BrokerServer {
         self.policy_engine = Some(engine);
     }
 
+    /// Attaches an injectable monotonic clock interface.
+    pub fn with_clock(mut self, clock: Arc<dyn MonotonicClock>) -> Self {
+        self.clock = clock;
+        self
+    }
+
     /// Claims or updates partition ownership via atomic CAS on the metadata authority.
     pub fn claim_partition_ownership(
         &self,
@@ -389,6 +398,27 @@ impl BrokerServer {
                         current,
                         attempted: proposed,
                     }
+                }
+                kamish_meta::MetaError::LeaseConflict { .. } => {
+                    BrokerError::PolicyDenied("prior_owner_lease_active".into())
+                }
+                other => BrokerError::Authority(other.to_string()),
+            })
+    }
+
+    /// Reacquires or renews local write authority for a persisted stream belonging to this region.
+    pub fn reacquire_partition_ownership(
+        &self,
+        topic: &str,
+        partition: u32,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, BrokerError> {
+        let stream = StreamId::new(topic, partition);
+        self.meta
+            .reacquire_ownership(&stream, &self.region, lease_duration_ms)
+            .map_err(|e| match e {
+                kamish_meta::MetaError::LeaseConflict { .. } => {
+                    BrokerError::PolicyDenied("prior_owner_lease_active".into())
                 }
                 other => BrokerError::Authority(other.to_string()),
             })
@@ -429,8 +459,17 @@ impl BrokerServer {
         let epoch = ownership.as_ref().map_or(1, |owner| owner.epoch);
         let response = self.produce_at_epoch(req, epoch)?;
         if let Some(ref owner) = ownership {
-            let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
-            if now >= owner.lease_expiry_ns {
+            let post_ownership = self.meta.get_ownership(&topic, partition);
+            let post_valid = match post_ownership {
+                Some(ref post) => {
+                    let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+                    post.owner_region == self.region
+                        && post.epoch == owner.epoch
+                        && now < post.lease_expiry_ns
+                }
+                None => false,
+            };
+            if !post_valid {
                 // Append may have committed; never send a successful ACK
                 // after lease expiry. The client must resolve/retry identity.
                 return Err(BrokerError::PolicyDenied(
@@ -1662,6 +1701,18 @@ mod tests {
             .compare_and_swap_epoch(&stream, 0, 7, "region-us", 60_000)
             .unwrap();
         assert!(broker.produce(req.clone()).is_err());
+        // Transfer while region-us lease is active must fail with LeaseConflict
+        let conflict_err = broker
+            .meta
+            .compare_and_swap_epoch(&stream, 7, 8, "region-eu", -1)
+            .unwrap_err();
+        assert!(matches!(
+            conflict_err,
+            kamish_meta::MetaError::LeaseConflict { .. }
+        ));
+
+        // After revoking the prior owner's lease, transfer succeeds
+        broker.meta.revoke_lease(&stream, 0).unwrap();
         broker
             .meta
             .compare_and_swap_epoch(&stream, 7, 8, "region-eu", -1)

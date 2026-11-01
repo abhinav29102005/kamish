@@ -170,6 +170,12 @@ impl EtcdMetadataAuthority {
         self.local_leases.read().unwrap().get(&key).cloned()
     }
 
+    /// Stores a local lease directly into cache (used for unit/integration testing of local lease path).
+    pub fn insert_local_lease_for_test(&self, stream: StreamId, lease: LocalLease) {
+        let key = (stream.topic, stream.partition);
+        self.local_leases.write().unwrap().insert(key, lease);
+    }
+
     /// Queries the authoritative ownership record from consensus directly without checking local lease cache.
     pub fn get_ownership_consensus(&self, stream: &StreamId) -> Option<PartitionOwnership> {
         self.block_on(async {
@@ -202,8 +208,8 @@ impl EtcdMetadataAuthority {
             let epoch_k = Self::epoch_key(stream);
             let owner_k = Self::owner_key(stream);
 
-            // 1. Grant etcd lease with duration
-            let ttl_sec = std::cmp::max(1, lease_duration_ms / 1000);
+            // 1. Grant etcd lease with duration (ceiling rounding ensures server TTL >= requested duration)
+            let ttl_sec = std::cmp::max(1, (lease_duration_ms + 999) / 1000);
             let mut lease_client = client.lease_client();
             let grant_res = lease_client
                 .grant(ttl_sec, None)
@@ -224,16 +230,51 @@ impl EtcdMetadataAuthority {
             let record_json = serde_json::to_string(&record)
                 .map_err(|e| MetaError::AuthorityError(format!("JSON serialization error: {e}")))?;
 
-            // 2. Build atomic CAS Txn
-            let compare = if expected_epoch == 0 {
-                Compare::version(epoch_k.clone(), CompareOp::Equal, 0)
+            let mut kv_client = client.kv_client();
+
+            // 2. Build atomic CAS Txn with prior ownership guard (Constraint 1)
+            let mut compares = Vec::new();
+            let mut prior_owner_active = false;
+
+            if expected_epoch == 0 {
+                // Initial stream registration: neither epoch key nor owner key must exist
+                compares.push(Compare::version(epoch_k.clone(), CompareOp::Equal, 0));
+                compares.push(Compare::version(owner_k.clone(), CompareOp::Equal, 0));
             } else {
-                Compare::value(
+                // Monotonic epoch advancement
+                compares.push(Compare::value(
                     epoch_k.clone(),
                     CompareOp::Equal,
                     expected_epoch.to_string(),
-                )
-            };
+                ));
+
+                // Check whether an active prior owner record currently exists in etcd
+                let existing_owner_resp = kv_client.get(owner_k.clone(), None).await.ok();
+                let existing_kv = existing_owner_resp.as_ref().and_then(|r| r.kvs().first());
+
+                if let Some(kv) = existing_kv {
+                    let existing_record: Option<OwnerRecord> =
+                        serde_json::from_slice(kv.value()).ok();
+                    if let Some(rec) = existing_record {
+                        if rec.owner_region != new_owner_region {
+                            // Prior owner record exists for another region.
+                            // Atomically require owner_k to have expired (version == 0) in etcd.
+                            prior_owner_active = true;
+                            compares.push(Compare::version(owner_k.clone(), CompareOp::Equal, 0));
+                        } else {
+                            // Re-acquisition or self-bump by current owner
+                            compares.push(Compare::version(
+                                owner_k.clone(),
+                                CompareOp::Equal,
+                                kv.version(),
+                            ));
+                        }
+                    }
+                } else {
+                    // Prior owner's lease expired and etcd purged owner_k
+                    compares.push(Compare::version(owner_k.clone(), CompareOp::Equal, 0));
+                }
+            }
 
             let put_owner = TxnOp::put(
                 owner_k.clone(),
@@ -243,31 +284,42 @@ impl EtcdMetadataAuthority {
             let put_epoch = TxnOp::put(epoch_k.clone(), new_epoch.to_string(), None);
 
             let txn = Txn::new()
-                .when([compare])
+                .when(compares)
                 .and_then([put_owner, put_epoch])
-                .or_else([TxnOp::get(epoch_k.clone(), None)]);
+                .or_else([
+                    TxnOp::get(epoch_k.clone(), None),
+                    TxnOp::get(owner_k.clone(), None),
+                ]);
 
-            let mut kv_client = client.kv_client();
             let txn_res = kv_client
                 .txn(txn)
                 .await
                 .map_err(|e| MetaError::AuthorityError(format!("etcd Txn CAS error: {e}")))?;
 
             if !txn_res.succeeded() {
-                // Determine actual committed epoch from failure read
-                let actual_epoch = match txn_res.op_responses().first() {
-                    Some(etcd_client::TxnOpResponse::Get(get_resp)) => {
+                // Determine actual committed epoch and owner from failure read
+                let mut actual_epoch = 0;
+                let mut owner_present_other_region = false;
+
+                #[allow(clippy::collapsible_if)]
+                for op_resp in txn_res.op_responses() {
+                    if let etcd_client::TxnOpResponse::Get(get_resp) = op_resp {
                         if let Some(kv) = get_resp.kvs().first() {
-                            std::str::from_utf8(kv.value())
-                                .ok()
-                                .and_then(|s| s.parse::<u64>().ok())
-                                .unwrap_or(0)
-                        } else {
-                            0
+                            if kv.key() == epoch_k.as_bytes() {
+                                actual_epoch = std::str::from_utf8(kv.value())
+                                    .ok()
+                                    .and_then(|s| s.parse::<u64>().ok())
+                                    .unwrap_or(0);
+                            } else if kv.key() == owner_k.as_bytes() {
+                                if let Ok(rec) = serde_json::from_slice::<OwnerRecord>(kv.value()) {
+                                    if rec.owner_region != new_owner_region {
+                                        owner_present_other_region = true;
+                                    }
+                                }
+                            }
                         }
                     }
-                    _ => 0,
-                };
+                }
 
                 // Ambiguous commit handling: if actual_epoch is already new_epoch,
                 // check if the existing committed owner is this claimant (idempotent retry).
@@ -295,6 +347,12 @@ impl EtcdMetadataAuthority {
 
                 // Losing claimant cleanup: revoke the redundant lease we granted
                 let _ = lease_client.revoke(lease_id).await;
+
+                if prior_owner_active || owner_present_other_region {
+                    return Err(MetaError::LeaseConflict {
+                        partition: stream.partition,
+                    });
+                }
 
                 return Err(MetaError::StaleEpoch {
                     current: actual_epoch,
@@ -713,36 +771,135 @@ impl MetadataAuthority for EtcdMetadataAuthority {
         })
     }
 
+    /// Reacquires or renews local write authority for a persisted stream belonging to `region`.
+    /// Complies with Constraint 2: A broker must not restore local write authority from a persisted
+    /// ownership record without a valid reacquisition or renewal protocol.
+    fn reacquire_ownership(
+        &self,
+        stream: &StreamId,
+        region: &str,
+        duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError> {
+        self.reacquire_lease(stream, region, duration_ms)
+    }
+
+    /// Returns locally verified partition ownership from monotonic local lease cache (NFR-01).
+    /// Zero synchronous etcd network I/O on the produce path.
     fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership> {
         let stream = StreamId::new(topic, partition);
-        let owner_k = Self::owner_key(&stream);
+        let local_lease = self.get_local_lease(&stream)?;
+        let now_monotonic_ms = self.clock.now_monotonic_ms();
+        local_lease.to_partition_ownership(now_monotonic_ms)
+    }
+}
 
+impl EtcdMetadataAuthority {
+    /// Reacquires or renews write authority from etcd for an already established stream.
+    /// Atomically verifies that the caller's region matches the persisted owner record in etcd,
+    /// acquires a new etcd lease, and registers the verified LocalLease.
+    pub fn reacquire_lease(
+        &self,
+        stream: &StreamId,
+        region: &str,
+        lease_duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError> {
         self.block_on(async {
-            let client = self.ensure_connected().await.ok()?;
+            let client = self.ensure_connected().await?;
+            let owner_k = Self::owner_key(stream);
+            let epoch_k = Self::epoch_key(stream);
+
             let mut kv_client = client.kv_client();
+            let owner_resp = kv_client
+                .get(owner_k.clone(), None)
+                .await
+                .map_err(|e| MetaError::AuthorityError(format!("etcd get error: {e}")))?;
+            let kv = owner_resp
+                .kvs()
+                .first()
+                .ok_or_else(|| MetaError::PartitionNotFound {
+                    topic: stream.topic.clone(),
+                    partition: stream.partition,
+                })?;
+            let record: OwnerRecord = serde_json::from_slice(kv.value())
+                .map_err(|e| MetaError::AuthorityError(format!("JSON deserialize error: {e}")))?;
 
-            let resp = kv_client.get(owner_k, None).await.ok()?;
-            let kv = resp.kvs().first()?;
+            if record.owner_region != region {
+                return Err(MetaError::LeaseConflict {
+                    partition: stream.partition,
+                });
+            }
 
-            let record: OwnerRecord = serde_json::from_slice(kv.value()).ok()?;
+            let ttl_sec = std::cmp::max(1, (lease_duration_ms + 999) / 1000);
+            let mut lease_client = client.lease_client();
+            let grant_res = lease_client
+                .grant(ttl_sec, None)
+                .await
+                .map_err(|e| MetaError::AuthorityError(format!("etcd lease grant error: {e}")))?;
+            let lease_id = grant_res.id();
+            let receipt_monotonic_ms = self.clock.now_monotonic_ms();
 
-            let local_lease = self.get_local_lease(&stream);
-            let is_valid = match local_lease {
-                Some(ref lease) => lease.is_valid(self.clock.now_monotonic_ms()),
-                None => true,
+            let new_record = OwnerRecord {
+                owner_region: region.to_string(),
+                epoch: record.epoch,
+                lease_id,
+                granted_at_ms: Utc::now().timestamp_millis(),
+                duration_ms: lease_duration_ms,
             };
+            let record_json = serde_json::to_string(&new_record)
+                .map_err(|e| MetaError::AuthorityError(format!("JSON serialize error: {e}")))?;
 
-            if !is_valid {
-                return None;
+            // Atomic put: owner key must still match kv.version() and epoch must match
+            let compare_owner = Compare::version(owner_k.clone(), CompareOp::Equal, kv.version());
+            let compare_epoch =
+                Compare::value(epoch_k.clone(), CompareOp::Equal, record.epoch.to_string());
+            let put_owner = TxnOp::put(
+                owner_k.clone(),
+                record_json,
+                Some(PutOptions::new().with_lease(lease_id)),
+            );
+
+            let txn = Txn::new()
+                .when([compare_owner, compare_epoch])
+                .and_then([put_owner]);
+            let txn_res = kv_client
+                .txn(txn)
+                .await
+                .map_err(|e| MetaError::AuthorityError(format!("etcd Txn reacquire error: {e}")))?;
+
+            if !txn_res.succeeded() {
+                let _ = lease_client.revoke(lease_id).await;
+                return Err(MetaError::LeaseConflict {
+                    partition: stream.partition,
+                });
             }
 
             let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
-            Some(PartitionOwnership {
-                topic: topic.to_string(),
-                partition,
-                owner_region: record.owner_region,
+            let expiry_ns = now_ns + (lease_duration_ms * 1_000_000);
+            let grant = LeaseGrant {
+                lease_id: lease_id as u64,
+                stream: stream.clone(),
+                holder_region: region.to_string(),
+                granted_at_ns: now_ns,
+                expiry_ns,
                 epoch: record.epoch,
-                lease_expiry_ns: now_ns + (record.duration_ms * 1_000_000),
+            };
+            let local_lease = LocalLease::from_grant(
+                &grant,
+                receipt_monotonic_ms,
+                self.max_clock_drift_ms,
+                self.transit_delay_allowance_ms,
+            );
+            self.local_leases
+                .write()
+                .unwrap()
+                .insert((stream.topic.clone(), stream.partition), local_lease);
+
+            Ok(PartitionOwnership {
+                topic: stream.topic.clone(),
+                partition: stream.partition,
+                owner_region: region.to_string(),
+                epoch: record.epoch,
+                lease_expiry_ns: expiry_ns,
             })
         })
     }

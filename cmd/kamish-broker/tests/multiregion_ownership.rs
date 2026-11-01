@@ -141,9 +141,20 @@ fn test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeed
     assert_eq!(success.committed_epoch, 1);
     assert_eq!(success.base_offset, 0);
 
-    // 5. If partition owner is another region, produce MUST fail closed
+    // 5. Transfer to region-b while region-a lease is active MUST fail with LeaseConflict
+    let conflict = meta
+        .compare_and_swap_epoch(&stream_id, 1, 2, "region-b", 60_000)
+        .unwrap_err();
+    assert!(
+        matches!(conflict, kamish_meta::MetaError::LeaseConflict { .. }),
+        "Transfer while prior lease is active must be rejected with LeaseConflict"
+    );
+
+    // Revoking prior owner lease allows transfer to region-b
+    meta.revoke_lease(&stream_id, 0).unwrap();
     meta.compare_and_swap_epoch(&stream_id, 1, 2, "region-b", 60_000)
         .unwrap();
+
     let wrong_owner_err = broker
         .produce(ProduceRequest {
             sequence_base: 1,
@@ -156,7 +167,17 @@ fn test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeed
         wrong_owner_err
     );
 
-    // 6. If lease has expired, produce MUST fail closed
+    // 6. Transfer back to region-a while region-b lease is active MUST fail with LeaseConflict
+    let conflict_b = meta
+        .compare_and_swap_epoch(&stream_id, 2, 3, "region-a", -1000)
+        .unwrap_err();
+    assert!(
+        matches!(conflict_b, kamish_meta::MetaError::LeaseConflict { .. }),
+        "Transfer while prior lease is active must be rejected with LeaseConflict"
+    );
+
+    // Revoking prior owner lease allows acquisition of epoch 3 with expired lease
+    meta.revoke_lease(&stream_id, 0).unwrap();
     meta.compare_and_swap_epoch(&stream_id, 2, 3, "region-a", -1000)
         .unwrap(); // expired 1s ago
     let expired_err = broker
@@ -170,4 +191,259 @@ fn test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeed
         "Produce on expired lease must fail closed, got: {:?}",
         expired_err
     );
+}
+
+/// Mock metadata authority that simulates a lease expiring right during disk sync
+#[derive(Clone)]
+struct ExpiringDuringAppendMeta {
+    inner: Arc<MetadataStore>,
+    call_count: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl kamish_audit::AuditWitnessAuthority for ExpiringDuringAppendMeta {
+    fn commit_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+        sequence: u64,
+        tail_hash: &str,
+        record_count: u64,
+        signature_hex: &str,
+        timestamp_ns: i64,
+    ) -> Result<(), kamish_audit::AuditError> {
+        self.inner.commit_checkpoint(
+            stream_topic,
+            stream_partition,
+            sequence,
+            tail_hash,
+            record_count,
+            signature_hex,
+            timestamp_ns,
+        )
+    }
+
+    fn read_latest_checkpoint(
+        &self,
+        stream_topic: &str,
+        stream_partition: u32,
+    ) -> Result<Option<kamish_audit::AuditWitnessCheckpointData>, kamish_audit::AuditError> {
+        self.inner
+            .read_latest_checkpoint(stream_topic, stream_partition)
+    }
+}
+
+impl MetadataAuthority for ExpiringDuringAppendMeta {
+    fn deployment_mode(&self) -> DeploymentMode {
+        self.inner.deployment_mode()
+    }
+
+    fn compare_and_swap_epoch(
+        &self,
+        stream: &kamish_meta::StreamId,
+        expected_epoch: u64,
+        new_epoch: u64,
+        new_owner_region: &str,
+        lease_duration_ms: i64,
+    ) -> Result<kamish_meta::PartitionOwnership, kamish_meta::MetaError> {
+        self.inner.compare_and_swap_epoch(
+            stream,
+            expected_epoch,
+            new_epoch,
+            new_owner_region,
+            lease_duration_ms,
+        )
+    }
+
+    fn grant_lease(
+        &self,
+        stream: &kamish_meta::StreamId,
+        holder_region: &str,
+        duration_ms: i64,
+    ) -> Result<kamish_meta::LeaseGrant, kamish_meta::MetaError> {
+        self.inner.grant_lease(stream, holder_region, duration_ms)
+    }
+
+    fn renew_lease(
+        &self,
+        stream: &kamish_meta::StreamId,
+        lease_id: u64,
+        duration_ms: i64,
+    ) -> Result<kamish_meta::LeaseGrant, kamish_meta::MetaError> {
+        self.inner.renew_lease(stream, lease_id, duration_ms)
+    }
+
+    fn revoke_lease(
+        &self,
+        stream: &kamish_meta::StreamId,
+        lease_id: u64,
+    ) -> Result<kamish_meta::RevocationAck, kamish_meta::MetaError> {
+        self.inner.revoke_lease(stream, lease_id)
+    }
+
+    fn get_policy_floor(&self, cluster_id: &str) -> Result<u64, kamish_meta::MetaError> {
+        self.inner.get_policy_floor(cluster_id)
+    }
+
+    fn advance_policy_floor(
+        &self,
+        cluster_id: &str,
+        new_floor: u64,
+    ) -> Result<u64, kamish_meta::MetaError> {
+        self.inner.advance_policy_floor(cluster_id, new_floor)
+    }
+
+    fn issue_source_identity(
+        &self,
+        cluster_id: &str,
+        node_id: &str,
+    ) -> Result<kamish_meta::SourceIdentityGrant, kamish_meta::MetaError> {
+        self.inner.issue_source_identity(cluster_id, node_id)
+    }
+
+    fn commit_audit_checkpoint(
+        &self,
+        checkpoint: kamish_meta::AuditCheckpoint,
+    ) -> Result<kamish_meta::CheckpointReceipt, kamish_meta::MetaError> {
+        self.inner.commit_audit_checkpoint(checkpoint)
+    }
+
+    fn read_audit_checkpoint(
+        &self,
+        stream: &kamish_meta::StreamId,
+    ) -> Result<Option<kamish_meta::AuditCheckpoint>, kamish_meta::MetaError> {
+        self.inner.read_audit_checkpoint(stream)
+    }
+
+    fn get_ownership(
+        &self,
+        topic: &str,
+        partition: u32,
+    ) -> Option<kamish_meta::PartitionOwnership> {
+        let count = self
+            .call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if count == 0 {
+            // First call (pre-append check): return valid ownership
+            self.inner.get_ownership(topic, partition)
+        } else {
+            // Subsequent call (post-append check): simulate lease expiration boundary crossed
+            None
+        }
+    }
+
+    fn reacquire_ownership(
+        &self,
+        stream: &kamish_meta::StreamId,
+        region: &str,
+        duration_ms: i64,
+    ) -> Result<kamish_meta::PartitionOwnership, kamish_meta::MetaError> {
+        self.inner.reacquire_ownership(stream, region, duration_ms)
+    }
+}
+
+#[test]
+fn test_append_crossing_lease_expiry_boundary_returns_unknown_outcome() {
+    // Constraint 6: When a durable append commits to disk but the lease expires before
+    // completion, produce MUST NOT return Ok; it must fail with lease_expired_outcome_unknown.
+    let base_meta = Arc::new(MetadataStore::new_multi_region());
+    let stream_id = kamish_meta::StreamId::new("expiry-topic", 0);
+    base_meta
+        .compare_and_swap_epoch(&stream_id, 0, 1, "region-a", 60_000)
+        .unwrap();
+
+    let meta = Arc::new(ExpiringDuringAppendMeta {
+        inner: base_meta,
+        call_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    });
+
+    let (broker_base, _m, dir) = setup_multiregion_broker("region-a", vec!["region-b".into()]);
+    let broker = BrokerServer::new(
+        "region-a",
+        broker_base.enforcer.clone(),
+        meta,
+        vec!["region-b".into()],
+        dir.path(),
+    );
+
+    let produce_req = ProduceRequest {
+        topic: "expiry-topic".to_string(),
+        partition: 0,
+        producer_id: 101,
+        producer_epoch: 1,
+        sequence_base: 0,
+        class_id: "general".to_string(),
+        payload: b"cross-expiry-data".to_vec(),
+        residency_rule: None,
+    };
+
+    let result = broker.produce(produce_req);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, BrokerError::PolicyDenied(ref reason) if reason == "lease_expired_outcome_unknown"),
+        "Expected lease_expired_outcome_unknown, got: {:?}",
+        err
+    );
+}
+
+#[test]
+fn test_broker_restart_requires_explicit_reacquisition() {
+    // Constraint 2: A broker must not restore local write authority from a persisted
+    // ownership record without a valid reacquisition protocol.
+    let (broker, meta, dir) = setup_multiregion_broker("region-a", vec!["region-b".into()]);
+    let stream_id = kamish_meta::StreamId::new("restart-topic", 0);
+    meta.compare_and_swap_epoch(&stream_id, 0, 1, "region-a", 60_000)
+        .unwrap();
+
+    let produce_req = ProduceRequest {
+        topic: "restart-topic".to_string(),
+        partition: 0,
+        producer_id: 202,
+        producer_epoch: 1,
+        sequence_base: 0,
+        class_id: "general".to_string(),
+        payload: b"first-record".to_vec(),
+        residency_rule: None,
+    };
+
+    // First produce succeeds
+    let resp1 = broker
+        .produce(produce_req.clone())
+        .expect("First produce should succeed");
+    assert_eq!(resp1.committed_epoch, 1);
+
+    // Simulate broker crash and restart: lease was revoked/expired on shutdown.
+    meta.revoke_lease(&stream_id, 0).unwrap();
+
+    let restarted_broker = BrokerServer::new(
+        "region-a",
+        broker.enforcer.clone(),
+        meta.clone(),
+        vec!["region-b".into()],
+        dir.path(),
+    );
+
+    // Write authority is NOT restored without reacquisition
+    let req2 = ProduceRequest {
+        sequence_base: 1,
+        ..produce_req.clone()
+    };
+    let unauth_err = restarted_broker.produce(req2.clone()).unwrap_err();
+    assert!(
+        matches!(unauth_err, BrokerError::PolicyDenied(..)),
+        "Restarted broker without reacquisition must deny produce, got: {:?}",
+        unauth_err
+    );
+
+    // Now reacquire ownership explicitly
+    restarted_broker
+        .reacquire_partition_ownership("restart-topic", 0, 60_000)
+        .expect("Explicit reacquisition must succeed");
+
+    // Write authority is now valid; second produce succeeds
+    let resp2 = restarted_broker
+        .produce(req2)
+        .expect("Produce after reacquisition must succeed");
+    assert_eq!(resp2.committed_epoch, 1);
+    assert_eq!(resp2.base_offset, 1);
 }

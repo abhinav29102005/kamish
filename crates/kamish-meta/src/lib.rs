@@ -658,6 +658,19 @@ pub trait MetadataAuthority: kamish_audit::AuditWitnessAuthority + Send + Sync {
 
     /// Returns the locally verified/cached partition ownership without consulting quorum per write (NFR-01).
     fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership>;
+
+    /// Reacquires or renews local write authority for a persisted stream belonging to `region`.
+    fn reacquire_ownership(
+        &self,
+        stream: &StreamId,
+        region: &str,
+        duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError> {
+        let _ = (stream, region, duration_ms);
+        Err(MetaError::AuthorityError(
+            "reacquire_ownership not supported by this authority".into(),
+        ))
+    }
 }
 
 impl kamish_audit::AuditWitnessAuthority for MetadataStore {
@@ -886,6 +899,24 @@ impl LocalLease {
         }
         self.effective_duration_ms
             .saturating_sub(current_monotonic_ms - self.received_monotonic_ms)
+    }
+
+    /// Converts this locally verified lease to a `PartitionOwnership` descriptor
+    /// with `lease_expiry_ns` calculated relative to remaining monotonic time.
+    pub fn to_partition_ownership(&self, current_monotonic_ms: u64) -> Option<PartitionOwnership> {
+        if !self.is_valid(current_monotonic_ms) {
+            return None;
+        }
+        let remaining_ms = self.remaining_ms(current_monotonic_ms);
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        let lease_expiry_ns = now_ns + (remaining_ms as i64 * 1_000_000);
+        Some(PartitionOwnership {
+            topic: self.stream.topic.clone(),
+            partition: self.stream.partition,
+            owner_region: self.holder_region.clone(),
+            epoch: self.epoch,
+            lease_expiry_ns,
+        })
     }
 }
 
@@ -1159,6 +1190,12 @@ impl MetadataAuthority for MetadataStore {
         }
 
         let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        if current.owner_region != new_owner_region && current.is_lease_valid(now_ns) {
+            return Err(MetaError::LeaseConflict {
+                partition: stream.partition,
+            });
+        }
+
         let new_ownership = PartitionOwnership {
             topic: stream.topic.clone(),
             partition: stream.partition,
@@ -1243,18 +1280,20 @@ impl MetadataAuthority for MetadataStore {
 
     fn revoke_lease(&self, stream: &StreamId, lease_id: u64) -> Result<RevocationAck, MetaError> {
         let mut inner = self.inner.write().unwrap();
-        let grant = match inner.leases.remove(&lease_id) {
-            Some(g) if &g.stream == stream => g,
-            _ => return Err(MetaError::LeaseNotFound(lease_id)),
-        };
+        let grant = inner.leases.remove(&lease_id);
 
         let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let key = (stream.topic.clone(), stream.partition);
         if let Some(owner) = inner.ownerships.get_mut(&key) {
             owner.lease_expiry_ns = now_ns;
+        } else if grant.is_none() {
+            return Err(MetaError::LeaseNotFound(lease_id));
         }
 
-        let effective_boundary_ns = std::cmp::max(now_ns, grant.expiry_ns);
+        let effective_boundary_ns = grant
+            .as_ref()
+            .map(|g| std::cmp::max(now_ns, g.expiry_ns))
+            .unwrap_or(now_ns);
 
         Ok(RevocationAck {
             lease_id,
@@ -1335,6 +1374,32 @@ impl MetadataAuthority for MetadataStore {
 
     fn get_ownership(&self, topic: &str, partition: u32) -> Option<PartitionOwnership> {
         self.get_ownership(topic, partition)
+    }
+
+    fn reacquire_ownership(
+        &self,
+        stream: &StreamId,
+        region: &str,
+        duration_ms: i64,
+    ) -> Result<PartitionOwnership, MetaError> {
+        let mut inner = self.inner.write().unwrap();
+        let key = (stream.topic.clone(), stream.partition);
+        let current =
+            inner
+                .ownerships
+                .get_mut(&key)
+                .ok_or_else(|| MetaError::PartitionNotFound {
+                    topic: stream.topic.clone(),
+                    partition: stream.partition,
+                })?;
+        if current.owner_region != region {
+            return Err(MetaError::LeaseConflict {
+                partition: stream.partition,
+            });
+        }
+        let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
+        current.lease_expiry_ns = now_ns + (duration_ms * 1_000_000);
+        Ok(current.clone())
     }
 }
 
@@ -1474,26 +1539,38 @@ mod tests {
         let stale = authority.compare_and_swap_epoch(&stream, 0, 2, "region-b", 5000);
         assert!(stale.is_err());
 
-        // Valid CAS advances epoch
+        // Transfer to region-b while region-a lease is active fails with LeaseConflict
+        let conflict = authority.compare_and_swap_epoch(&stream, 1, 2, "region-b", 10_000);
+        assert!(matches!(conflict, Err(MetaError::LeaseConflict { .. })));
+
+        // After prior lease has expired, transfer to region-b succeeds
+        let stream_expired = StreamId::new("orders-expired", 0);
+        authority
+            .compare_and_swap_epoch(&stream_expired, 0, 1, "region-a", -1000)
+            .unwrap();
         let advanced = authority
-            .compare_and_swap_epoch(&stream, 1, 2, "region-b", 10_000)
+            .compare_and_swap_epoch(&stream_expired, 1, 2, "region-b", 10_000)
             .unwrap();
         assert_eq!(advanced.epoch, 2);
         assert_eq!(advanced.owner_region, "region-b");
 
-        // Grant lease
-        let lease = authority.grant_lease(&stream, "region-b", 2000).unwrap();
+        // Grant lease on advanced stream
+        let lease = authority
+            .grant_lease(&stream_expired, "region-b", 2000)
+            .unwrap();
         assert_eq!(lease.holder_region, "region-b");
         assert_eq!(lease.epoch, 2);
 
         // Renew lease
         let renewed = authority
-            .renew_lease(&stream, lease.lease_id, 5000)
+            .renew_lease(&stream_expired, lease.lease_id, 5000)
             .unwrap();
         assert!(renewed.expiry_ns > lease.expiry_ns);
 
         // Revoke lease
-        let ack = authority.revoke_lease(&stream, lease.lease_id).unwrap();
+        let ack = authority
+            .revoke_lease(&stream_expired, lease.lease_id)
+            .unwrap();
         assert_eq!(ack.lease_id, lease.lease_id);
     }
 

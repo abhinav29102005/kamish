@@ -466,6 +466,26 @@ impl AuditWitness {
     }
 }
 
+fn normalize_audit_path(path: &Path) -> PathBuf {
+    let p = if let Ok(c) = path.canonicalize() {
+        c
+    } else if let (Some(parent), Some(file_name)) = (path.parent(), path.file_name()) {
+        if let Ok(parent_c) = parent.canonicalize() {
+            parent_c.join(file_name)
+        } else {
+            path.to_path_buf()
+        }
+    } else {
+        path.to_path_buf()
+    };
+    let s = p.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        p
+    }
+}
+
 static WITNESS_REGISTRY: Mutex<Option<HashMap<PathBuf, Arc<AuditWitness>>>> = Mutex::new(None);
 
 struct AuditLogInner {
@@ -523,7 +543,7 @@ impl AuditLog {
                 .unwrap_or_else(|| Path::new(".")),
         )?
         .sync_all()?;
-        let canonical = path_buf.canonicalize().unwrap_or_else(|_| path_buf.clone());
+        let canonical = normalize_audit_path(&path_buf);
         let maybe_witness = {
             let guard = WITNESS_REGISTRY.lock().unwrap();
             guard.as_ref().and_then(|m| m.get(&canonical).cloned())
@@ -762,10 +782,7 @@ impl AuditLog {
     pub fn register_witness<P: AsRef<Path>>(path: P, witness: Arc<AuditWitness>) {
         let mut guard = WITNESS_REGISTRY.lock().unwrap();
         let map = guard.get_or_insert_with(HashMap::new);
-        let canonical = path
-            .as_ref()
-            .canonicalize()
-            .unwrap_or_else(|_| path.as_ref().to_path_buf());
+        let canonical = normalize_audit_path(path.as_ref());
         map.insert(canonical, witness);
     }
 
@@ -773,10 +790,7 @@ impl AuditLog {
     pub fn unregister_witness<P: AsRef<Path>>(path: P) {
         let mut guard = WITNESS_REGISTRY.lock().unwrap();
         if let Some(map) = guard.as_mut() {
-            let canonical = path
-                .as_ref()
-                .canonicalize()
-                .unwrap_or_else(|_| path.as_ref().to_path_buf());
+            let canonical = normalize_audit_path(path.as_ref());
             map.remove(&canonical);
         }
     }

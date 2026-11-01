@@ -503,3 +503,152 @@ fn test_08_cold_restart_epoch_and_fence_persistence() {
         "[test] Cold restart fence persistence verified: epoch 42 persisted and bumped to 43."
     );
 }
+
+#[test]
+fn test_09_transfer_rejected_while_prior_lease_active() {
+    if !check_env_or_skip() {
+        return;
+    }
+
+    let authority_a = create_test_authority(None);
+    let authority_b = create_test_authority(None);
+    let stream = StreamId::new("etcd-lease-transfer-stream", 0);
+
+    // Initial claim by region-a with 30s lease
+    let claim_a = authority_a
+        .compare_and_swap_epoch(&stream, 0, 1, "region-a", 30_000)
+        .expect("Initial claim must succeed");
+    assert_eq!(claim_a.epoch, 1);
+    assert_eq!(claim_a.owner_region, "region-a");
+
+    // Claimant B tries to advance epoch to 2 while region-a's lease is still active in etcd
+    let conflict_err = authority_b
+        .compare_and_swap_epoch(&stream, 1, 2, "region-b", 30_000)
+        .expect_err("Transfer while prior lease is active must be rejected");
+    assert!(
+        matches!(
+            conflict_err,
+            kamish_meta::MetaError::LeaseConflict { partition: 0 }
+        ),
+        "Expected LeaseConflict, got: {:?}",
+        conflict_err
+    );
+
+    // Authority A explicitly revokes lease
+    let _ = authority_a.revoke_lease(&stream, 0);
+
+    // After revocation, Authority B can now claim epoch 2
+    let claim_b = authority_b
+        .compare_and_swap_epoch(&stream, 1, 2, "region-b", 30_000)
+        .expect("Transfer after prior lease revocation must succeed");
+    assert_eq!(claim_b.epoch, 2);
+    assert_eq!(claim_b.owner_region, "region-b");
+}
+
+#[test]
+fn test_10_restart_without_reacquisition_denies_write_authority() {
+    // Constraint 2: A broker must not restore local write authority from a persisted
+    // ownership record without a valid reacquisition or renewal protocol.
+    let mock_clock = Arc::new(MockMonotonicClock::new(1_000_000));
+    let endpoints = vec!["https://127.0.0.1:2379".to_string()];
+    let authority = EtcdMetadataAuthority::new(
+        endpoints,
+        None::<PathBuf>,
+        None::<PathBuf>,
+        None::<PathBuf>,
+        Some(mock_clock),
+    )
+    .expect("Authority initialization must succeed");
+
+    let stream = StreamId::new("restart-test-topic", 0);
+
+    // Before any acquisition/reacquisition, local write authority MUST be None (no unverified restoration)
+    assert!(
+        authority
+            .get_ownership(&stream.topic, stream.partition)
+            .is_none(),
+        "Fresh authority without local lease must return None for ownership"
+    );
+}
+
+#[test]
+fn test_11_produce_path_zero_consensus_network_reads() {
+    // Constraint 3 (NFR-01): The produce path must not require a synchronous etcd
+    // metadata read for every write. Verified via local-lease in-memory lookup.
+    let mock_clock = Arc::new(MockMonotonicClock::new(500_000));
+    let endpoints = vec!["https://127.0.0.1:2379".to_string()];
+    let authority = EtcdMetadataAuthority::new(
+        endpoints,
+        None::<PathBuf>,
+        None::<PathBuf>,
+        None::<PathBuf>,
+        Some(mock_clock),
+    )
+    .expect("Authority initialization must succeed");
+
+    let stream = StreamId::new("zero-io-topic", 0);
+
+    // Pre-populate a local lease into memory directly simulating a granted write lease
+    let grant = kamish_meta::LeaseGrant {
+        lease_id: 42,
+        stream: stream.clone(),
+        holder_region: "region-a".to_string(),
+        granted_at_ns: 500_000_000_000,
+        expiry_ns: 560_000_000_000, // 60s lease
+        epoch: 5,
+    };
+    let local = kamish_meta::LocalLease::from_grant(&grant, 500_000, 200, 100);
+    authority.insert_local_lease_for_test(stream.clone(), local);
+
+    // Benchmark 10,000 lookups - must execute in memory with zero network calls
+    let start = std::time::Instant::now();
+    for _ in 0..10_000 {
+        let ownership = authority.get_ownership(&stream.topic, stream.partition);
+        assert!(ownership.is_some());
+    }
+    let elapsed = start.elapsed();
+    let per_lookup_ns = elapsed.as_nanos() / 10_000;
+    println!(
+        "[test] 10,000 get_ownership checks completed in {:?} (~{} ns/op, zero network calls)",
+        elapsed, per_lookup_ns
+    );
+    assert!(
+        per_lookup_ns < 20_000,
+        "Local lease evaluation must be purely in-memory and ultra-fast for NFR-01"
+    );
+}
+
+#[test]
+fn test_12_monotonic_clock_immune_to_wall_clock_skew() {
+    // Constraint 5: Monotonic clock immunity against system wall clock backward/forward jumps
+    let mock_clock = Arc::new(MockMonotonicClock::new(100_000));
+    let stream = StreamId::new("monotonic-skew-topic", 0);
+    let grant = kamish_meta::LeaseGrant {
+        lease_id: 99,
+        stream: stream.clone(),
+        holder_region: "region-eu".to_string(),
+        granted_at_ns: 100_000_000_000,
+        expiry_ns: 110_000_000_000, // 10s TTL
+        epoch: 3,
+    };
+
+    // Receipt at monotonic ms 100_000. With 200ms drift + 100ms transit safety margin,
+    // local monotonic expiry is: 100_000 + 10_000 - 300 = 109_700 ms.
+    let local_lease = kamish_meta::LocalLease::from_grant(&grant, 100_000, 200, 100);
+
+    // At 105_000 ms (5s later), lease is still valid
+    mock_clock.set_ms(105_000);
+    assert!(local_lease.is_valid(mock_clock.now_monotonic_ms()));
+    let ownership = local_lease.to_partition_ownership(mock_clock.now_monotonic_ms());
+    assert!(ownership.is_some());
+    assert_eq!(ownership.unwrap().epoch, 3);
+
+    // At 109_701 ms (just past monotonic expiry), lease is immediately INVALID
+    mock_clock.set_ms(109_701);
+    assert!(!local_lease.is_valid(mock_clock.now_monotonic_ms()));
+    assert!(
+        local_lease
+            .to_partition_ownership(mock_clock.now_monotonic_ms())
+            .is_none()
+    );
+}
