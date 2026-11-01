@@ -201,10 +201,10 @@ pub fn spawn_retention_worker(
 
                     for (topic, partitions) in topics_meta {
                         for p in 0..partitions {
-                            if let Some(log) = broker.get_log(&topic, p) {
-                                if let Err(e) = coordinator.evaluate_and_reclaim(&topic, p, &log, &checkpoints, &outboxes) {
-                                    tracing::warn!(topic = %topic, partition = p, error = %e, "Retention evaluation failed");
-                                }
+                            if let Some(log) = broker.get_log(&topic, p)
+                                && let Err(e) = coordinator.evaluate_and_reclaim(&topic, p, &log, &checkpoints, &outboxes)
+                            {
+                                tracing::warn!(topic = %topic, partition = p, error = %e, "Retention evaluation failed");
                             }
                         }
                     }

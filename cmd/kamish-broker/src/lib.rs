@@ -42,7 +42,7 @@ pub use consumer_group::{
     LeaveGroupRequest, LeaveGroupResponse,
 };
 pub use retention::{
-    spawn_retention_worker, RetentionCoordinator, RetentionMetrics, TopicRetentionPolicy,
+    RetentionCoordinator, RetentionMetrics, TopicRetentionPolicy, spawn_retention_worker,
 };
 use std::pin::Pin;
 use thiserror::Error;
