@@ -12,6 +12,8 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 hex = { workspace = true }
+ring = { version = "0.17", features = ["std"] }
+rand = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.17"

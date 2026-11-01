@@ -483,6 +483,7 @@ pub struct BrokerServer {
     owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
     renewal_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
     pub ack_level: AckLevel,
+    pub key_provider: Option<Arc<dyn kamish_seal::KeyProvider>>,
 }
 
 impl BrokerServer {
@@ -585,6 +586,7 @@ impl BrokerServer {
             owned_partitions: Arc::new(RwLock::new(HashSet::new())),
             renewal_shutdown: Arc::new(renewal_tx),
             ack_level: AckLevel::LeaderFsync,
+            key_provider: None,
         };
 
         // Load existing consumer checkpoints from disk (W22)
@@ -707,6 +709,17 @@ impl BrokerServer {
     pub fn with_clock(mut self, clock: Arc<dyn MonotonicClock>) -> Self {
         self.clock = clock;
         self
+    }
+
+    /// Attaches a KeyProvider for cryptographic AEAD sealed replication (§1.6 D2, §3.4.5).
+    pub fn with_key_provider(mut self, provider: Arc<dyn kamish_seal::KeyProvider>) -> Self {
+        self.key_provider = Some(provider);
+        self
+    }
+
+    /// Dynamically sets or updates the key provider.
+    pub fn set_key_provider(&mut self, provider: Arc<dyn kamish_seal::KeyProvider>) {
+        self.key_provider = Some(provider);
     }
 
     /// Claims or updates partition ownership via atomic CAS on the metadata authority.
@@ -1264,10 +1277,18 @@ impl BrokerServer {
             .residency_rule
             .clone()
             .unwrap_or(ResidencyPolicy::GlobalCleartext);
-        if matches!(residency, ResidencyPolicy::SealedCiphertext(_)) {
-            return Err(BrokerError::PolicyDenied(
-                "sealed_replication_not_configured".into(),
-            ));
+        if let ResidencyPolicy::SealedCiphertext(ref _allowed_regions) = residency {
+            if let Some(ref kp) = self.key_provider {
+                if kp.home_region() != self.region.as_str() {
+                    return Err(BrokerError::PolicyDenied(
+                        "cross_border_key_denied".into(),
+                    ));
+                }
+            } else {
+                return Err(BrokerError::PolicyDenied(
+                    "sealed_replication_not_configured".into(),
+                ));
+            }
         }
         let request_policy =
             serde_json::to_string(&residency).map_err(|e| std::io::Error::other(e.to_string()))?;
@@ -1408,7 +1429,7 @@ impl BrokerServer {
             if send_decision.allowed {
                 // Fail closed until an authenticated encryption/key-custody
                 // integration exists. A boolean flag is not encryption.
-                if send_decision.mode == DestinationMode::SealedOnly {
+                if send_decision.mode == DestinationMode::SealedOnly && self.key_provider.is_none() {
                     return Err(BrokerError::PolicyDenied(
                         "sealed_replication_not_configured".into(),
                     ));
@@ -1517,6 +1538,30 @@ impl BrokerServer {
 
         // 5. Commit all reserved outbox ranges (§3.B)
         for (peer, reservation, is_sealed) in reservations {
+            let (outbox_payload, envelope_payload) = if is_sealed {
+                if let Some(ref kp) = self.key_provider {
+                    let sealed_env = kamish_seal::AeadSealEngine::seal(
+                        &req.payload,
+                        kamish_seal::AeadAlgorithm::ChaCha20Poly1305,
+                        &req.topic,
+                        req.partition,
+                        epoch,
+                        decision.policy_version,
+                        "default",
+                        1,
+                        kp.as_ref(),
+                    )
+                    .map_err(|e| BrokerError::PolicyDenied(format!("seal_error: {e}")))?;
+                    let serialized = serde_json::to_vec(&sealed_env)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?;
+                    (serialized.clone(), Some(serialized))
+                } else {
+                    (req.payload.clone(), None)
+                }
+            } else {
+                (req.payload.clone(), None)
+            };
+
             let range = OutboxRange {
                 topic: req.topic.clone(),
                 partition: req.partition,
@@ -1524,10 +1569,10 @@ impl BrokerServer {
                 start_offset: offset,
                 end_offset: offset + 1,
                 class_id: req.class_id.clone(),
-                payload: req.payload.clone(),
+                payload: outbox_payload,
                 is_sealed,
                 source_generation: source_gen,
-                envelope_payload: None,
+                envelope_payload,
                 context: Some(context.clone()),
                 policy_version: decision.policy_version,
                 checksum: Some(committed_checksum),
