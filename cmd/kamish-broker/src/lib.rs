@@ -95,6 +95,16 @@ pub fn parse_region_id(s: &str) -> RegionId {
     }
 }
 
+/// Configured acknowledgement durability level (§3.1.1, CONTRACT.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AckLevel {
+    /// Leader fsync to persistent segmented commit log before returning ACK (default).
+    #[default]
+    LeaderFsync,
+    /// In-region replica persistence quorum (2-of-3 replicas persisted in-region).
+    InRegionQuorum,
+}
+
 /// Request to produce a batch of records.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProduceRequest {
@@ -117,6 +127,8 @@ pub struct ProduceResponse {
     pub committed_epoch: u64,
     pub sovereignty_allowed: bool,
     pub denial_reason: String,
+    #[serde(default)]
+    pub ack_level: Option<AckLevel>,
 }
 
 /// Request to fetch records from a partition.
@@ -470,6 +482,7 @@ pub struct BrokerServer {
     degraded_links: Arc<RwLock<HashSet<String>>>,
     owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
     renewal_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
+    pub ack_level: AckLevel,
 }
 
 impl BrokerServer {
@@ -571,6 +584,7 @@ impl BrokerServer {
             degraded_links: Arc::new(RwLock::new(HashSet::new())),
             owned_partitions: Arc::new(RwLock::new(HashSet::new())),
             renewal_shutdown: Arc::new(renewal_tx),
+            ack_level: AckLevel::LeaderFsync,
         };
 
         // Load existing consumer checkpoints from disk (W22)
@@ -1279,6 +1293,7 @@ impl BrokerServer {
                     committed_epoch: 0,
                     sovereignty_allowed: false,
                     denial_reason: violation.to_string(),
+                    ack_level: None,
                 });
             }
         }
@@ -1298,6 +1313,7 @@ impl BrokerServer {
                 committed_epoch: 0,
                 sovereignty_allowed: false,
                 denial_reason: decision.reason,
+                ack_level: None,
             });
         }
 
@@ -1328,6 +1344,7 @@ impl BrokerServer {
                 committed_epoch: epoch,
                 sovereignty_allowed: true,
                 denial_reason: "idempotent_duplicate".to_string(),
+                ack_level: Some(AckLevel::LeaderFsync),
             });
         }
 
@@ -1344,6 +1361,7 @@ impl BrokerServer {
                 committed_epoch: epoch,
                 sovereignty_allowed: false,
                 denial_reason: "stream_policy_change_requires_new_topic".into(),
+                ack_level: None,
             });
         }
 
@@ -1416,6 +1434,7 @@ impl BrokerServer {
                                 "Backpressure: destination outbox for '{}' full",
                                 peer
                             ),
+                            ack_level: None,
                         });
                     }
                     Err(e) => {
@@ -1457,6 +1476,7 @@ impl BrokerServer {
                             committed_epoch: epoch,
                             sovereignty_allowed: false,
                             denial_reason: "stream_destinations_changed_requires_new_topic".into(),
+                            ack_level: None,
                         });
                     }
                 }
@@ -1526,6 +1546,7 @@ impl BrokerServer {
             committed_epoch: epoch,
             sovereignty_allowed: true,
             denial_reason: "ok".to_string(),
+            ack_level: Some(self.ack_level),
         })
     }
 
@@ -1736,10 +1757,11 @@ impl BrokerServer {
             }
         }
 
-        // Deduplication upon reconnect (INV-5, INV-6):
-        // Case 1: Entire range is already committed locally -> Idempotent no-op ACK
-        if req.to_offset <= local_next {
-            let same_record = log.read(req.from_offset, 1).first().is_some_and(|record| {
+        // Deduplication and Divergence Handling upon Reconnect/Transfer (INV-5, INV-6):
+        // If range overlaps with local committed records:
+        if req.from_offset < local_next {
+            let existing_record = log.read(req.from_offset, 1).first().cloned();
+            let same_record = existing_record.as_ref().is_some_and(|record| {
                 let base_match = record.epoch == req.epoch
                     && record.class_id == req.class_id
                     && record.payload == req.payload
@@ -1756,18 +1778,88 @@ impl BrokerServer {
                 };
                 base_match && checksum_match && context_match
             });
-            if !same_record {
-                return Ok(ReplicationResponse {
-                    accepted: false,
-                    applied_watermark: local_next,
-                    reason: "replication_history_conflict".into(),
+
+            if same_record {
+                if req.to_offset <= local_next {
+                    return Ok(ReplicationResponse {
+                        accepted: true,
+                        applied_watermark: local_next,
+                        reason: "idempotent_duplicate_noop".to_string(),
+                    });
+                } else {
+                    return Ok(ReplicationResponse {
+                        accepted: false,
+                        applied_watermark: local_next,
+                        reason: format!(
+                            "partial_overlap: local watermark is {}, please resume from {}",
+                            local_next, local_next
+                        ),
+                    });
+                }
+            } else {
+                // Record does not match: history divergence detected!
+                let local_epoch = existing_record.as_ref().map_or(1, |r| r.epoch);
+                let ownership = self.meta.get_ownership(&req.topic, req.partition);
+                let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+                let sender_is_owner = ownership.as_ref().map_or(false, |o| {
+                    o.owner_region == req.source_region
+                        && req.epoch >= o.epoch
+                        && o.is_lease_valid(now_ns)
                 });
+
+                if sender_is_owner && req.epoch > local_epoch {
+                    // Sender is verified authoritative owner with a strictly higher epoch.
+                    // Local suffix is speculative from a superseded prior owner.
+                    // Durably quarantine local divergent records and truncate local log.
+                    tracing::warn!(
+                        topic = %req.topic,
+                        partition = req.partition,
+                        offset = req.from_offset,
+                        local_epoch,
+                        owner_epoch = req.epoch,
+                        owner = %req.source_region,
+                        "Authoritative owner with higher epoch superseded local suffix; quarantining divergent records"
+                    );
+                    self.quarantine_divergent_suffix(&req.topic, req.partition, req.from_offset)?;
+
+                    // Now local_next is req.from_offset: append authoritative record
+                    let applied_offset = log.append_with_context(
+                        req.epoch,
+                        &req.class_id,
+                        policy_version,
+                        req.payload,
+                        record_context,
+                    )?;
+                    let new_watermark = applied_offset + 1;
+                    self.local_tracker.update_watermark(
+                        &req.topic,
+                        req.partition,
+                        &req.source_region,
+                        new_watermark,
+                    );
+                    return Ok(ReplicationResponse {
+                        accepted: true,
+                        applied_watermark: new_watermark,
+                        reason: "divergent_suffix_quarantined_and_reconciled".into(),
+                    });
+                } else {
+                    // Stale epoch or unverified ownership: reject to protect local history.
+                    tracing::error!(
+                        topic = %req.topic,
+                        partition = req.partition,
+                        offset = req.from_offset,
+                        local_epoch,
+                        incoming_epoch = req.epoch,
+                        sender = %req.source_region,
+                        "Replication rejected due to history conflict; local history preserved"
+                    );
+                    return Ok(ReplicationResponse {
+                        accepted: false,
+                        applied_watermark: local_next,
+                        reason: "replication_history_conflict".into(),
+                    });
+                }
             }
-            return Ok(ReplicationResponse {
-                accepted: true,
-                applied_watermark: local_next,
-                reason: "idempotent_duplicate_noop".to_string(),
-            });
         }
 
         // Case 2: Exact next contiguous offset -> Append and advance watermark (INV-5)
@@ -1794,27 +1886,15 @@ impl BrokerServer {
             });
         }
 
-        // Case 3: Gap or partial overlap detected
-        if req.from_offset > local_next {
-            Ok(ReplicationResponse {
-                accepted: false,
-                applied_watermark: local_next,
-                reason: format!(
-                    "offset_gap: expected {}, received {}",
-                    local_next, req.from_offset
-                ),
-            })
-        } else {
-            // from_offset < local_next, but to_offset > local_next (partial overlap)
-            Ok(ReplicationResponse {
-                accepted: false,
-                applied_watermark: local_next,
-                reason: format!(
-                    "partial_overlap: local watermark is {}, please resume from {}",
-                    local_next, local_next
-                ),
-            })
-        }
+        // Case 3: Gap detected (from_offset > local_next)
+        Ok(ReplicationResponse {
+            accepted: false,
+            applied_watermark: local_next,
+            reason: format!(
+                "offset_gap: expected {}, received {}",
+                local_next, req.from_offset
+            ),
+        })
     }
 
     /// Returns the durable watermark for a replicated stream from `source_region`.
