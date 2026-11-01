@@ -333,7 +333,14 @@ mod tests {
         let quorum_commit = Some(4u64);
 
         let res = coordinator
-            .evaluate_and_reclaim_with_quorum("orders", 0, &log, &checkpoints, &outboxes, quorum_commit)
+            .evaluate_and_reclaim_with_quorum(
+                "orders",
+                0,
+                &log,
+                &checkpoints,
+                &outboxes,
+                quorum_commit,
+            )
             .unwrap();
 
         assert!(res.is_some());
@@ -341,4 +348,3 @@ mod tests {
         assert!(reclaim.new_base_offset_floor <= 4);
     }
 }
-

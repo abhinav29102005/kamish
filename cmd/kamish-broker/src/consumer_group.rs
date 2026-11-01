@@ -523,7 +523,7 @@ mod tests {
                     client_id: "client-1".to_string(),
                     client_host: Some("127.0.0.1".to_string()),
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["events".to_string()],
                 },
                 &topic_counts,
@@ -545,7 +545,7 @@ mod tests {
                     client_id: "client-2".to_string(),
                     client_host: Some("127.0.0.1".to_string()),
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["events".to_string()],
                 },
                 &topic_counts,
@@ -555,7 +555,9 @@ mod tests {
         assert_eq!(res2.generation_id, 2);
 
         // After rebalance, check description
-        let desc = coordinator.describe_group("grp-alpha").expect("group missing");
+        let desc = coordinator
+            .describe_group("grp-alpha")
+            .expect("group missing");
         assert_eq!(desc.generation_id, 2);
         assert_eq!(desc.members.len(), 2);
 
@@ -580,7 +582,7 @@ mod tests {
                     client_id: "client-1".to_string(),
                     client_host: None,
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["telemetry".to_string()],
                 },
                 &topic_counts,
@@ -620,7 +622,7 @@ mod tests {
                     client_id: "c1".to_string(),
                     client_host: None,
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["orders".to_string()],
                 },
                 &topic_counts,
@@ -635,7 +637,7 @@ mod tests {
                     client_id: "c2".to_string(),
                     client_host: None,
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["orders".to_string()],
                 },
                 &topic_counts,
@@ -651,15 +653,17 @@ mod tests {
         assert_ne!(c1_owned, c2_owned);
 
         // c1 committing its own partition succeeds
-        assert!(coordinator
-            .validate_partition_commit(
-                "grp-gamma",
-                Some(&res1.member_id),
-                Some(desc.generation_id),
-                "orders",
-                Some(c1_owned)
-            )
-            .is_ok());
+        assert!(
+            coordinator
+                .validate_partition_commit(
+                    "grp-gamma",
+                    Some(&res1.member_id),
+                    Some(desc.generation_id),
+                    "orders",
+                    Some(c1_owned)
+                )
+                .is_ok()
+        );
 
         // c1 committing c2's partition fails with PolicyDenied
         let err = coordinator
@@ -668,7 +672,7 @@ mod tests {
                 Some(&res1.member_id),
                 Some(desc.generation_id),
                 "orders",
-                Some(c2_owned)
+                Some(c2_owned),
             )
             .unwrap_err();
         assert!(matches!(err, BrokerError::PolicyDenied(_)));
@@ -680,7 +684,7 @@ mod tests {
                 Some(&res1.member_id),
                 Some(desc.generation_id - 1),
                 "orders",
-                Some(c1_owned)
+                Some(c1_owned),
             )
             .unwrap_err();
         assert!(matches!(err_gen, BrokerError::EpochFenced { .. }));
@@ -702,7 +706,7 @@ mod tests {
                     client_id: "c1".to_string(),
                     client_host: None,
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["events".to_string()],
                 },
                 &topic_counts,
@@ -717,7 +721,7 @@ mod tests {
                     client_id: "c2".to_string(),
                     client_host: None,
                     session_timeout_ms: 10_000,
-                                        protocol_type: "consumer".to_string(),
+                    protocol_type: "consumer".to_string(),
                     subscribed_topics: vec!["events".to_string()],
                 },
                 &topic_counts,
@@ -763,7 +767,7 @@ mod tests {
                         client_id: "c1".to_string(),
                         client_host: None,
                         session_timeout_ms: 10_000,
-                                                protocol_type: "consumer".to_string(),
+                        protocol_type: "consumer".to_string(),
                         subscribed_topics: vec!["events".to_string()],
                     },
                     &topic_counts,
@@ -774,10 +778,14 @@ mod tests {
 
         // Reopen coordinator from the same data_dir
         let reloaded = ConsumerGroupCoordinator::new(temp_dir.path());
-        let desc = reloaded.describe_group("grp-persist").expect("group should persist");
+        let desc = reloaded
+            .describe_group("grp-persist")
+            .expect("group should persist");
         assert_eq!(desc.generation_id, 1);
         assert!(desc.members.contains_key(&member_id));
-        assert_eq!(desc.members[&member_id].assigned_partitions["events"], vec![0, 1]);
+        assert_eq!(
+            desc.members[&member_id].assigned_partitions["events"],
+            vec![0, 1]
+        );
     }
 }
-

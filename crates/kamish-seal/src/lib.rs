@@ -498,8 +498,8 @@ mod tests {
         assert_eq!(envelope.algorithm, AeadAlgorithm::ChaCha20Poly1305);
         assert_ne!(envelope.ciphertext, payload);
 
-        let decrypted = AeadSealEngine::unseal(&envelope, "us-east-1", &provider)
-            .expect("unsealing failed");
+        let decrypted =
+            AeadSealEngine::unseal(&envelope, "us-east-1", &provider).expect("unsealing failed");
         assert_eq!(decrypted, payload);
     }
 
@@ -523,8 +523,8 @@ mod tests {
         assert_eq!(envelope.algorithm, AeadAlgorithm::Aes256Gcm);
         assert_ne!(envelope.ciphertext, payload);
 
-        let decrypted = AeadSealEngine::unseal(&envelope, "us-east-1", &provider)
-            .expect("unsealing failed");
+        let decrypted =
+            AeadSealEngine::unseal(&envelope, "us-east-1", &provider).expect("unsealing failed");
         assert_eq!(decrypted, payload);
     }
 
@@ -548,8 +548,8 @@ mod tests {
         .expect("seal failed");
 
         // Legitimate unseal with matching tenant
-        let decrypted = AeadSealEngine::unseal(&envelope, "us-east-1", &provider)
-            .expect("unseal failed");
+        let decrypted =
+            AeadSealEngine::unseal(&envelope, "us-east-1", &provider).expect("unseal failed");
         assert_eq!(decrypted, payload);
 
         // Tamper tenant in envelope
@@ -614,7 +614,11 @@ mod tests {
         let kms_provider = ExternalKmsProvider::new(kms_config);
 
         // Fails closed safely when credentials/network KMS are unavailable
-        let res = kms_provider.get_key("arn:aws:kms:us-east-1:123456789012:key/test", 1, "us-east-1");
+        let res = kms_provider.get_key(
+            "arn:aws:kms:us-east-1:123456789012:key/test",
+            1,
+            "us-east-1",
+        );
         assert!(matches!(res, Err(SealError::KmsProviderError(_))));
     }
 
@@ -624,19 +628,39 @@ mod tests {
         let payload = b"hello world";
 
         // Cleartext
-        let ct = SealEngine::transform(payload, DestinationMode::Cleartext, "test-key-1", "us-east-1", &provider).unwrap();
+        let ct = SealEngine::transform(
+            payload,
+            DestinationMode::Cleartext,
+            "test-key-1",
+            "us-east-1",
+            &provider,
+        )
+        .unwrap();
         assert_eq!(ct, payload);
 
         // Deny
-        let denied = SealEngine::transform(payload, DestinationMode::Deny, "test-key-1", "us-east-1", &provider).unwrap();
+        let denied = SealEngine::transform(
+            payload,
+            DestinationMode::Deny,
+            "test-key-1",
+            "us-east-1",
+            &provider,
+        )
+        .unwrap();
         assert!(denied.is_empty());
 
         // SealedOnly
-        let sealed = SealEngine::transform(payload, DestinationMode::SealedOnly, "test-key-1", "us-east-1", &provider).unwrap();
+        let sealed = SealEngine::transform(
+            payload,
+            DestinationMode::SealedOnly,
+            "test-key-1",
+            "us-east-1",
+            &provider,
+        )
+        .unwrap();
         assert_ne!(sealed, payload);
 
         let unsealed = SealEngine::unseal(&sealed, "us-east-1", &provider).unwrap();
         assert_eq!(unsealed, payload);
     }
 }
-
