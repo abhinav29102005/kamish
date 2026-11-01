@@ -119,11 +119,10 @@ impl ConsumerGroupCoordinator {
         let path = dir.join("consumer_groups.json");
         if let Ok(mut f) = File::open(&path) {
             let mut bytes = Vec::new();
-            if f.read_to_end(&mut bytes).is_ok() {
-                if let Ok(loaded) = serde_json::from_slice::<HashMap<String, ConsumerGroup>>(&bytes)
-                {
-                    groups = loaded;
-                }
+            if f.read_to_end(&mut bytes).is_ok()
+                && let Ok(loaded) = serde_json::from_slice::<HashMap<String, ConsumerGroup>>(&bytes)
+            {
+                groups = loaded;
             }
         }
 
@@ -177,7 +176,10 @@ impl ConsumerGroupCoordinator {
         // Assign leader: first lexicographical member ID
         let mut member_keys: Vec<String> = group.members.keys().cloned().collect();
         member_keys.sort();
-        let leader_id = member_keys.first().cloned().unwrap_or_else(|| member_id.clone());
+        let leader_id = member_keys
+            .first()
+            .cloned()
+            .unwrap_or_else(|| member_id.clone());
         group.leader_id = Some(leader_id.clone());
 
         // Increment generation ID on rebalance (§5.1)
@@ -209,11 +211,14 @@ impl ConsumerGroupCoordinator {
     }
 
     /// Records member heartbeat, validating generation fencing against zombie consumers.
-    pub fn heartbeat(&self, req: HeartbeatGroupRequest) -> Result<HeartbeatGroupResponse, BrokerError> {
+    pub fn heartbeat(
+        &self,
+        req: HeartbeatGroupRequest,
+    ) -> Result<HeartbeatGroupResponse, BrokerError> {
         let mut groups = self.groups.write().unwrap();
-        let group = groups
-            .get_mut(&req.group_id)
-            .ok_or_else(|| BrokerError::NotFound(format!("Consumer group '{}' not found", req.group_id)))?;
+        let group = groups.get_mut(&req.group_id).ok_or_else(|| {
+            BrokerError::NotFound(format!("Consumer group '{}' not found", req.group_id))
+        })?;
 
         if req.generation_id != group.generation_id {
             return Err(BrokerError::EpochFenced {
@@ -222,10 +227,9 @@ impl ConsumerGroupCoordinator {
             });
         }
 
-        let member = group
-            .members
-            .get_mut(&req.member_id)
-            .ok_or_else(|| BrokerError::NotFound(format!("Member '{}' not in group", req.member_id)))?;
+        let member = group.members.get_mut(&req.member_id).ok_or_else(|| {
+            BrokerError::NotFound(format!("Member '{}' not in group", req.member_id))
+        })?;
 
         member.last_heartbeat_ms = Utc::now().timestamp_millis();
 
@@ -243,9 +247,9 @@ impl ConsumerGroupCoordinator {
         topic_partition_counts: &HashMap<String, u32>,
     ) -> Result<LeaveGroupResponse, BrokerError> {
         let mut groups = self.groups.write().unwrap();
-        let group = groups
-            .get_mut(&req.group_id)
-            .ok_or_else(|| BrokerError::NotFound(format!("Consumer group '{}' not found", req.group_id)))?;
+        let group = groups.get_mut(&req.group_id).ok_or_else(|| {
+            BrokerError::NotFound(format!("Consumer group '{}' not found", req.group_id))
+        })?;
 
         group.members.remove(&req.member_id);
 

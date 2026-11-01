@@ -20,9 +20,8 @@ use thiserror::Error;
 
 pub mod publisher;
 pub use publisher::{
-    spawn_witness_publisher_worker, FileWitnessDestination, UnconfiguredWitnessDestination,
-    WitnessAck, WitnessCheckpointEnvelope, WitnessDestination, WitnessPublisher,
-    WitnessPublisherMetrics,
+    FileWitnessDestination, UnconfiguredWitnessDestination, WitnessAck, WitnessCheckpointEnvelope,
+    WitnessDestination, WitnessPublisher, WitnessPublisherMetrics, spawn_witness_publisher_worker,
 };
 
 /// Predefined zero hash for the genesis entry.

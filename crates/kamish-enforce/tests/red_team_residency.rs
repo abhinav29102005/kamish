@@ -233,7 +233,7 @@ fn test_audit_ledger_zero_payload_disclosure() {
 #[test]
 fn test_cross_border_key_custody_denial() {
     let key_service = RegionalKeyService::new("region-eu");
-    key_service.provision_key("eu-key-01", [0x42u8; 32]);
+    key_service.provision_key("eu-key-01", 1, [0x42u8; 32]);
 
     let secret_payload = b"top-secret-gdpr-pii-data";
 
