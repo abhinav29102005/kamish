@@ -900,6 +900,7 @@ dependencies = [
  "kamish-log",
  "kamish-meta",
  "kamish-outbox",
+ "kamish-own",
  "kamish-policy",
  "rcgen",
  "rustls",
@@ -935,6 +936,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
@@ -958,11 +960,28 @@ version = "0.1.0"
 dependencies = [
  "kamish-audit",
  "kamish-enforce",
+ "kamish-log",
  "kamish-policy",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "kamish-own"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "kamish-audit",
+ "kamish-enforce",
+ "kamish-log",
+ "kamish-meta",
+ "kamish-policy",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
