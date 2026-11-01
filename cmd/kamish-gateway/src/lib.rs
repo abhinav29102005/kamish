@@ -74,6 +74,9 @@ pub fn app(state: GatewayState) -> Router {
         )
         .route("/api/produce", post(produce_handler))
         .route("/api/fetch", post(fetch_handler))
+        .route("/api/partitions/promote", post(promote_partition_handler))
+        .route("/api/partitions/quarantine", get(list_quarantine_handler))
+        .route("/api/reconciliation/run", post(trigger_reconciliation_handler))
         .route("/api/scenarios/run", post(run_scenario_handler))
         .route("/api/mode", get(get_mode_handler).post(set_mode_handler))
         // Server-Sent Events
@@ -201,9 +204,11 @@ async fn security_middleware(
         ("POST", "/api/fetch") => session.role.can_consume(),
         ("GET", "/api/audit") | ("POST", "/api/audit/verify") => session.role.can_audit(),
         ("POST", "/api/policy/publish") => session.role.is_admin(),
-        ("POST", "/api/topics") | ("POST", "/api/scenarios/run") | ("POST", "/api/mode") => {
-            session.role.can_operate()
-        }
+        ("POST", "/api/topics")
+        | ("POST", "/api/scenarios/run")
+        | ("POST", "/api/mode")
+        | ("POST", "/api/partitions/promote")
+        | ("POST", "/api/reconciliation/run") => session.role.can_operate(),
         _ => true,
     };
 
@@ -350,10 +355,61 @@ async fn status_handler(State(state): State<GatewayState>) -> Json<serde_json::V
 }
 
 async fn streams_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
-    let owned = state.broker.owned_partitions();
     let mut streams_data = Vec::new();
+    let mut seen_keys = HashSet::new();
 
-    for (topic, partition) in owned {
+    // 1. Gather all active streams from broker partition states
+    let partition_states = state.broker.get_partition_states();
+    for p in partition_states {
+        seen_keys.insert((p.topic.clone(), p.partition));
+        let mut lag_by_peer = serde_json::Map::new();
+        let mut outbox_by_peer = serde_json::Map::new();
+
+        for peer in &state.broker.known_peers {
+            let lag = state
+                .broker
+                .local_tracker
+                .get_watermark(&p.topic, p.partition, peer);
+            lag_by_peer.insert(peer.clone(), serde_json::json!(lag));
+
+            if let Some(outbox) = state.broker.get_outbox(peer) {
+                outbox_by_peer.insert(peer.clone(), serde_json::json!(outbox.queued_bytes()));
+            }
+        }
+
+        let ownership = state.broker.meta.get_ownership(&p.topic, p.partition);
+        let owner_region = ownership
+            .as_ref()
+            .map_or_else(|| state.broker.region.clone(), |o| o.owner_region.clone());
+        let is_owner = owner_region == state.broker.region;
+
+        let quarantined = state
+            .broker
+            .quarantine()
+            .records()
+            .into_iter()
+            .filter(|r| r.base_offset >= p.high_watermark)
+            .count();
+
+        streams_data.push(serde_json::json!({
+            "topic": p.topic,
+            "partition": p.partition,
+            "high_watermark": p.high_watermark,
+            "durable_watermark": p.durable_watermark,
+            "epoch": p.epoch,
+            "is_owner": is_owner,
+            "owner_region": owner_region,
+            "replication_lags": lag_by_peer,
+            "outbox_queued_bytes": outbox_by_peer,
+            "quarantined_records": quarantined,
+        }));
+    }
+
+    // 2. Also ensure any owned partitions not yet active in logs are displayed
+    for (topic, partition) in state.broker.owned_partitions() {
+        if seen_keys.contains(&(topic.clone(), partition)) {
+            continue;
+        }
         let mut lag_by_peer = serde_json::Map::new();
         for peer in &state.broker.known_peers {
             let lag = state
@@ -362,11 +418,17 @@ async fn streams_handler(State(state): State<GatewayState>) -> Json<serde_json::
                 .get_watermark(&topic, partition, peer);
             lag_by_peer.insert(peer.clone(), serde_json::json!(lag));
         }
-
         streams_data.push(serde_json::json!({
             "topic": topic,
             "partition": partition,
+            "high_watermark": 0,
+            "durable_watermark": 0,
+            "epoch": 1,
+            "is_owner": true,
+            "owner_region": state.broker.region,
             "replication_lags": lag_by_peer,
+            "outbox_queued_bytes": serde_json::Map::new(),
+            "quarantined_records": 0,
         }));
     }
 
@@ -379,23 +441,34 @@ async fn streams_handler(State(state): State<GatewayState>) -> Json<serde_json::
 async fn authority_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
     let owned = state.broker.owned_partitions();
     let mut ownership_data = Vec::new();
+    let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
 
-    for (topic, partition) in owned {
-        if let Some(ownership) = state.broker.meta.get_ownership(&topic, partition) {
+    for (topic, partition) in &owned {
+        if let Some(ownership) = state.broker.meta.get_ownership(topic, *partition) {
+            let remaining_ms = ((ownership.lease_expiry_ns - now_ns) / 1_000_000).max(0);
             ownership_data.push(serde_json::json!({
                 "topic": topic,
                 "partition": partition,
                 "owner_region": ownership.owner_region,
                 "epoch": ownership.epoch,
-                "active_lease": state.broker.is_partition_renewal_active(&topic, partition),
+                "active_lease": state.broker.is_partition_renewal_active(topic, *partition),
+                "lease_expiry_ns": ownership.lease_expiry_ns,
+                "remaining_lease_ms": remaining_ms,
             }));
         }
     }
+
+    let total_quarantined = state.broker.quarantine().count();
 
     Json(serde_json::json!({
         "authority_type": "etcd 3.7.3 (External with mTLS)",
         "active_region": state.broker.region,
         "monotonic_clock_ms": state.broker.clock.now_monotonic_ms(),
+        "lease_ttl_ms": 10_000,
+        "renewal_interval_ms": 3_000,
+        "safety_margin_ms": 2_000,
+        "active_leases_count": owned.len(),
+        "total_quarantined_records": total_quarantined,
         "ownerships": ownership_data,
     }))
 }
@@ -739,6 +812,103 @@ async fn run_scenario_handler(
             Json(serde_json::json!({ "error": format!("Unknown scenario: {}", other) })),
         )),
     }
+}
+
+#[derive(Deserialize)]
+struct PromotePartitionApiRequest {
+    topic: String,
+    partition: u32,
+    class_id: Option<String>,
+    required_watermark: Option<u64>,
+}
+
+async fn promote_partition_handler(
+    State(state): State<GatewayState>,
+    Json(payload): Json<PromotePartitionApiRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.broker.promote_partition(
+        &payload.topic,
+        payload.partition,
+        payload.class_id.as_deref(),
+        payload.required_watermark,
+    ) {
+        Ok(ownership) => {
+            let _ = state.event_tx.send(format!(
+                "PROMOTION: stream={}:{} promoted to owner region={} epoch={}",
+                payload.topic, payload.partition, ownership.owner_region, ownership.epoch
+            ));
+            Ok(Json(serde_json::json!({
+                "status": "PROMOTED",
+                "topic": ownership.topic,
+                "partition": ownership.partition,
+                "owner_region": ownership.owner_region,
+                "epoch": ownership.epoch,
+                "lease_expiry_ns": ownership.lease_expiry_ns,
+            })))
+        }
+        Err(e) => Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        )),
+    }
+}
+
+async fn list_quarantine_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
+    let records = state.broker.quarantine().records();
+    let records_json: Vec<serde_json::Value> = records
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "offset": r.base_offset,
+                "epoch": r.epoch,
+                "class_id": r.class_id,
+                "checksum": r.checksum,
+                "payload_len": r.payload.len(),
+            })
+        })
+        .collect();
+
+    Json(serde_json::json!({
+        "total_quarantined": records.len(),
+        "records": records_json,
+    }))
+}
+
+#[derive(Deserialize)]
+struct TriggerReconciliationRequest {
+    target_region: Option<String>,
+}
+
+async fn trigger_reconciliation_handler(
+    State(state): State<GatewayState>,
+    Json(payload): Json<TriggerReconciliationRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let targets: Vec<String> = match payload.target_region {
+        Some(t) => vec![t],
+        None => state.broker.known_peers.clone(),
+    };
+
+    let mut total_gaps = 0;
+    let mut total_scheduled = 0;
+    for target in &targets {
+        let count = state.broker.refill_outbox(target).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+        })?;
+        total_scheduled += count;
+        if count > 0 {
+            total_gaps += 1;
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "status": "RECONCILED",
+        "targets_reconciled": targets,
+        "gaps_discovered": total_gaps,
+        "records_scheduled_into_outbox": total_scheduled,
+    })))
 }
 
 async fn get_mode_handler(State(state): State<GatewayState>) -> Json<serde_json::Value> {
