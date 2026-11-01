@@ -72,6 +72,23 @@ const INITIAL_NODES: Record<RegionId, RegionNodeState> = {
   },
 };
 
+function parsePrometheusCounter(text: string, metricName: string, requiredLabel?: string): number | null {
+  let found = false;
+  let total = 0;
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith(metricName)) continue;
+    const separator = line.lastIndexOf(" ");
+    if (separator <= metricName.length) continue;
+    const labels = line.slice(metricName.length, separator);
+    if (requiredLabel && !labels.includes(requiredLabel)) continue;
+    const value = Number(line.slice(separator + 1).trim());
+    if (!Number.isFinite(value)) continue;
+    total += value;
+    found = true;
+  }
+  return found ? total : null;
+}
+
 const INITIAL_LINKS: LinkState[] = [
   {
     id: 'eu-us',
@@ -130,6 +147,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Telemetry buffer
   const [telemetryHistory, setTelemetryHistory] = useState<TelemetrySample[]>([]);
+  const [liveThroughputEps, setLiveThroughputEps] = useState<number | null>(null);
+  const liveProduceCounterRef = useRef<{ count: number; sampledAt: number } | null>(null);
   const [currentTelemetry, setCurrentTelemetry] = useState<TelemetrySample>(() => ({
     timestamp: Date.now(),
     localCommitted: 1240,
@@ -379,11 +398,29 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     try {
-      const [status, authority, streams] = await Promise.all([
+      const [status, authority, streams, metricsText] = await Promise.all([
         gatewayClient.getStatus(),
         gatewayClient.getAuthority(),
         gatewayClient.getStreams(),
+        gatewayClient.getMetrics().catch(() => null),
       ]);
+
+      const produceSuccessTotal = metricsText
+        ? parsePrometheusCounter(metricsText, "kamish_produce_requests_total", 'status="success"')
+        : null;
+      const sampledAt = Date.now();
+      const previousSample = liveProduceCounterRef.current;
+      if (produceSuccessTotal !== null) {
+        if (previousSample && sampledAt > previousSample.sampledAt && produceSuccessTotal >= previousSample.count) {
+          setLiveThroughputEps((produceSuccessTotal - previousSample.count) / ((sampledAt - previousSample.sampledAt) / 1000));
+        } else {
+          setLiveThroughputEps(null);
+        }
+        liveProduceCounterRef.current = { count: produceSuccessTotal, sampledAt };
+      } else {
+        liveProduceCounterRef.current = null;
+        setLiveThroughputEps(null);
+      }
 
       setGatewayStatus(status);
       setGatewayAuthority(authority);
@@ -525,11 +562,15 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // browser-local simulation and must never mutate the broker's server-side mode.
   const toggleMode = async () => {
     if (isLiveMode) {
+      liveProduceCounterRef.current = null;
+      setLiveThroughputEps(null);
       setIsLiveMode(false);
       setConnectionError(null);
       return;
     }
 
+    liveProduceCounterRef.current = null;
+    setLiveThroughputEps(null);
     setTelemetryHistory([]);
     setConnectionStatus(gatewayClient.getConfigError() ? "config_error" : "connecting");
     setConnectionError(gatewayClient.getConfigError());
@@ -1066,6 +1107,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         links,
         telemetryHistory,
         currentTelemetry,
+        liveThroughputEps,
         auditLedger,
         auditError,
         recentEvents,
