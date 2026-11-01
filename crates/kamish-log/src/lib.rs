@@ -802,7 +802,10 @@ impl PartitionLog {
     pub fn read_range(&self, start_offset: u64, end_offset: u64) -> Vec<RecordEnvelope> {
         let inner = self.inner.read().unwrap();
         let effective_start = start_offset.max(inner.base_offset_floor);
-        if effective_start >= inner.high_watermark || effective_start >= end_offset || inner.records.is_empty() {
+        if effective_start >= inner.high_watermark
+            || effective_start >= end_offset
+            || inner.records.is_empty()
+        {
             return Vec::new();
         }
 
@@ -894,7 +897,9 @@ impl PartitionLog {
         }
 
         let effective_target = reclaim_before_offset.min(inner.high_watermark);
-        let split_idx = inner.records.partition_point(|r| r.base_offset < effective_target);
+        let split_idx = inner
+            .records
+            .partition_point(|r| r.base_offset < effective_target);
 
         if split_idx == 0 {
             return Ok(RetentionReclaimResult {
@@ -965,7 +970,10 @@ impl PartitionLog {
             dir_file.sync_all()?;
         }
 
-        let new_floor = retained_records.first().map(|r| r.base_offset).unwrap_or(inner.next_offset);
+        let new_floor = retained_records
+            .first()
+            .map(|r| r.base_offset)
+            .unwrap_or(inner.next_offset);
         inner.base_offset_floor = new_floor;
         inner.records = retained_records;
         inner.index_entries = new_index;
@@ -992,7 +1000,10 @@ impl PartitionLog {
     /// 9. ONLY AFTER replacement succeeds on disk does in-memory state transition to truncated prefix.
     /// 10. Any failure before installation leaves original in-memory log intact.
     /// 11. Any ambiguous replacement outcome fences the writer fail-closed.
-    pub fn truncate_to_offset(&self, new_next_offset: u64) -> Result<Vec<RecordEnvelope>, LogError> {
+    pub fn truncate_to_offset(
+        &self,
+        new_next_offset: u64,
+    ) -> Result<Vec<RecordEnvelope>, LogError> {
         let mut writer_guard = self.writer_lock.lock().unwrap();
         let mut inner = self.inner.write().unwrap();
 

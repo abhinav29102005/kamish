@@ -240,23 +240,26 @@ impl ReplicationAgent {
     }
 }
 
-fn build_replication_request(source_region: &str, target_region: &str, range: &OutboxRange) -> ReplicationRequest {
-    let (extracted_ctx, extracted_pv, extracted_cs) = if let Some(ref env_bytes) = range.envelope_payload {
-        if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
-            (env.context, Some(env.policy_version), Some(env.checksum))
+fn build_replication_request(
+    source_region: &str,
+    target_region: &str,
+    range: &OutboxRange,
+) -> ReplicationRequest {
+    let (extracted_ctx, extracted_pv, extracted_cs) =
+        if let Some(ref env_bytes) = range.envelope_payload {
+            if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
+                (env.context, Some(env.policy_version), Some(env.checksum))
+            } else {
+                (None, None, None)
+            }
         } else {
             (None, None, None)
-        }
-    } else {
-        (None, None, None)
-    };
+        };
     let rep_context = range.context.clone().or(extracted_ctx);
     let policy_version = if range.policy_version > 0 {
         range.policy_version
-    } else if let Some(pv) = extracted_pv {
-        pv
     } else {
-        1
+        extracted_pv.unwrap_or(1)
     };
     let checksum = range.checksum.or(extracted_cs);
 
@@ -332,7 +335,8 @@ impl ReplicationAgent {
             });
         }
 
-        let rep_req = build_replication_request(&self.local_region, &task.target_region, &task.range);
+        let rep_req =
+            build_replication_request(&self.local_region, &task.target_region, &task.range);
 
         // Prefer TCP peer if address is registered
         let tcp_addr = {
@@ -348,7 +352,10 @@ impl ReplicationAgent {
                 Ok(c) => c,
                 Err(e) => {
                     self.router.record_link_failure(&task.target_region, None);
-                    return Err(AgentError::TargetNotRegistered(format!("TCP connect to {}: {}", addr, e)));
+                    return Err(AgentError::TargetNotRegistered(format!(
+                        "TCP connect to {}: {}",
+                        addr, e
+                    )));
                 }
             };
             let res = match client.replicate(rep_req).await {
@@ -581,7 +588,7 @@ impl ReplicationAgent {
                             // Periodic heartbeat-based replication reconciliation (§2.7.3, FN-04)
                             let should_reconcile = last_reconcile
                                 .get(&target)
-                                .map_or(true, |last| now.duration_since(*last) >= reconcile_interval);
+                                .is_none_or(|last| now.duration_since(*last) >= reconcile_interval);
                             if should_reconcile {
                                 last_reconcile.insert(target.clone(), now);
                                 if let Err(e) = self.reconcile_peer(&target).await {
@@ -702,9 +709,9 @@ impl ReplicationAgent {
                 .meta
                 .get_ownership(&remote_p.topic, remote_p.partition);
 
-            let is_local_owner = ownership.as_ref().map_or(false, |o| {
-                o.owner_region == self.local_region && now < o.lease_expiry_ns
-            });
+            let is_local_owner = ownership
+                .as_ref()
+                .is_some_and(|o| o.owner_region == self.local_region && now < o.lease_expiry_ns);
             let authoritative_epoch = ownership.as_ref().map_or(1, |o| o.epoch);
 
             // Stale epoch detection
@@ -737,9 +744,11 @@ impl ReplicationAgent {
                 );
 
                 // Check for gap between remote's durable progress and local log HWM
-                let local_hwm = self
-                    .local_broker
-                    .get_watermark(&remote_p.topic, remote_p.partition, &self.local_region);
+                let local_hwm = self.local_broker.get_watermark(
+                    &remote_p.topic,
+                    remote_p.partition,
+                    &self.local_region,
+                );
 
                 if remote_p.durable_watermark < local_hwm {
                     summary.gaps_detected += 1;
@@ -778,11 +787,16 @@ impl ReplicationAgent {
                         }
                     }
                 }
-            } else if ownership.as_ref().map_or(false, |o| o.owner_region == target_region) {
+            } else if ownership
+                .as_ref()
+                .is_some_and(|o| o.owner_region == target_region)
+            {
                 // Peer is owner: discover if local replica is lagging
-                let local_hwm = self
-                    .local_broker
-                    .get_watermark(&remote_p.topic, remote_p.partition, target_region);
+                let local_hwm = self.local_broker.get_watermark(
+                    &remote_p.topic,
+                    remote_p.partition,
+                    target_region,
+                );
                 if local_hwm < remote_p.high_watermark {
                     summary.gaps_detected += 1;
                     info!(

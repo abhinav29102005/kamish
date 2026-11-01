@@ -46,9 +46,7 @@ impl WitnessCheckpointEnvelope {
         let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(0);
         let req_id = format!(
             "wit-req-{}-{}-{}",
-            checkpoint_sequence,
-            now_ns,
-            record_count
+            checkpoint_sequence, now_ns, record_count
         );
         Self {
             format_version: 1,
@@ -135,9 +133,7 @@ impl WitnessDestination for FileWitnessDestination {
     ) -> Result<WitnessAck, AuditError> {
         let filename = format!(
             "anchor_{}_{}_{}.json",
-            checkpoint.stream_topic,
-            checkpoint.stream_partition,
-            checkpoint.checkpoint_sequence
+            checkpoint.stream_topic, checkpoint.stream_partition, checkpoint.checkpoint_sequence
         );
         let path = self.anchor_dir.join(filename);
         let serialized = serde_json::to_vec_pretty(checkpoint)?;
@@ -210,11 +206,11 @@ impl WitnessPublisher {
         let journal_path = dir.join("witness_publisher_journal.json");
         if let Ok(mut f) = File::open(&journal_path) {
             let mut content = Vec::new();
-            if f.read_to_end(&mut content).is_ok() {
-                if let Ok(state) = serde_json::from_slice::<PublisherJournalState>(&content) {
-                    last_acked = state.last_acked_sequence;
-                    queue = state.queue;
-                }
+            if f.read_to_end(&mut content).is_ok()
+                && let Ok(state) = serde_json::from_slice::<PublisherJournalState>(&content)
+            {
+                last_acked = state.last_acked_sequence;
+                queue = state.queue;
             }
         }
 
@@ -253,7 +249,10 @@ impl WitnessPublisher {
         self.metrics
             .pending_count
             .store(q.len() as u64, Ordering::SeqCst);
-        self.persist_journal(&q, self.metrics.last_published_sequence.load(Ordering::SeqCst))?;
+        self.persist_journal(
+            &q,
+            self.metrics.last_published_sequence.load(Ordering::SeqCst),
+        )?;
         Ok(())
     }
 

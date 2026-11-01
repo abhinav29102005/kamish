@@ -288,6 +288,8 @@ fn test_w22_durable_consumer_checkpoints() {
         topic: "events".to_string(),
         partition: 0,
         offset: 142,
+        generation_id: None,
+        member_id: None,
     };
 
     let committed = broker

@@ -89,20 +89,25 @@ fn setup_two_region_cluster() -> (
     let audit_a =
         kamish_audit::AuditLog::open(dir_a.path().join("audit.log").to_str().unwrap()).unwrap();
     let mut cache_a = PolicyCache::new(trusted.clone());
-    cache_a.update(signed.clone(), Utc::now().timestamp()).unwrap();
+    cache_a
+        .update(signed.clone(), Utc::now().timestamp())
+        .unwrap();
     let enforcer_a = Arc::new(Enforcer::new(
         "region-a",
         Arc::new(RwLock::new(cache_a)),
         audit_a,
     ));
 
-    let broker_a = Arc::new(BrokerServer::new(
-        "region-a",
-        enforcer_a,
-        meta.clone(),
-        vec!["region-b".into()],
-        dir_a.path(),
-    ).with_promotion_safety_margin_ms(200));
+    let broker_a = Arc::new(
+        BrokerServer::new(
+            "region-a",
+            enforcer_a,
+            meta.clone(),
+            vec!["region-b".into()],
+            dir_a.path(),
+        )
+        .with_promotion_safety_margin_ms(200),
+    );
 
     let dir_b = tempdir().unwrap();
     let audit_b =
@@ -115,13 +120,16 @@ fn setup_two_region_cluster() -> (
         audit_b,
     ));
 
-    let broker_b = Arc::new(BrokerServer::new(
-        "region-b",
-        enforcer_b,
-        meta.clone(),
-        vec!["region-a".into()],
-        dir_b.path(),
-    ).with_promotion_safety_margin_ms(200));
+    let broker_b = Arc::new(
+        BrokerServer::new(
+            "region-b",
+            enforcer_b,
+            meta.clone(),
+            vec!["region-a".into()],
+            dir_b.path(),
+        )
+        .with_promotion_safety_margin_ms(200),
+    );
 
     (broker_a, broker_b, dir_a, dir_b, meta)
 }
@@ -365,7 +373,10 @@ async fn test_promotion_success_fences_old_owner_and_quarantines_divergent_suffi
         .quarantine_divergent_suffix("failover-topic", 0, 2)
         .expect("Quarantine reconciliation must succeed");
 
-    assert_eq!(quarantined_count, 2, "Expected 2 divergent records to be quarantined");
+    assert_eq!(
+        quarantined_count, 2,
+        "Expected 2 divergent records to be quarantined"
+    );
 
     // Verify Region A's active log high watermark is truncated back to 2
     let fetch_a = broker_a
@@ -386,7 +397,9 @@ async fn test_promotion_success_fences_old_owner_and_quarantines_divergent_suffi
     assert_eq!(broker_a.quarantine().count(), 2);
 
     // Repeating quarantine is an idempotent no-op
-    let repeat = broker_a.quarantine_divergent_suffix("failover-topic", 0, 2).unwrap();
+    let repeat = broker_a
+        .quarantine_divergent_suffix("failover-topic", 0, 2)
+        .unwrap();
     assert_eq!(repeat, 0);
 }
 
@@ -397,7 +410,8 @@ fn test_partition_truncation_failure_safety_and_restart() {
 
     // Append 5 records (offset 0..5)
     for i in 0..5 {
-        log.append(1, "general", 1, format!("msg-{}", i).into_bytes()).unwrap();
+        log.append(1, "general", 1, format!("msg-{}", i).into_bytes())
+            .unwrap();
     }
     assert_eq!(log.next_offset(), 5);
     assert_eq!(log.high_watermark(), 5);
@@ -448,7 +462,11 @@ fn test_quarantine_store_persistence_recovery_and_idempotent_retry() {
 
     // 2. Idempotent retry: persisting the exact same batch does not duplicate records
     q_store.quarantine_records(batch.clone()).unwrap();
-    assert_eq!(q_store.count(), 2, "Idempotent retry must not duplicate records");
+    assert_eq!(
+        q_store.count(),
+        2,
+        "Idempotent retry must not duplicate records"
+    );
 
     // 3. Adding a new unique record increases count by 1
     let record3 = kamish_log::RecordEnvelope::new(2, "general", 1, 12, b"divergent-3".to_vec());
@@ -478,7 +496,8 @@ async fn test_promotion_cas_conflict_and_ambiguity_handling() {
 
     // 2. Concurrently, another broker or authority increments epoch to 2
     let stream = kamish_meta::StreamId::new("cas-conflict-topic", 0);
-    meta.compare_and_swap_epoch(&stream, 1, 2, "region-c", 10_000).unwrap();
+    meta.compare_and_swap_epoch(&stream, 1, 2, "region-c", 10_000)
+        .unwrap();
 
     // 3. Region B attempts promotion: current_ownership in candidate view had epoch 1
     // But CAS on metadata authority will detect epoch conflict (now at epoch 2)
@@ -488,7 +507,10 @@ async fn test_promotion_cas_conflict_and_ambiguity_handling() {
 
     // Broker B must be rejected with EpochFenced or conflict, and NOT become owner
     assert!(
-        matches!(err, BrokerError::EpochFenced { current: 2, .. } | BrokerError::PolicyDenied(_)),
+        matches!(
+            err,
+            BrokerError::EpochFenced { current: 2, .. } | BrokerError::PolicyDenied(_)
+        ),
         "Expected CAS conflict or epoch fenced error, got: {:?}",
         err
     );
@@ -500,50 +522,62 @@ async fn test_promotion_reconciliation_ordering_isolates_suffix_before_cas() {
     let (broker_a, broker_b, _dir_a, _dir_b, _meta) = setup_two_region_cluster();
 
     // 1. Region A claims partition at epoch 1 with 150ms lease and writes 2 records
-    broker_a.claim_partition_ownership("order-topic", 0, 0, 1, 150).unwrap();
+    broker_a
+        .claim_partition_ownership("order-topic", 0, 0, 1, 150)
+        .unwrap();
     for seq in 0..2 {
-        broker_a.produce(ProduceRequest {
-            topic: "order-topic".to_string(),
-            partition: 0,
-            producer_id: 501,
-            producer_epoch: 1,
-            sequence_base: seq,
-            class_id: "general".to_string(),
-            payload: format!("c-{}", seq).into_bytes(),
-            residency_rule: None,
-        }).unwrap();
+        broker_a
+            .produce(ProduceRequest {
+                topic: "order-topic".to_string(),
+                partition: 0,
+                producer_id: 501,
+                producer_epoch: 1,
+                sequence_base: seq,
+                class_id: "general".to_string(),
+                payload: format!("c-{}", seq).into_bytes(),
+                residency_rule: None,
+            })
+            .unwrap();
     }
 
     // Replicate to Region B
     for offset in 0..2 {
-        let rec = broker_a.fetch(FetchRequest {
-            topic: "order-topic".to_string(),
-            partition: 0,
-            class_id: "general".to_string(),
-            start_offset: offset,
-            max_records: 1,
-        }).unwrap().records[0].clone();
-        broker_b.handle_replication(kamish_broker::ReplicationRequest {
-            topic: "order-topic".to_string(),
-            partition: 0,
-            source_region: "region-a".to_string(),
-            target_region: "region-b".to_string(),
-            class_id: "general".to_string(),
-            epoch: 1,
-            from_offset: offset,
-            to_offset: offset + 1,
-            payload: rec.payload,
-            is_sealed: false,
-            context: rec.context,
-            policy_version: rec.policy_version,
-            checksum: Some(rec.checksum),
-            ..Default::default()
-        }).unwrap();
+        let rec = broker_a
+            .fetch(FetchRequest {
+                topic: "order-topic".to_string(),
+                partition: 0,
+                class_id: "general".to_string(),
+                start_offset: offset,
+                max_records: 1,
+            })
+            .unwrap()
+            .records[0]
+            .clone();
+        broker_b
+            .handle_replication(kamish_broker::ReplicationRequest {
+                topic: "order-topic".to_string(),
+                partition: 0,
+                source_region: "region-a".to_string(),
+                target_region: "region-b".to_string(),
+                class_id: "general".to_string(),
+                epoch: 1,
+                from_offset: offset,
+                to_offset: offset + 1,
+                payload: rec.payload,
+                is_sealed: false,
+                context: rec.context,
+                policy_version: rec.policy_version,
+                checksum: Some(rec.checksum),
+                ..Default::default()
+            })
+            .unwrap();
     }
 
     // Candidate Region B locally receives 1 uncommitted speculative record directly
     let log_b = broker_b.get_or_create_log("order-topic", 0, 1).unwrap();
-    log_b.append(1, "general", 1, b"speculative-b".to_vec()).unwrap();
+    log_b
+        .append(1, "general", 1, b"speculative-b".to_vec())
+        .unwrap();
     assert_eq!(log_b.next_offset(), 3);
 
     // Lease expires
@@ -551,7 +585,9 @@ async fn test_promotion_reconciliation_ordering_isolates_suffix_before_cas() {
 
     // Promotion with required watermark 2 must isolate speculative record 2 to quarantine
     // and truncate log to 2 before CAS commits epoch 2
-    let promoted = broker_b.promote_partition("order-topic", 0, Some("general"), Some(2)).unwrap();
+    let promoted = broker_b
+        .promote_partition("order-topic", 0, Some("general"), Some(2))
+        .unwrap();
     assert_eq!(promoted.epoch, 2);
     assert_eq!(promoted.owner_region, "region-b");
 
@@ -576,15 +612,18 @@ async fn test_restart_preserves_reconciled_state_without_resurrecting_divergence
     let mut modes = HashMap::new();
     modes.insert("region-a".to_string(), DestinationMode::Cleartext);
     let mut classes = HashMap::new();
-    classes.insert("general".to_string(), ClassRule {
-        class_id: "general".to_string(),
-        description: "General".to_string(),
-        legal_regions: legal.clone(),
-        destination_modes: modes.clone(),
-        ack_mode: AckMode::LocalMajority,
-        failover_candidates: vec!["region-a".to_string()],
-        transit_allowed: true,
-    });
+    classes.insert(
+        "general".to_string(),
+        ClassRule {
+            class_id: "general".to_string(),
+            description: "General".to_string(),
+            legal_regions: legal.clone(),
+            destination_modes: modes.clone(),
+            ack_mode: AckMode::LocalMajority,
+            failover_candidates: vec!["region-a".to_string()],
+            transit_allowed: true,
+        },
+    );
     let policy_doc = PolicyDocument {
         policy_id: "pol-cluster".to_string(),
         version: 1,
@@ -598,10 +637,17 @@ async fn test_restart_preserves_reconciled_state_without_resurrecting_divergence
     let mut trusted = HashSet::new();
     trusted.insert(pubkey_hex);
 
-    let audit = kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
+    let audit =
+        kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
     let mut cache = PolicyCache::new(trusted.clone());
-    cache.update(signed.clone(), Utc::now().timestamp()).unwrap();
-    let enforcer = Arc::new(Enforcer::new("region-a", Arc::new(RwLock::new(cache)), audit));
+    cache
+        .update(signed.clone(), Utc::now().timestamp())
+        .unwrap();
+    let enforcer = Arc::new(Enforcer::new(
+        "region-a",
+        Arc::new(RwLock::new(cache)),
+        audit,
+    ));
     let meta = Arc::new(MetadataStore::new_multi_region());
 
     let broker = Arc::new(BrokerServer::new(
@@ -615,12 +661,15 @@ async fn test_restart_preserves_reconciled_state_without_resurrecting_divergence
     // Append 4 records directly to log
     let log = broker.get_or_create_log("restart-topic", 0, 1).unwrap();
     for i in 0..4 {
-        log.append(1, "general", 1, format!("rec-{}", i).into_bytes()).unwrap();
+        log.append(1, "general", 1, format!("rec-{}", i).into_bytes())
+            .unwrap();
     }
     assert_eq!(log.next_offset(), 4);
 
     // Reconcile divergent suffix back to 2
-    let count = broker.quarantine_divergent_suffix("restart-topic", 0, 2).unwrap();
+    let count = broker
+        .quarantine_divergent_suffix("restart-topic", 0, 2)
+        .unwrap();
     assert_eq!(count, 2);
     assert_eq!(broker.quarantine().count(), 2);
     assert_eq!(log.next_offset(), 2);
@@ -628,20 +677,24 @@ async fn test_restart_preserves_reconciled_state_without_resurrecting_divergence
     // Simulate broker process crash and restart: reopen BrokerServer on the same data directory
     drop(log);
     drop(broker);
-    let audit_reopened = kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
+    let audit_reopened =
+        kamish_audit::AuditLog::open(dir.path().join("audit.log").to_str().unwrap()).unwrap();
     let mut cache_reopened = PolicyCache::new(trusted);
-    cache_reopened.update(signed, Utc::now().timestamp()).unwrap();
-    let enforcer_reopened = Arc::new(Enforcer::new("region-a", Arc::new(RwLock::new(cache_reopened)), audit_reopened));
-    let restarted_broker = BrokerServer::new(
+    cache_reopened
+        .update(signed, Utc::now().timestamp())
+        .unwrap();
+    let enforcer_reopened = Arc::new(Enforcer::new(
         "region-a",
-        enforcer_reopened,
-        meta,
-        vec![],
-        dir.path(),
-    );
+        Arc::new(RwLock::new(cache_reopened)),
+        audit_reopened,
+    ));
+    let restarted_broker =
+        BrokerServer::new("region-a", enforcer_reopened, meta, vec![], dir.path());
 
     // Verify restarted broker log is still at 2
-    let restarted_log = restarted_broker.get_or_create_log("restart-topic", 0, 1).unwrap();
+    let restarted_log = restarted_broker
+        .get_or_create_log("restart-topic", 0, 1)
+        .unwrap();
     assert_eq!(restarted_log.next_offset(), 2);
     assert_eq!(restarted_log.high_watermark(), 2);
     let recs = restarted_log.read(0, 10);

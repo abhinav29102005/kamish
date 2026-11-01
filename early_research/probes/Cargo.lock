@@ -886,6 +886,8 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -902,6 +904,7 @@ dependencies = [
  "kamish-outbox",
  "kamish-own",
  "kamish-policy",
+ "kamish-seal",
  "rcgen",
  "rustls",
  "rustls-pemfile",
@@ -1013,6 +1016,20 @@ dependencies = [
  "kamish-policy",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "kamish-seal"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "kamish-policy",
+ "rand",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
 ]
 
 [[package]]

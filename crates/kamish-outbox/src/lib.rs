@@ -83,26 +83,30 @@ impl Default for OutboxRange {
     }
 }
 
+/// Parameter struct for constructing an `OutboxRange` without argument-count bloat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxRangeParams {
+    pub topic: String,
+    pub partition: u32,
+    pub epoch: u64,
+    pub start_offset: u64,
+    pub end_offset: u64,
+    pub class_id: String,
+    pub payload: Vec<u8>,
+    pub is_sealed: bool,
+}
+
 impl OutboxRange {
-    pub fn new(
-        topic: impl Into<String>,
-        partition: u32,
-        epoch: u64,
-        start_offset: u64,
-        end_offset: u64,
-        class_id: impl Into<String>,
-        payload: Vec<u8>,
-        is_sealed: bool,
-    ) -> Self {
+    pub fn new(params: OutboxRangeParams) -> Self {
         Self {
-            topic: topic.into(),
-            partition,
-            epoch,
-            start_offset,
-            end_offset,
-            class_id: class_id.into(),
-            payload,
-            is_sealed,
+            topic: params.topic,
+            partition: params.partition,
+            epoch: params.epoch,
+            start_offset: params.start_offset,
+            end_offset: params.end_offset,
+            class_id: params.class_id,
+            payload: params.payload,
+            is_sealed: params.is_sealed,
             source_generation: 1,
             envelope_payload: None,
             context: None,
@@ -331,7 +335,8 @@ impl DestinationOutbox {
         let mut trimmed_bytes = 0;
         inner.ranges.retain(|r| {
             if r.topic == topic && r.partition == partition {
-                let provenance_matches = r.epoch <= epoch && r.source_generation <= source_generation;
+                let provenance_matches =
+                    r.epoch <= epoch && r.source_generation <= source_generation;
                 if provenance_matches && r.end_offset <= new_watermark {
                     trimmed_bytes += r.byte_size();
                     false
@@ -458,6 +463,29 @@ impl DestinationOutbox {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_outbox_range_params_constructor() {
+        let params = OutboxRangeParams {
+            topic: "events".to_string(),
+            partition: 0,
+            epoch: 1,
+            start_offset: 0,
+            end_offset: 1,
+            class_id: "general".to_string(),
+            payload: b"test-payload".to_vec(),
+            is_sealed: false,
+        };
+        let range = OutboxRange::new(params.clone());
+        assert_eq!(range.topic, params.topic);
+        assert_eq!(range.partition, params.partition);
+        assert_eq!(range.epoch, params.epoch);
+        assert_eq!(range.start_offset, params.start_offset);
+        assert_eq!(range.end_offset, params.end_offset);
+        assert_eq!(range.class_id, params.class_id);
+        assert_eq!(range.payload, params.payload);
+        assert!(!range.is_sealed);
+    }
 
     #[test]
     fn test_outbox_enqueue_advance_and_trim() {

@@ -16,7 +16,7 @@
 
 use kamish_policy::DestinationMode;
 use rand::RngCore;
-use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, CHACHA20_POLY1305};
+use ring::aead::{AES_256_GCM, Aad, CHACHA20_POLY1305, LessSafeKey, Nonce, UnboundKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -97,10 +97,12 @@ pub trait KeyProvider: Send + Sync {
 /// WARNING: This provider stores raw key bytes in local process memory and is
 /// strictly intended for automated tests, development clusters, and scenario validation.
 /// It must NEVER be used in a production deployment where hardware key custody is mandated.
+type KeyMap = Arc<RwLock<HashMap<(String, u32), [u8; 32]>>>;
+
 #[derive(Clone, Default)]
 pub struct DevKeyProvider {
     home_region: String,
-    keys: Arc<RwLock<HashMap<(String, u32), [u8; 32]>>>,
+    keys: KeyMap,
 }
 
 impl DevKeyProvider {
@@ -290,14 +292,8 @@ impl AeadSealEngine {
         let key = LessSafeKey::new(unbound_key);
 
         // 4. Construct AAD
-        let aad_bytes = compute_aead_aad(
-            topic,
-            partition,
-            epoch,
-            policy_version,
-            key_id,
-            key_version,
-        );
+        let aad_bytes =
+            compute_aead_aad(topic, partition, epoch, policy_version, key_id, key_version);
         let aad = Aad::from(&aad_bytes);
 
         // 5. Encrypt in-place with tag appended
