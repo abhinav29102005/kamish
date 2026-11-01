@@ -491,7 +491,7 @@ class GatewayClient {
   public subscribeEvents(onMessage: (data: string) => void, onError?: (err: any) => void): () => void {
     if (this.configError) {
       if (onError) onError(new Error(`Gateway Configuration Error: ${this.configError}`));
-      return () => {};
+      return () => { };
     }
 
     const eventSource = new EventSource(this.buildUrl("/api/events"), {
