@@ -73,6 +73,13 @@ export interface AuditVerificationResult {
   total_streams_audited: number;
   total_checkpoints_verified: number;
   cryptographic_signatures_valid: boolean;
+  error?: string;
+  operation?: string;
+  total_streams_checked?: number;
+  checkpoints_present?: number;
+  valid?: boolean;
+  verified_entries_count?: number;
+  error_message?: string;
 }
 
 export interface ScenarioResult {
@@ -83,13 +90,16 @@ export interface ScenarioResult {
 
 export interface ConsumerGroupsResponse {
   status: string;
+  count: number;
   consumer_groups: Array<{
     group_id: string;
-    generation_id: number;
-    protocol_type: string;
-    leader_id: string | null;
     state: string;
-    members: Record<string, {
+    generation_id: number;
+    member_count: number;
+    leader_id: string | null;
+    subscribed_topics: string[];
+    protocol_type?: string;
+    members?: Record<string, {
       member_id: string;
       client_id: string;
       client_host: string;
@@ -99,12 +109,12 @@ export interface ConsumerGroupsResponse {
       assigned_partitions: Record<string, number[]>;
     }>;
   }>;
-  count: number;
 }
 
 export interface RetentionStatusResponse {
   status: string;
-  active_rules: number;
+  active_retention_rules: number;
+  active_rules?: number;
   reclaimed_bytes_total: number;
   reclaimed_records_total: number;
   last_sweep_timestamp_ms: number;
@@ -112,15 +122,23 @@ export interface RetentionStatusResponse {
 
 export interface QuorumStatusResponse {
   configured: boolean;
+  group_id?: string | null;
+  region: string;
+  local_node_id: string;
+  role: string;
+  current_term: number;
+  leader_id?: string | null;
   quorum_size: number;
+  total_voters: number;
   ack_level: string;
   peers: Array<{
-    node_id: number;
-    region: string;
-    endpoint: string;
-    is_voter: boolean;
-    connected: boolean;
-    last_ack_ms: number;
+    node_id: string;
+    endpoint?: string;
+    last_replicated_offset?: number;
+    last_match_offset?: number;
+    last_ack_timestamp_ms?: number;
+    connected?: boolean;
+    is_voter?: boolean;
   }>;
   commit_indices: Record<string, number>;
 }
@@ -512,13 +530,56 @@ class GatewayClient {
     return res.text();
   }
 
+  public async getQuarantine(): Promise<{
+    total_quarantined: number;
+    records: Array<{
+      offset: number;
+      epoch: number;
+      class_id: string;
+      checksum: number;
+      payload_len: number;
+    }>;
+  }> {
+    return this.request("/api/partitions/quarantine");
+  }
+
+  public async promotePartition(
+    topic: string,
+    partition: number,
+    class_id?: string,
+    required_watermark?: number
+  ): Promise<{
+    status: string;
+    topic: string;
+    partition: number;
+    owner_region: string;
+    epoch: number;
+    lease_expiry_ns: number;
+  }> {
+    return this.request("/api/partitions/promote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic,
+        partition,
+        class_id: class_id || null,
+        required_watermark: required_watermark || null,
+      }),
+    });
+  }
+
   public subscribeEvents(onMessage: (data: string) => void, onError?: (err: any) => void): () => void {
     if (this.configError) {
       if (onError) onError(new Error(`Gateway Configuration Error: ${this.configError}`));
       return () => { };
     }
 
-    const eventSource = new EventSource(this.buildUrl("/api/events"), {
+    const baseUrl = this.buildUrl("/api/events");
+    const url = this.sessionToken
+      ? `${baseUrl}?token=${encodeURIComponent(this.sessionToken)}`
+      : baseUrl;
+
+    const eventSource = new EventSource(url, {
       withCredentials: true,
     });
 

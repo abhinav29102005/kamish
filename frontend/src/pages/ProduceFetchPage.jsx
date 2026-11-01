@@ -24,6 +24,9 @@ export default function ProduceFetchPage() {
   const [fetchResult, setFetchResult] = useState(null);
   const [fetchError, setFetchError] = useState(null);
 
+  const canProduce = !currentUser || ["admin", "operator", "producer"].includes(currentUser.role.toLowerCase());
+  const canFetch = !currentUser || ["admin", "operator", "consumer"].includes(currentUser.role.toLowerCase());
+
   const handleProduce = async (e) => {
     e.preventDefault();
     setProdLoading(true);
@@ -67,7 +70,7 @@ export default function ProduceFetchPage() {
 
   return (
     <div style={{ maxWidth: "1240px", margin: "0 auto", padding: "2rem 3.5rem 120px" }}>
-      <div style={{ marginBottom: "2rem" }}>
+      <div style={{ marginBottom: "1.5rem" }}>
         <h1 style={{ fontFamily: "var(--font-mono)", fontSize: "2.5rem", fontWeight: 900, textTransform: "uppercase", color: "#ffffff", margin: 0 }}>
           PRODUCE & FETCH CONSOLE
         </h1>
@@ -76,12 +79,54 @@ export default function ProduceFetchPage() {
         </p>
       </div>
 
+      {/* SESSION & RBAC STATUS BANNER */}
+      <div style={{
+        marginBottom: "2rem",
+        padding: "0.85rem 1.25rem",
+        borderRadius: "6px",
+        background: currentUser ? "rgba(56, 189, 248, 0.08)" : "rgba(245, 158, 11, 0.08)",
+        border: `1px solid ${currentUser ? "rgba(56, 189, 248, 0.3)" : "rgba(245, 158, 11, 0.3)"}`,
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.85rem",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: "0.75rem"
+      }}>
+        <div>
+          {currentUser ? (
+            <span>
+              Active Operator Session: <strong style={{ color: "#38bdf8" }}>{currentUser.username}</strong> · RBAC Role: <strong style={{ color: "#a855f7" }}>{currentUser.role.toUpperCase()}</strong>
+            </span>
+          ) : (
+            <span style={{ color: "#fbbf24" }}>
+              ⚠️ Anonymous Session: Gateway RBAC may require an active authenticated session (<code style={{ color: "#38bdf8" }}>Producer</code> role for ingress, <code style={{ color: "#a855f7" }}>Consumer</code> role for egress).
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+          Ingress: <code style={{ color: "#38bdf8" }}>POST /api/produce</code> · Egress: <code style={{ color: "#a855f7" }}>POST /api/fetch</code>
+        </div>
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(480px, 1fr))", gap: "2rem" }}>
         {/* PRODUCER CARD */}
         <div className="brutal-card-offset" style={{ padding: "2rem" }}>
-          <h2 style={{ fontFamily: "var(--font-mono)", fontSize: "1.3rem", color: "#38bdf8", margin: "0 0 1rem" }}>
-            1. REAL RECORD PRODUCER
-          </h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "0 0 1rem" }}>
+            <h2 style={{ fontFamily: "var(--font-mono)", fontSize: "1.3rem", color: "#38bdf8", margin: 0 }}>
+              1. REAL RECORD PRODUCER
+            </h2>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: canProduce ? "#10b981" : "#f43f5e" }}>
+              {canProduce ? "RBAC: AUTHORIZED" : "RBAC: ROLE RESTRICTED"}
+            </span>
+          </div>
+
+          {!canProduce && (
+            <div style={{ background: "rgba(244, 63, 94, 0.15)", border: "1px solid #f43f5e", color: "#fda4af", padding: "0.75rem", marginBottom: "1rem", borderRadius: "6px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}>
+              Warning: Current role ({currentUser?.role}) cannot produce. Required: Producer, Operator, or Admin.
+            </div>
+          )}
 
           {prodError && (
             <div role="alert" style={{ background: "rgba(244, 63, 94, 0.2)", border: "1px solid #f43f5e", color: "#fda4af", padding: "0.75rem", marginBottom: "1rem", borderRadius: "6px", fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
@@ -176,9 +221,20 @@ export default function ProduceFetchPage() {
 
         {/* CONSUMER CARD */}
         <div className="brutal-card-offset" style={{ padding: "2rem" }}>
-          <h2 style={{ fontFamily: "var(--font-mono)", fontSize: "1.3rem", color: "#c084fc", margin: "0 0 1rem" }}>
-            2. REAL RECORD FETCH CONSOLE
-          </h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "0 0 1rem" }}>
+            <h2 style={{ fontFamily: "var(--font-mono)", fontSize: "1.3rem", color: "#c084fc", margin: 0 }}>
+              2. REAL RECORD FETCH CONSOLE
+            </h2>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.75rem", color: canFetch ? "#10b981" : "#f43f5e" }}>
+              {canFetch ? "RBAC: AUTHORIZED" : "RBAC: ROLE RESTRICTED"}
+            </span>
+          </div>
+
+          {!canFetch && (
+            <div style={{ background: "rgba(244, 63, 94, 0.15)", border: "1px solid #f43f5e", color: "#fda4af", padding: "0.75rem", marginBottom: "1rem", borderRadius: "6px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }}>
+              Warning: Current role ({currentUser?.role}) cannot fetch. Required: Consumer, Operator, or Admin.
+            </div>
+          )}
 
           {fetchError && (
             <div role="alert" style={{ background: "rgba(244, 63, 94, 0.2)", border: "1px solid #f43f5e", color: "#fda4af", padding: "0.75rem", marginBottom: "1rem", borderRadius: "6px", fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
@@ -271,29 +327,29 @@ export default function ProduceFetchPage() {
                   <div
                     key={rec.offset}
                     style={{
-                      background: "#0d071a",
-                      border: "1px solid rgba(168, 85, 247, 0.3)",
-                      borderRadius: "4px",
-                      padding: "0.6rem 0.8rem",
-                      fontFamily: "var(--font-mono)",
-                      fontSize: "0.8rem",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", color: "#d8b4fe", marginBottom: "0.25rem" }}>
-                      <span>Offset: <strong>#{rec.offset}</strong></span>
-                      <span>Epoch: <strong>{rec.epoch}</strong></span>
-                      <span style={{ color: "#38bdf8" }}>[{rec.class_id}]</span>
-                    </div>
-                    <div style={{ color: "#ffffff", wordBreak: "break-all" }}>
-                      {rec.payload}
-                    </div>
+                    background: "#0d071a",
+                    border: "1px solid rgba(168, 85, 247, 0.3)",
+                    borderRadius: "4px",
+                    padding: "0.6rem 0.8rem",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: "0.8rem",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", color: "#d8b4fe", marginBottom: "0.25rem" }}>
+                    <span>Offset: <strong>#{rec.offset}</strong></span>
+                    <span>Epoch: <strong>{rec.epoch}</strong></span>
+                    <span style={{ color: "#38bdf8" }}>[{rec.class_id}]</span>
                   </div>
-                ))}
-              </div>
+                  <div style={{ color: "#ffffff", wordBreak: "break-all" }}>
+                    {rec.payload}
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
+  </div>
   );
 }

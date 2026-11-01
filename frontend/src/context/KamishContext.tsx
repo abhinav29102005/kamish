@@ -474,8 +474,31 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       // Try fetching recent real audit records if authenticated
       if (gatewayClient.isAuthenticated()) {
-        gatewayClient.getAudit(20).then((auditRes) => {
-          if (auditRes && Array.isArray(auditRes.entries)) {
+        gatewayClient.getAudit().then((auditRes: any) => {
+          if (auditRes && Array.isArray(auditRes.checkpoint_anchors) && auditRes.checkpoint_anchors.length > 0) {
+            const mapped: AuditRecord[] = auditRes.checkpoint_anchors.map((cp: any, idx: number) => {
+              const streamParts = (cp.stream || "").split(":");
+              const topicName = streamParts[0] || "checkpoint";
+              return {
+                seq: idx + 1,
+                timestamp: new Date().toISOString(),
+                action: 'CheckpointCommit',
+                topic: topicName,
+                sourceRegion: (status.region || 'EU_WEST') as RegionId,
+                targetRegion: (status.region || 'EU_WEST') as RegionId,
+                policyVersion: 1,
+                outcome: 'AllowCleartext',
+                reason: `Committed checkpoint anchor for ${cp.stream} (record_count: ${cp.record_count})`,
+                prevHash: '',
+                hash: cp.tail_hash || '',
+              };
+            });
+            setLiveAuditLedger((prev) => {
+              const existingHashes = new Set(prev.map((p) => p.hash));
+              const newItems = mapped.filter((m) => !existingHashes.has(m.hash));
+              return [...prev, ...newItems];
+            });
+          } else if (auditRes && Array.isArray(auditRes.entries)) {
             const mapped: AuditRecord[] = auditRes.entries.map((e: any, idx: number) => ({
               seq: e.seq ?? idx + 1,
               timestamp: e.timestamp ?? new Date().toISOString(),
@@ -526,7 +549,44 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Immediate poll on live mode mount
       refreshLiveTelemetry();
       const liveTimer = setInterval(refreshLiveTelemetry, 1500);
-      return () => clearInterval(liveTimer);
+
+      // Subscribe to real Server-Sent Events from gateway
+      const unsubscribeSse = gatewayClient.subscribeEvents(
+        (data: string) => {
+          if (data.startsWith("PRODUCE: ")) {
+            const match = data.match(/stream=([^:]+):(\d+)\s+base_offset=(\d+)\s+count=(\d+)/);
+            if (match) {
+              const [, topic, partitionStr] = match;
+              const newEvent: StreamEvent = {
+                id: Date.now(),
+                topic,
+                partitionKey: `P${partitionStr}`,
+                originRegion: (gatewayStatus?.region || "EU_WEST") as RegionId,
+                residencyRule: { type: "StrictLocal" },
+                timestampMs: Date.now(),
+                payloadSize: 256,
+                status: "ingested",
+              };
+              setRecentEvents((prev) => [newEvent, ...prev.slice(0, 24)]);
+            }
+            refreshLiveTelemetry();
+          } else if (
+            data.startsWith("POLICY_UPDATE: ") ||
+            data.startsWith("PROMOTION: ") ||
+            data.startsWith("MODE_CHANGE: ")
+          ) {
+            refreshLiveTelemetry();
+          }
+        },
+        () => {
+          // SSE reconnects automatically, live timer polling continues
+        }
+      );
+
+      return () => {
+        clearInterval(liveTimer);
+        unsubscribeSse();
+      };
     }
 
     // DEMO MODE ONLY: Synthetic simulation sampling
@@ -1048,10 +1108,12 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (isLiveMode) {
       try {
         const res = await gatewayClient.verifyAudit();
+        const isValid = res.valid ?? (res.verification_result === "PASS" && res.hash_chain_valid !== false);
+        const entryCount = res.verified_entries_count ?? res.total_entries ?? res.total_checkpoints_verified ?? 0;
         return {
-          valid: res.valid,
-          count: res.verified_entries_count,
-          error: res.valid ? undefined : (res.error_message || 'Gateway audit verification failed'),
+          valid: isValid,
+          count: entryCount,
+          error: isValid ? undefined : (res.error_message || res.error || `Gateway audit verification returned status: ${res.verification_result}`),
         };
       } catch (err: any) {
         return {

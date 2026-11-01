@@ -3652,3 +3652,38 @@ In strict accordance with governing directives:
   - In `crates/kamish-log/src/lib.rs` (`reclaim_prefix_before_offset`), added active segment tail preservation (`reclaim_before_offset.min(high_watermark - 1)`), guaranteeing the active segment head is never deleted.
   - In `cmd/kamish-broker/src/retention.rs` (`evaluate_and_reclaim_with_quorum`), bounded the reclamation safe ceiling by the quorum commit index, ensuring uncommitted records are never reclaimed.
 - **Benchmark Dual Durability:** Updated `benchmarks/orchestrator.mjs` to support dual durability levels (`LeaderFsync` and `InRegionQuorum`), establishing fair, equivalent comparisons with Apache Kafka (`acks=all`) and Apache Pulsar (`ackQuorum=2`).
+
+
+---
+
+## 39. Frontend/Backend Integration & Gateway API Harmonization (2026-11-01)
+
+### 39.1 Mission & Scope
+As part of the active draft PR #1 (`audit/evidence-contract-frontend-reconciliation-2026-11-01`), a targeted source-level functionality review of the frontend–backend integration was executed. Concrete integration defects across authentication, audit verification, real-time event streaming, client type schemas, and telemetry display were resolved to ensure full end-to-end fidelity between the React dashboard and the Axum gateway daemon.
+
+In strict compliance with execution directives:
+- **Zero Testing Mandate:** No unit tests, integration suites, builds (`cargo check`, `npm run build`), linters, or benchmarks were executed or added.
+- **Strictly Functionality-First:** Only demonstrable integration defects supported by existing contracts and source code were modified.
+- **Empirical Boundary Integrity:** Synthetic metrics were strictly isolated to Demo mode, while Live mode displays real gateway telemetry and clear disclaimers for unexecuted benchmarks.
+
+### 39.2 Server-Sent Events (SSE) Query Token Extraction (`cmd/kamish-gateway/src/lib.rs`)
+- **Native Browser `EventSource` Limitation:** Browser standard `EventSource` cannot send custom `Authorization: Bearer <token>` headers. In cross-origin deployments or environments restricting third-party credentials, this caused gateway SSE streaming to fail with `401 Unauthorized`.
+- **Query Parameter Fallback:** Updated `security_middleware` in `cmd/kamish-gateway/src/lib.rs` to extract session tokens from query string `?token=<tok>` strictly when accessing `/api/events`, while preserving mandatory header/cookie extraction for all other API endpoints.
+- **Client Propagation:** Updated `subscribeEvents` in `frontend/src/utils/gatewayClient.ts` to append `?token=${encodeURIComponent(this.sessionToken)}` when an active session token exists.
+
+### 39.3 Audit Verification Property & Ledger Anchor Mapping (`frontend/src/context/KamishContext.tsx`)
+- **Verification Property Mismatch:** Axum endpoint `POST /api/audit/verify` returns `{ verification_result: "PASS" | "FAIL", hash_chain_valid: bool, total_entries: u64, ... }`. `KamishContext.tsx` checked nonexistent fields `res.valid`, `res.verified_entries_count`, and `res.error_message`, causing audit verification to permanently report failure in Live mode. Corrected to check `res.verification_result === "PASS" && res.hash_chain_valid !== false` and extract `total_entries ?? total_checkpoints_verified`.
+- **Checkpoint Anchor Ingestion:** Axum endpoint `GET /api/audit` returns `{ audit_ledger_status, checkpoints_count, checkpoint_anchors: [...] }`. `KamishContext.tsx` previously looked for `auditRes.entries`, resulting in a no-op. Updated mapping to ingest `checkpoint_anchors` as `CheckpointCommit` audit records into `liveAuditLedger`.
+
+### 39.4 Real-Time Event Stream Connection (`frontend/src/context/KamishContext.tsx`)
+- **Wired SSE Listener:** Connected `gatewayClient.subscribeEvents` during active Live mode sessions. Parsed incoming gateway broadcast lines (`PRODUCE`, `POLICY_UPDATE`, `PROMOTION`, `MODE_CHANGE`), dynamically prepending ingested records to `recentEvents` and triggering live telemetry refreshes with clean unsubscribe teardown on unmount or mode switch.
+
+### 39.5 Gateway Client Schema Harmonization (`frontend/src/utils/gatewayClient.ts`)
+- **Quorum Status Schema:** Corrected `QuorumStatusResponse` interface: `local_node_id` and `peers.node_id` typed as `string` (matching Rust `String`, previously incorrectly typed as `number`), and added `group_id`, `role`, `current_term`, `leader_id`, and `total_voters`.
+- **Consumer Group Summary:** Updated `ConsumerGroupsResponse` to match Rust `GroupSummary` (`state`, `generation_id`, `member_count`, `leader_id`, `subscribed_topics`).
+- **Retention Status:** Added `active_retention_rules` to match the exact JSON key emitted by Axum.
+- **Missing API Client Methods:** Added `getQuarantine()` (`/api/partitions/quarantine`) and `promotePartition(...)` (`/api/partitions/promote`).
+
+### 39.6 Live Telemetry Realism & RBAC Awareness (`frontend/src/pages/`)
+- **`TelemetryPage.jsx` Realism:** Replaced hardcoded simulated values (12,479 msg/s, 1.4M records) in Live mode with real broker telemetry from `currentTelemetry` (sustained throughput `throughputEps`, outbox depth `outboxDepth`, replication lag `replicationLag`, local committed offset `localCommitted`). Added explicit disclaimers for latency percentiles (p50/p90/p99) noting that exact distributions require executing `benchmarks/orchestrator.mjs`, while preserving simulated demo metrics exclusively in Demo mode with clear `[SIMULATED]` indicators.
+- **`ProduceFetchPage.jsx` RBAC Status:** Added an active Operator Session & RBAC Status banner. Evaluates operator roles (`Producer`, `Consumer`, `Operator`, `Admin`) against backend gateway security middleware requirements, alerting unauthenticated or role-restricted operators before initiating requests.

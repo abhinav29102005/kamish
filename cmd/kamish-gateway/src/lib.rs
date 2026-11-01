@@ -219,7 +219,20 @@ async fn security_middleware(
     }
 
     // 2. Authentication Enforcement for all protected API endpoints
-    let token = extract_token_from_headers(req.headers());
+    let token = extract_token_from_headers(req.headers()).or_else(|| {
+        if path == "/api/events" {
+            req.uri().query().and_then(|q| {
+                for pair in q.split('&') {
+                    if let Some(tok) = pair.strip_prefix("token=") {
+                        return Some(tok.to_string());
+                    }
+                }
+                None
+            })
+        } else {
+            None
+        }
+    });
     let session = match token
         .as_deref()
         .and_then(|tok| state.session_store.validate_session(tok))
