@@ -56,12 +56,11 @@ pub enum OwnershipError {
 
 use kamish_log::{PartitionLog, RecordContext};
 
-/// Role of an in-region partition replica in Option 1 (INV-2 / INV-3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplicaRole {
-    Leader,
-    Follower,
-}
+pub mod quorum;
+pub use quorum::{
+    calculate_quorum_frontier, PersistentConsensusState, ReplicaGroupConfig, ReplicaPeerConfig,
+    ReplicaRole,
+};
 
 /// In-region 3-replica quorum group enforcing INV-2, INV-3, W04, and W20.
 pub struct InRegionReplicationGroup {
