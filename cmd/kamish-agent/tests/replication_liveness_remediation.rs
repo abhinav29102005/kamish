@@ -188,6 +188,8 @@ fn test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers() {
             class_id: "global-stream".to_string(),
             payload: b"msg-2".to_vec(),
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         })
         .unwrap();
     outbox_us
@@ -200,6 +202,8 @@ fn test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers() {
             class_id: "global-stream".to_string(),
             payload: b"msg-3".to_vec(),
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         })
         .unwrap();
 

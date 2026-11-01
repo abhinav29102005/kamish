@@ -12,7 +12,6 @@ use kamish_broker::{
 use kamish_log::RecordEnvelope;
 use kamish_meta::{PolicyEngine, RegionId, ResidencyPolicy, StreamEvent};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
 
@@ -31,14 +30,26 @@ pub enum ClientError {
     UnexpectedResponse,
 }
 
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// Per-stream monotonic sequence tracking and unresolved produce retention (W21).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamState {
+    pub next_sequence: u32,
+    pub pending: Option<ProduceRequest>,
+}
+
 /// Thread-safe Idempotent Producer Client.
 pub struct KamishProducer {
     client: Arc<tokio::sync::Mutex<BrokerClient>>,
     producer_id: u64,
     producer_epoch: u64,
-    sequence_seq: AtomicU32,
     local_region: RegionId,
     policy_engine: Option<Arc<dyn PolicyEngine>>,
+    stream_states: Arc<tokio::sync::Mutex<HashMap<(String, u32), StreamState>>>,
+    journal_path: Option<PathBuf>,
 }
 
 impl KamishProducer {
@@ -56,10 +67,89 @@ impl KamishProducer {
             client: Arc::new(tokio::sync::Mutex::new(client)),
             producer_id,
             producer_epoch: 1,
-            sequence_seq: AtomicU32::new(0),
             local_region,
             policy_engine,
+            stream_states: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            journal_path: None,
         })
+    }
+
+    /// Configures a disk-persisted session journal surviving client restarts (W21).
+    pub fn with_session_journal(mut self, path: PathBuf) -> Self {
+        if let Ok(content) = std::fs::read(&path)
+            && let Ok(states) = serde_json::from_slice::<HashMap<String, StreamState>>(&content)
+        {
+            let mut map = self.stream_states.blocking_lock();
+            for (k, v) in states {
+                let parts: Vec<&str> = k.split(':').collect();
+                if parts.len() == 2
+                    && let Ok(p) = parts[1].parse::<u32>()
+                {
+                    map.insert((parts[0].to_string(), p), v);
+                }
+            }
+        }
+        self.journal_path = Some(path);
+        self
+    }
+
+    fn persist_journal(&self, states: &HashMap<(String, u32), StreamState>) {
+        if let Some(ref path) = self.journal_path {
+            let serialized: HashMap<String, StreamState> = states
+                .iter()
+                .map(|((t, p), state)| (format!("{}:{}", t, p), state.clone()))
+                .collect();
+            if let Ok(bytes) = serde_json::to_vec(&serialized) {
+                let tmp = path.with_extension("tmp");
+                let _ = std::fs::write(&tmp, &bytes);
+                let _ = std::fs::rename(&tmp, path);
+            }
+        }
+    }
+
+    /// Checks if a stream has an unresolved pending write requiring retry (W21).
+    pub async fn has_pending(&self, topic: &str, partition: u32) -> bool {
+        let states = self.stream_states.lock().await;
+        states
+            .get(&(topic.to_string(), partition))
+            .is_some_and(|s| s.pending.is_some())
+    }
+
+    /// Retries an exact unresolved pending write, retaining identical identity and bytes (W21).
+    pub async fn retry_pending(
+        &self,
+        topic: &str,
+        partition: u32,
+    ) -> Result<ProduceResponse, ClientError> {
+        let pending_req = {
+            let states = self.stream_states.lock().await;
+            states
+                .get(&(topic.to_string(), partition))
+                .and_then(|s| s.pending.clone())
+                .ok_or_else(|| {
+                    ClientError::BrokerRejection("No unresolved pending write on stream".into())
+                })?
+        };
+
+        let mut client = self.client.lock().await;
+        let resp = client
+            .send_request(BrokerRequest::Produce(pending_req.clone()))
+            .await
+            .map_err(|e| ClientError::Network(e.to_string()))?;
+
+        match resp {
+            BrokerResponse::Produce(ack) => {
+                let mut states = self.stream_states.lock().await;
+                if let Some(state) = states.get_mut(&(topic.to_string(), partition)) {
+                    state.next_sequence = pending_req.sequence_base + 1;
+                    state.pending = None;
+                }
+                self.persist_journal(&states);
+                Ok(ack)
+            }
+            BrokerResponse::Error(err) => Err(ClientError::BrokerRejection(err)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
     }
 
     /// Publishes a record with automatic sequence numbering and pre-flight residency check.
@@ -86,33 +176,67 @@ impl KamishProducer {
             }
         }
 
-        let seq = self.sequence_seq.fetch_add(1, Ordering::SeqCst);
-        let req = BrokerRequest::Produce(ProduceRequest {
-            topic: topic.to_string(),
-            partition,
-            producer_id: self.producer_id,
-            producer_epoch: self.producer_epoch,
-            sequence_base: seq,
-            class_id: class_id.to_string(),
-            payload,
-            residency_rule: Some(residency_rule),
-        });
+        // Per-stream sequence and pending check (W21)
+        let key = (topic.to_string(), partition);
+        let produce_req = {
+            let mut states = self.stream_states.lock().await;
+            let state = states.entry(key.clone()).or_insert_with(|| StreamState {
+                next_sequence: 0,
+                pending: None,
+            });
+
+            if state.pending.is_some() {
+                return Err(ClientError::BrokerRejection(
+                    "Stream has an unresolved pending write; call retry_pending (W21)".into(),
+                ));
+            }
+
+            let seq = state.next_sequence;
+            ProduceRequest {
+                topic: topic.to_string(),
+                partition,
+                producer_id: self.producer_id,
+                producer_epoch: self.producer_epoch,
+                sequence_base: seq,
+                class_id: class_id.to_string(),
+                payload,
+                residency_rule: Some(residency_rule),
+            }
+        };
 
         let mut client = self.client.lock().await;
         let resp = client
-            .send_request(req)
-            .await
-            .map_err(|e| ClientError::Network(e.to_string()))?;
+            .send_request(BrokerRequest::Produce(produce_req.clone()))
+            .await;
+
+        let mut states = self.stream_states.lock().await;
+        let state = states.get_mut(&key).unwrap();
 
         match resp {
-            BrokerResponse::Produce(ack) => {
+            Ok(BrokerResponse::Produce(ack)) => {
                 if !ack.sovereignty_allowed {
                     return Err(ClientError::BrokerRejection(ack.denial_reason));
                 }
+                state.next_sequence = produce_req.sequence_base + 1;
+                state.pending = None;
+                self.persist_journal(&states);
                 Ok(ack)
             }
-            BrokerResponse::Error(err) => Err(ClientError::BrokerRejection(err)),
-            _ => Err(ClientError::UnexpectedResponse),
+            Ok(BrokerResponse::Error(err)) => {
+                state.pending = Some(produce_req);
+                self.persist_journal(&states);
+                Err(ClientError::BrokerRejection(err))
+            }
+            Err(e) => {
+                state.pending = Some(produce_req);
+                self.persist_journal(&states);
+                Err(ClientError::Network(e.to_string()))
+            }
+            _ => {
+                state.pending = Some(produce_req);
+                self.persist_journal(&states);
+                Err(ClientError::UnexpectedResponse)
+            }
         }
     }
 }
@@ -172,6 +296,59 @@ impl KamishConsumer {
         }
     }
 
+    /// Commits consumer group offset with crash-safe durable persistence (W22).
+    pub async fn commit_offset(
+        &mut self,
+        group_id: &str,
+        topic: &str,
+        partition: u32,
+        offset: u64,
+    ) -> Result<u64, ClientError> {
+        let req = BrokerRequest::CommitOffset(kamish_broker::CommitOffsetRequest {
+            group_id: group_id.to_string(),
+            topic: topic.to_string(),
+            partition,
+            offset,
+        });
+
+        let mut client = self.client.lock().await;
+        let resp = client
+            .send_request(req)
+            .await
+            .map_err(|e| ClientError::Network(e.to_string()))?;
+
+        match resp {
+            BrokerResponse::OffsetCommitted { offset, .. } => Ok(offset),
+            BrokerResponse::Error(e) => Err(ClientError::BrokerRejection(e)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
+    }
+
+    /// Fetches committed consumer group offset (W22).
+    pub async fn fetch_committed_offset(
+        &mut self,
+        group_id: &str,
+        topic: &str,
+        partition: u32,
+    ) -> Result<Option<u64>, ClientError> {
+        let req = BrokerRequest::FetchOffset(kamish_broker::FetchOffsetRequest {
+            group_id: group_id.to_string(),
+            topic: topic.to_string(),
+            partition,
+        });
+
+        let mut client = self.client.lock().await;
+        let resp = client
+            .send_request(req)
+            .await
+            .map_err(|e| ClientError::Network(e.to_string()))?;
+
+        match resp {
+            BrokerResponse::OffsetFetched { offset, .. } => Ok(offset),
+            BrokerResponse::Error(e) => Err(ClientError::BrokerRejection(e)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
+    }
     pub fn current_offset(&self) -> u64 {
         self.current_offset
     }

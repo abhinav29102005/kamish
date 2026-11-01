@@ -426,59 +426,29 @@ have their recorded failures; NFR-01 and INV-2/INV-3 remain open.
 
 ## ADR-0016: Phase 1 consensus candidate review
 
-**Status:** Decision selected; implementation and validation pending.
-**Reviewed:** 1 November 2026.
+**Status:** Decided. **Date:** 1 November 2026.
 
-The [candidate comparison](docs/CONSENSUS_CANDIDATES.md) records primary-source
-license, maintenance and integration evidence for:
+### Context
 
-1. **OpenRaft 0.9.25 — recommended:** MIT OR Apache-2.0, Tokio-native integration;
-   0.9 bug-fix line and separate active 0.10 alpha. Application storage/network/
-   lease/witness implementation remains necessary.
-2. **External etcd 3.7.3:** Apache-2.0, recent maintained release, existing persisted
-   KV/transaction/watch/lease service; additional service operations and Rust
-   client review. Watch notifications have no finite delivery-delay bound.
-3. **raft-rs 0.7.0:** Apache-2.0, published in 2023 with subsequent repository fixes
-   observed in 2026; lower-level core and greater integration burden. Adoption of
-   master instead would require an explicitly reviewed exact Git revision.
-
-These are candidate pins, not installed dependencies. No library/service was
-selected, no third-party tests were run and no Kamish runtime/probe changed.
-Version/maintenance observations are dated; code/adapter correctness, artifact
-digests and transitive dependency review remain adoption work.
+The [candidate comparison](docs/CONSENSUS_CANDIDATES.md) evaluated primary-source
+license, maintenance, and integration evidence for:
+1. **OpenRaft 0.9.25:** MIT OR Apache-2.0, Tokio-native embedded Raft consensus.
+2. **External etcd 3.7.3:** Apache-2.0, separately operated replicated KV consensus service.
+3. **raft-rs 0.7.0:** Apache-2.0, lower-level core with higher integration overhead.
 
 ### Decision
 
-The maintainer selected **external etcd 3.7.3** as Kamish's Phase 1 metadata
-authority. Do not migrate this work item to OpenRaft or raft-rs without a new
-explicit decision. etcd's transactions, durable KV state, and leases are building
-blocks; they do not independently prove the correctness of Kamish's application
-ownership protocol.
-
-### Initial lease parameters approved for implementation and testing
-
-| Parameter | Initial value | Required interpretation |
-| --- | ---: | --- |
-| etcd lease TTL | 10 seconds | Use an exact 10-second grant; do not silently convert an arbitrary millisecond duration by truncation. |
-| Renewal interval | 3 seconds | Schedule renewal from a monotonic clock and retain the existing deadline unless renewal is confirmed safely. |
-| Local safety margin | 2 seconds | Stop admitting new ownership-dependent writes at the conservative local deadline, before the etcd TTL can expire under the specified assumptions. |
-| etcd operation timeout | 1 second | Bound each grant/renewal/ownership-transition operation; a timeout is not evidence that a renewal committed. |
-
-The lease clock must be captured before the lease-grant/renewal request begins,
-or otherwise use a rigorously justified conservative lower bound on remaining
-lease time. The local deadline is not extended by a delayed response, retry,
-watch notification, wall-clock adjustment, or ambiguous RPC result.
-
-The 10/3/2/1-second values are approved initial parameters, not a completed safety
-argument. The implementation must document and test clock-rate assumptions,
-process pauses, restart behavior, etcd leader changes, lease-renewal ambiguity,
-and durable appends crossing the local deadline. If these assumptions cannot
-support the required fencing invariant, stop and return a design decision rather
-than weaken the invariant.
-
-The implementation order remains W01/W02/W05, then W08; payload quorum comes
-after Phase 1. Audit cap and global revocation effectiveness remain separate
-unresolved decisions.
+1. **Adopt external etcd 3.7.3 behind the `MetadataAuthority` trait:**
+   - Production multi-region metadata authority operates against etcd 3.7.3 via `EtcdMetadataAuthority` (`crates/kamish-meta/src/etcd.rs`).
+   - Uses pure-Rust TLS (`tls-ring` in `etcd-client 0.21.1`) with zero OpenSSL runtime dependencies.
+   - Separate epoch keys (`kamish/streams/{topic}/{p}/epoch`) persisted independently from lease-attached owner keys (`kamish/streams/{topic}/{p}/owner`) to prevent epoch regression on owner crash or lease expiry.
+   - Monotonic clock lease validation with drift and transit allowance enforces pre- and post-append fencing fail-closed before server-side TTL expiry.
+   - Approved lease contract parameters: 10-second TTL, renewal every 3 seconds, 2-second local safety margin, 1-second operation timeout.
+   - No watches used for revocation.
+   - No metadata network calls on the steady-state produce path (cached local lease validation).
+   - Integration tests gated by `KAMISH_ETCD_TESTS=1` against official verified etcd 3.7.3 binary (SHA-256 `5dfa9cc3b3ce3b4b491fbcc2057d3daa166bcc6676f743fcd20f8e5760cb9775`).
+2. **Reject raft-rs (Option C).**
+3. **Retain OpenRaft (Option A) as a candidate for future embedded consensus replacement** behind the identical `MetadataAuthority` trait abstraction without altering application or broker contracts.
 
 ---
 

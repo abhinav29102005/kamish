@@ -95,6 +95,8 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
             class_id: "orders".to_string(),
             payload: format!("record-{}", i).into_bytes(),
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         });
     }
     let _local_duration_healthy = start_local.elapsed();
@@ -126,6 +128,8 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
             class_id: "orders".to_string(),
             payload: format!("record-{}", i).into_bytes(),
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         });
     }
     let local_duration_degraded = start_degraded.elapsed();
@@ -181,6 +185,8 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
                 class_id: "tx".to_string(),
                 payload: format!("tx-{}", i).into_bytes(),
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             })
             .unwrap();
 
@@ -212,6 +218,8 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
                 class_id: "tx".to_string(),
                 payload: format!("tx-{}", i).into_bytes(),
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             })
             .unwrap();
     }

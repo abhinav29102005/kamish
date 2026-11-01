@@ -124,6 +124,7 @@ fn test_record_size_exceeding_estimate_retains_durable_wal_obligation() {
         origin_region: "EU_WEST".to_string(),
         request_policy: "{\"residency_rule\":\"GlobalCleartext\"}".to_string(),
         replication_targets: vec!["US_EAST".to_string()],
+        source_generation: 1,
     };
     let part_dir = _td.path().join("audit-events-0");
     std::fs::create_dir_all(&part_dir).unwrap();
@@ -146,6 +147,8 @@ fn test_record_size_exceeding_estimate_retains_durable_wal_obligation() {
         class_id: "replicated-stream".to_string(),
         payload: vec![b'A'; 36], // 36 + 64 = 100 bytes
         is_sealed: false,
+        source_generation: 1,
+        envelope_payload: None,
     };
     assert!(!reservation.is_infallible(&actual_range));
 
@@ -222,6 +225,8 @@ fn test_exact_preallocation_guarantees_infallible_commit() {
         class_id: "replicated-stream".to_string(),
         payload: payload.clone(),
         is_sealed: false,
+        source_generation: 1,
+        envelope_payload: None,
     };
 
     assert!(reservation.is_infallible(&range));
@@ -316,6 +321,8 @@ fn test_reservation_accounting_lifecycle_exhaustive() {
         class_id: "c".to_string(),
         payload: vec![0; 100],
         is_sealed: false,
+        source_generation: 1,
+        envelope_payload: None,
     };
     res1.commit(r1).unwrap();
     assert_eq!(outbox.queued_bytes(), 164);
@@ -344,6 +351,8 @@ fn test_reservation_accounting_lifecycle_exhaustive() {
         class_id: "c".to_string(),
         payload: vec![0; 336], // 336 + 64 = 400 bytes
         is_sealed: false,
+        source_generation: 1,
+        envelope_payload: None,
     };
     assert!(res3.commit(r3_oversized).is_err());
     assert_eq!(

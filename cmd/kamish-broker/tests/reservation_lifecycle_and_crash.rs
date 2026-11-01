@@ -133,6 +133,8 @@ fn test_reservation_lifecycle_and_accounting_invariants() {
         class_id: "replicated-stream".to_string(),
         payload: vec![b'Z'; 286], // 286 + 64 = 350 bytes
         is_sealed: false,
+        source_generation: 1,
+        envelope_payload: None,
     };
     res2.commit(range).unwrap();
 
@@ -175,6 +177,8 @@ async fn test_producer_cancellation_releases_reservation() {
             class_id: "replicated-stream".to_string(),
             payload: vec![0; 236],
             is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
         };
         reservation.commit(range).unwrap();
     });
@@ -301,6 +305,8 @@ fn test_multi_partition_restart_reconciliation_isolation() {
                 class_id: r.class_id,
                 payload: r.payload,
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             })
             .unwrap();
     }
@@ -315,6 +321,8 @@ fn test_multi_partition_restart_reconciliation_isolation() {
                 class_id: r.class_id,
                 payload: r.payload,
                 is_sealed: false,
+                source_generation: 1,
+                envelope_payload: None,
             })
             .unwrap();
     }

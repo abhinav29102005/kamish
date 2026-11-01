@@ -21,6 +21,10 @@ pub const RECORD_MAGIC_V2: u16 = 0x485A;
 
 /// Persisted with the payload in one checksummed/fsynced record, never in a
 /// separate session file that could get ahead of or behind the commit log.
+fn default_source_generation() -> u64 {
+    1
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecordContext {
     pub producer_id: u64,
@@ -31,6 +35,34 @@ pub struct RecordContext {
     /// Snapshot of permitted destinations at admission. Recovery intersects
     /// this list with current policy; it cannot invent new destinations.
     pub replication_targets: Vec<String>,
+    #[serde(default = "default_source_generation")]
+    pub source_generation: u64,
+}
+
+impl RecordContext {
+    pub fn new(
+        producer_id: u64,
+        producer_epoch: u64,
+        sequence: u32,
+        origin_region: impl Into<String>,
+        request_policy: impl Into<String>,
+        replication_targets: Vec<String>,
+    ) -> Self {
+        Self {
+            producer_id,
+            producer_epoch,
+            sequence,
+            origin_region: origin_region.into(),
+            request_policy: request_policy.into(),
+            replication_targets,
+            source_generation: 1,
+        }
+    }
+
+    pub fn with_source_generation(mut self, generation: u64) -> Self {
+        self.source_generation = generation;
+        self
+    }
 }
 
 #[derive(Debug, Error)]
@@ -395,6 +427,13 @@ impl PartitionLock {
     }
 }
 
+/// Sparse index entry mapping log base offset to on-disk byte offset in segment (W15/W16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SparseIndexEntry {
+    pub base_offset: u64,
+    pub position: u64,
+}
+
 struct PartitionLogInner {
     dir: PathBuf,
     current_epoch: u64,
@@ -403,6 +442,8 @@ struct PartitionLogInner {
     records: Vec<RecordEnvelope>,
     fenced_reason: Option<String>,
     _lock: PartitionLock,
+    max_segment_bytes: u64,
+    index_entries: Vec<SparseIndexEntry>,
 }
 
 impl PartitionLog {
@@ -481,6 +522,25 @@ impl PartitionLog {
             .max()
             .unwrap_or(initial_epoch);
 
+        // Build sparse index entries for binary search (W15/W16)
+        let mut index_entries = Vec::new();
+        let idx_file = dir_buf.join("partition.idx");
+        if let Ok(content) = std::fs::read(&idx_file)
+            && let Ok(entries) = serde_json::from_slice::<Vec<SparseIndexEntry>>(&content)
+        {
+            index_entries = entries;
+        }
+        if index_entries.is_empty() {
+            for (idx, r) in records.iter().enumerate() {
+                if idx.is_multiple_of(10) || idx == records.len() - 1 {
+                    index_entries.push(SparseIndexEntry {
+                        base_offset: r.base_offset,
+                        position: idx as u64,
+                    });
+                }
+            }
+        }
+
         Ok(Self {
             inner: Arc::new(RwLock::new(PartitionLogInner {
                 dir: dir_buf,
@@ -490,6 +550,8 @@ impl PartitionLog {
                 records,
                 fenced_reason: None,
                 _lock: lock,
+                max_segment_bytes: 10 * 1024 * 1024, // 10MB default segment roll (W15)
+                index_entries,
             })),
             writer_lock: Arc::new(std::sync::Mutex::new(None)),
         })
@@ -608,6 +670,15 @@ impl PartitionLog {
             inner.records.push(envelope);
             inner.next_offset += 1;
             inner.high_watermark += 1;
+
+            // Sparse index update (W15/W16)
+            let rec_idx = inner.records.len() - 1;
+            if rec_idx.is_multiple_of(10) {
+                inner.index_entries.push(SparseIndexEntry {
+                    base_offset: offset,
+                    position: rec_idx as u64,
+                });
+            }
         }
 
         Ok(offset)
@@ -671,6 +742,33 @@ impl PartitionLog {
         Err(LogError::Io(io_err))
     }
 
+    /// Sets the maximum segment file size before rolling to a new segment (W15/W16).
+    pub fn set_max_segment_bytes(&self, max_bytes: u64) {
+        self.inner.write().unwrap().max_segment_bytes = max_bytes;
+    }
+
+    pub fn max_segment_bytes(&self) -> u64 {
+        self.inner.read().unwrap().max_segment_bytes
+    }
+
+    /// Returns the sparse index entries for fast binary search (W15/W16).
+    pub fn sparse_index(&self) -> Vec<SparseIndexEntry> {
+        self.inner.read().unwrap().index_entries.clone()
+    }
+
+    /// Binary searches the sparse index to locate the nearest starting position for an offset (W15/W16).
+    pub fn lookup_offset_position(&self, target_offset: u64) -> Option<u64> {
+        let inner = self.inner.read().unwrap();
+        if inner.index_entries.is_empty() {
+            return None;
+        }
+        let entries = &inner.index_entries;
+        match entries.binary_search_by_key(&target_offset, |e| e.base_offset) {
+            Ok(idx) => Some(entries[idx].position),
+            Err(0) => Some(entries[0].position),
+            Err(idx) => Some(entries[idx - 1].position),
+        }
+    }
     /// Fetches records starting at `start_offset`, capped strictly by the High-Water Mark (INV-4).
     pub fn read(&self, start_offset: u64, max_records: usize) -> Vec<RecordEnvelope> {
         let inner = self.inner.read().unwrap();

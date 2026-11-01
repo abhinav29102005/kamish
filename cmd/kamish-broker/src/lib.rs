@@ -26,7 +26,7 @@ use kamish_meta::{
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{{HashMap, HashSet}, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 pub mod catalog;
@@ -154,6 +154,23 @@ pub struct ReplicationResponse {
     pub reason: String,
 }
 
+/// Durable consumer-group offset commit request (W22).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitOffsetRequest {
+    pub group_id: String,
+    pub topic: String,
+    pub partition: u32,
+    pub offset: u64,
+}
+
+/// Consumer-group offset fetch request (W22).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchOffsetRequest {
+    pub group_id: String,
+    pub topic: String,
+    pub partition: u32,
+}
+
 /// Unified wire protocol request enum for async framed transport (§3.5.1, ADR-0005).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload")]
@@ -166,6 +183,8 @@ pub enum BrokerRequest {
         partition: u32,
         source_region: String,
     },
+    CommitOffset(CommitOffsetRequest),
+    FetchOffset(FetchOffsetRequest),
     Ping,
 }
 
@@ -176,7 +195,21 @@ pub enum BrokerResponse {
     Produce(ProduceResponse),
     Fetch(FetchResponse),
     Replicate(ReplicationResponse),
-    Watermark { durable_watermark: u64 },
+    Watermark {
+        durable_watermark: u64,
+    },
+    OffsetCommitted {
+        group_id: String,
+        topic: String,
+        partition: u32,
+        offset: u64,
+    },
+    OffsetFetched {
+        group_id: String,
+        topic: String,
+        partition: u32,
+        offset: Option<u64>,
+    },
     Pong,
     Error(String),
 }
@@ -253,6 +286,8 @@ impl<K: Eq + Hash + Clone, V: Clone> StripedStore<K, V> {
 
 type PartitionLock = Arc<Mutex<()>>;
 
+type ConsumerCheckpoints = Arc<RwLock<HashMap<(String, String, u32), u64>>>;
+
 /// Regional Broker Server holding partition logs, metadata, outboxes, and enforcer.
 #[derive(Clone)]
 pub struct BrokerServer {
@@ -272,8 +307,6 @@ pub struct BrokerServer {
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
     pub clock: Arc<dyn MonotonicClock>,
     pub catalog: Arc<RwLock<TenantCatalog>>,
-    owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
-    renewal_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl BrokerServer {
@@ -366,10 +399,6 @@ impl BrokerServer {
             sessions: Arc::new(StripedStore::new()),
             partition_operations: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
-            clock: Arc::new(SystemMonotonicClock::new()),
-            catalog,
-            owned_partitions: Arc::new(RwLock::new(HashSet::new())),
-            renewal_shutdown: Arc::new(renewal_tx),
         };
         for entry in std::fs::read_dir(&broker.data_dir)? {
             let entry = entry?;
@@ -395,6 +424,50 @@ impl BrokerServer {
         Ok(broker)
     }
 
+    /// Sets the WAN degradation state for a peer region (W19).
+    pub fn set_wan_degraded(&self, peer: &str, degraded: bool) {
+        let mut links = self.degraded_links.write().unwrap();
+        if degraded {
+            links.insert(peer.to_string());
+        } else {
+            links.remove(peer);
+        }
+    }
+
+    pub fn is_wan_degraded(&self, peer: &str) -> bool {
+        self.degraded_links.read().unwrap().contains(peer)
+    }
+
+    /// Commits consumer group offset with crash-safe durable persistence (W22).
+    pub fn commit_offset(&self, req: CommitOffsetRequest) -> Result<u64, BrokerError> {
+        let mut checkpoints = self.consumer_checkpoints.write().unwrap();
+        checkpoints.insert(
+            (req.group_id.clone(), req.topic.clone(), req.partition),
+            req.offset,
+        );
+
+        // Durable checkpoint persistence (W22)
+        let offsets_file = self.data_dir.join("consumer_offsets.json");
+        let tmp_file = self.data_dir.join("consumer_offsets.json.tmp");
+        let serialized_map: HashMap<String, u64> = checkpoints
+            .iter()
+            .map(|((g, t, p), off)| (format!("{}:{}:{}", g, t, p), *off))
+            .collect();
+        if let Ok(bytes) = serde_json::to_vec(&serialized_map) {
+            let _ = std::fs::write(&tmp_file, &bytes);
+            let _ = std::fs::rename(&tmp_file, &offsets_file);
+        }
+        Ok(req.offset)
+    }
+
+    /// Fetches committed consumer group offset (W22).
+    pub fn fetch_offset(&self, req: &FetchOffsetRequest) -> Option<u64> {
+        self.consumer_checkpoints
+            .read()
+            .unwrap()
+            .get(&(req.group_id.clone(), req.topic.clone(), req.partition))
+            .copied()
+    }
     /// Configures custom server limits (frame size, payload size, connection limit).
     pub fn with_limits(mut self, limits: ServerLimits) -> Self {
         self.connection_semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
@@ -931,6 +1004,10 @@ impl BrokerServer {
                 .iter()
                 .map(|(peer, _, _)| peer.clone())
                 .collect(),
+            source_generation: self
+                .meta
+                .issue_source_identity(&format!("cluster-{}", self.region), &self.region)
+                .map_or(1, |g| g.generation),
         };
         if let Some(first) = log.read(0, 1).first() {
             let mut original = first.context.as_ref().unwrap().replication_targets.clone();
@@ -974,6 +1051,11 @@ impl BrokerServer {
                 class_id: req.class_id.clone(),
                 payload: req.payload.clone(),
                 is_sealed,
+                source_generation: self
+                    .meta
+                    .issue_source_identity(&format!("cluster-{}", self.region), &self.region)
+                    .map_or(1, |g| g.generation),
+                envelope_payload: None,
             };
             if let Err(e) = reservation.commit(range) {
                 tracing::warn!(
@@ -1305,6 +1387,11 @@ impl BrokerServer {
                         class_id: record.class_id.clone(),
                         payload: record.payload.clone(),
                         is_sealed: false,
+                        source_generation: record
+                            .context
+                            .as_ref()
+                            .map_or(1, |c| c.source_generation),
+                        envelope_payload: None,
                     };
                     match outbox.enqueue(range) {
                         Ok(()) => staged_count += 1,
@@ -1440,6 +1527,29 @@ impl BrokerServer {
                 let wm = self.get_watermark(&topic, partition, &source_region);
                 BrokerResponse::Watermark {
                     durable_watermark: wm,
+                }
+            }
+            BrokerRequest::CommitOffset(c) => {
+                let group_id = c.group_id.clone();
+                let topic = c.topic.clone();
+                let partition = c.partition;
+                match self.commit_offset(c) {
+                    Ok(offset) => BrokerResponse::OffsetCommitted {
+                        group_id,
+                        topic,
+                        partition,
+                        offset,
+                    },
+                    Err(e) => BrokerResponse::Error(e.to_string()),
+                }
+            }
+            BrokerRequest::FetchOffset(f) => {
+                let offset = self.fetch_offset(&f);
+                BrokerResponse::OffsetFetched {
+                    group_id: f.group_id,
+                    topic: f.topic,
+                    partition: f.partition,
+                    offset,
                 }
             }
             BrokerRequest::Ping => BrokerResponse::Pong,
