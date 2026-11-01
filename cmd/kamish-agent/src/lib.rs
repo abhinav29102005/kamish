@@ -280,8 +280,33 @@ fn build_replication_request(source_region: &str, target_region: &str, range: &O
 }
 
 impl ReplicationAgent {
+    /// Verifies whether the local broker holds valid, non-expired ownership authority for this partition.
+    ///
+    /// Stale or expired owners must not schedule or transmit cross-region replication (§3.4.2, §3.4.4).
+    pub fn check_replication_authority(&self, topic: &str, partition: u32) -> bool {
+        if let Some(ownership) = self.local_broker.meta.get_ownership(topic, partition) {
+            let now_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(i64::MAX, |d| d.as_nanos() as i64);
+            ownership.owner_region == self.local_region && ownership.is_lease_valid(now_ns)
+        } else {
+            // Unregistered or single-node prototype stream: default local authority
+            true
+        }
+    }
+
     /// Dispatches a single replication task against the target peer (TCP or in-memory) with route validation.
     pub async fn execute_task(&self, task: &ReplicationTask) -> Result<bool, AgentError> {
+        if !self.check_replication_authority(&task.range.topic, task.range.partition) {
+            warn!(
+                topic = %task.range.topic,
+                partition = task.range.partition,
+                target = %task.target_region,
+                "Local broker is no longer authoritative owner of partition; aborting replication dispatch"
+            );
+            return Ok(false);
+        }
+
         let metrics = self
             .link_metrics
             .read()
@@ -879,6 +904,17 @@ impl ReplicationAgent {
         let mut summary = TransferSummary::default();
 
         for range in pending_ranges {
+            // Verify ownership authority: stale owners must not replicate
+            if !self.check_replication_authority(&range.topic, range.partition) {
+                warn!(
+                    topic = %range.topic,
+                    partition = range.partition,
+                    target = %target_region,
+                    "Local broker lacks active ownership lease; skipping replication range"
+                );
+                continue;
+            }
+
             // 1. Route selection with hard policy filter first (§2.2, §3.4.3)
             let direct_candidate = PathCandidate {
                 target_region: target_region.to_string(),
@@ -1018,6 +1054,17 @@ impl ReplicationAgent {
         let mut summary = TransferSummary::default();
 
         for range in pending_ranges {
+            // Verify ownership authority: stale owners must not replicate
+            if !self.check_replication_authority(&range.topic, range.partition) {
+                warn!(
+                    topic = %range.topic,
+                    partition = range.partition,
+                    target = %target_region,
+                    "Local broker lacks active ownership lease; skipping replication range"
+                );
+                continue;
+            }
+
             let direct_candidate = PathCandidate {
                 target_region: target_region.to_string(),
                 relay_region: None,

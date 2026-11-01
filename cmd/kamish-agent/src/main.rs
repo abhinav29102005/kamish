@@ -68,7 +68,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         agent.register_remote_peer(target, addr);
         info!(target = %target, addr = %addr, "Registered remote broker TCP endpoint for replication");
 
+        // Run initial startup reconciliation
         let target_str = target.clone();
+        let agent_recon = Arc::clone(&agent);
+        tokio::spawn(async move {
+            info!(target = %target_str, "Executing startup replication reconciliation");
+            if let Err(e) = agent_recon.reconcile_peer(&target_str).await {
+                error!(target = %target_str, error = %e, "Initial peer reconciliation failed; background retry worker will sweep");
+            }
+        });
+
+        let target_drain = target.clone();
         let agent_task = Arc::clone(&agent);
         let interval = Duration::from_millis(args.poll_interval_ms);
 
@@ -76,16 +86,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut ticker = tokio::time::interval(interval);
             loop {
                 ticker.tick().await;
-                if let Err(e) = agent_task.step_replication_tcp(&target_str).await {
-                    error!(target = %target_str, error = %e, "Replication step failed");
+                if let Err(e) = agent_task.step_replication_tcp(&target_drain).await {
+                    error!(target = %target_drain, error = %e, "Replication step failed");
                 }
             }
         });
     }
 
+    // Spawn the automated retry worker handling backoff and periodic heartbeat sweeps (FN-04)
+    let worker_handle = agent.clone().spawn_retry_worker().await;
+
     info!(region = %args.local_region, "Kamish replication agent active and monitoring outbox streams.");
 
-    tokio::signal::ctrl_c().await?;
-    info!("Replication agent shutting down.");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received shutdown signal, terminating replication agent.");
+        }
+    }
+
+    if let Some(handle) = worker_handle {
+        handle.abort();
+    }
+    info!("Replication agent stopped.");
     Ok(())
 }
