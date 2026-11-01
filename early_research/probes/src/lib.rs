@@ -186,6 +186,11 @@ mod review {
                 to_offset: range.end_offset,
                 payload: range.payload,
                 is_sealed: range.is_sealed,
+                context: range.context,
+                source_generation: range.source_generation,
+                policy_version: range.policy_version,
+                checksum: range.checksum,
+                envelope_payload: range.envelope_payload,
             })
             .unwrap();
         assert!(response.accepted);
