@@ -656,17 +656,17 @@ Kamish supports two fully operational, non-simulated durability modes configurab
 - **Envelope Security Invariants:**
   - Every sealed record generates a unique 96-bit CSPRNG nonce (`OsRng`) per encryption operation.
   - Additional Authenticated Data (AAD) cryptographically binds:
-    $$\text{AAD} = \text{topic} \parallel \text{partition} \parallel \text{epoch} \parallel \text{policy\_version} \parallel \text{key\_id} \parallel \text{key\_version}$$
+    $$\text{AAD} = \text{tenant} \parallel \text{topic} \parallel \text{partition} \parallel \text{epoch} \parallel \text{policy\_version} \parallel \text{key\_id} \parallel \text{key\_version}$$
   - Tampering with ciphertext or context metadata causes Poly1305 or GCM tag authentication to fail, dropping the frame.
 - **KMS Custody & Fail-Closed Boundary:**
   - `KeyProvider` trait abstracts key retrieval and unwrapping.
   - `DevKeyProvider` is strictly isolated for offline local development and rejects foreign-region unwrap requests.
-  - `ExternalKmsProvider` models production cloud KMS integration (AWS KMS, GCP KMS, Azure Key Vault, HashiCorp Vault).
+  - `ExternalKmsProvider` models production cloud KMS integration (AWS KMS, GCP KMS, Azure Key Vault, HashiCorp Vault) configured via `[kms]` in `BrokerConfig`.
   - In `BrokerServer::produce`: when a topic policy mandates `ResidencyPolicy::SealedCiphertext`, the broker verifies local key provider configuration. If external KMS custody is unconfigured, the broker fails closed immediately with error `"sealed_replication_not_configured"`. No plaintext or mock XOR transformations are permitted in transit.
 
 ### 8.3 Autonomous Audit Witness Publication
 - **Durable Checkpoint Journal:**
-  - `crates/kamish-audit::WitnessPublisher` periodically captures the rolling SHA-256 event digest, signs the payload with Ed25519, and journals checkpoints to `witness_publisher_journal.json` using crash-safe atomic rename and `sync_all()`.
+  - `crates/kamish-audit::WitnessPublisher` periodically captures the rolling SHA-256 event digest, signs the payload with Ed25519, generates stable deterministic request IDs (`wit-req-<topic>-<partition>-<seq>-<hash>`) for idempotent delivery, and journals checkpoints to `witness_publisher_journal.json` using crash-safe atomic rename and `sync_all()`.
   - Checkpoints queue durably during network interruptions up to a bounded backlog (10,000 checkpoints).
 - **Fail-Closed Verification:**
   - If no external witness endpoint is configured (`UnconfiguredWitnessDestination`), checkpoints accumulate in the journal and are marked pending.
@@ -676,17 +676,21 @@ Kamish supports two fully operational, non-simulated durability modes configurab
 - **Protocol & Rebalancing:**
   - `ConsumerGroupCoordinator` manages dynamic client membership (`JoinGroup`, `HeartbeatGroup`, `LeaveGroup`).
   - Assigns partition ownership deterministically across group members using round-robin distribution over all subscribed topics.
-  - Heartbeat sweeps expire unresponsive members exceeding `session_timeout_ms` and trigger immediate rebalancing.
-- **Generational Fencing:**
+  - `spawn_consumer_group_sweeper_worker` periodically sweeps expired members exceeding `session_timeout_ms`, evicts dead consumers, triggers immediate rebalancing, and advances group generation.
+  - Single-process limitation: Consumer group state is coordinated per regional broker instance with crash-safe disk persistence (`consumer_groups.json`); cross-cluster distributed group balancing is partitioned by region.
+- **Generational & Partition Fencing:**
   - Every rebalance increments the group's `generation_id`.
-  - Offset commits validate `(group_id, member_id, generation_id)`. Stale members attempting to commit offsets under superseded generations are rejected with `BrokerError::EpochFenced`.
+  - Offset commits validate `(group_id, member_id, generation_id)` and verify that the committing member currently holds assignment authority for the specific partition. Stale members or unassigned partition commits are rejected with `BrokerError::EpochFenced` or `BrokerError::PolicyDenied`.
+  - `JoinGroup` enforces tenant authorization: clients cannot subscribe to topics owned by foreign tenants.
   - State persists atomically to `consumer_groups.json` with temporary file `sync_all` and atomic rename.
 
 ### 8.5 Safe Storage Retention and Prefix Reclamation
-- **Offset Monotonicity Preservation:**
+- **Offset Monotonicity & Tail Preservation:**
   - `PartitionLog::reclaim_prefix_before_offset` prunes historical log segments safely without renumbering offsets, tracking `base_offset_floor = new_retained_start_offset`.
-  - High watermarks and dense sequential offset identities are preserved. Any read for `start_offset < base_offset_floor` returns empty, preserving monotonicity without offset renumbering.
+  - Active segment tail is preserved: reclamation retains at least the latest record to preserve segment metadata and monotonic sequence boundaries. Any read for `start_offset < base_offset_floor` returns empty, preserving monotonicity without offset renumbering.
 - **Strict Reclamation Ceiling:**
   - `RetentionCoordinator` calculates:
-    $$\text{safe\_ceiling} = \min(\text{high\_watermark}, \min(\text{active\_consumer\_checkpoints}), \min(\text{outbox\_watermarks}))$$
-  - Records required by active consumer groups or un-replicated cross-region outbox queues are never garbage collected, guaranteeing zero consumer data loss and zero replication gaps.
+    $$\text{safe\_ceiling} = \min(\text{high\_watermark}, \min(\text{quorum\_commit\_indices}), \min(\text{active\_consumer\_checkpoints}), \min(\text{outbox\_watermarks}))$$
+  - Records required by active consumer groups, uncommitted in-region quorum consensus, or un-replicated cross-region outbox queues are never garbage collected, guaranteeing zero consumer data loss and zero replication gaps.
+- **Explicit Quarantine Retention Policy:**
+  - `QuarantineStore::prune_quarantine` enforces a bounded record ceiling (100k records max) with crash-safe disk replacement, isolating uncommitted divergent suffixes without unbounded disk exhaustion.

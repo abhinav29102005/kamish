@@ -34,6 +34,10 @@ The functional completion campaign delivered the following discrete commits on b
 | `d84313c` | `feat(consensus)` | add persistent regional replica membership and state | `crates/kamish-own/src/quorum.rs`, `crates/kamish-own/src/lib.rs` |
 | `88398bf` | `feat(replication)` | add in-region quorum log replication and protocol wire commands | `crates/kamish-log/src/lib.rs`, `crates/kamish-outbox/src/lib.rs`, `cmd/kamish-broker/src/quorum_manager.rs`, `cmd/kamish-broker/src/lib.rs`, `cmd/kamish-broker/src/metrics.rs` |
 | `3dcbd7f` | `feat(broker)` | enforce in-region quorum durability and commit gating in broker daemon | `cmd/kamish-broker/src/config.rs`, `cmd/kamish-broker/src/main.rs`, `cmd/kamish-gateway/src/lib.rs`, `packages/kamish-client/src/types.ts` |
+| `add2ff8` | `fix(consensus)` | harden quorum commit watermarks, follower safety, and metrics | `cmd/kamish-broker/src/lib.rs`, `cmd/kamish-broker/src/quorum_manager.rs`, `cmd/kamish-broker/src/metrics.rs`, `cmd/kamish-gateway/src/lib.rs` |
+| `b7cbeec` | `feat(security)` | bind tenant to AEAD context, add OsRng nonces, and wire KMS configuration | `crates/kamish-seal/src/lib.rs`, `cmd/kamish-broker/src/config.rs`, `cmd/kamish-broker/src/main.rs` |
+| `c9fe2da` | `fix(audit)` | ensure stable checkpoint IDs, crash-safe journal persistence, and quarantine pruning | `crates/kamish-audit/Cargo.toml`, `crates/kamish-audit/src/publisher.rs`, `crates/kamish-own/src/lib.rs` |
+| `fb6341d` | `feat(storage)` | enforce partition ownership on commit, background group sweeper, and active tail retention | `cmd/kamish-broker/src/consumer_group.rs`, `cmd/kamish-broker/src/lib.rs`, `cmd/kamish-broker/src/main.rs`, `crates/kamish-log/src/lib.rs`, `cmd/kamish-broker/src/retention.rs`, `benchmarks/orchestrator.mjs` |
 
 ---
 
@@ -101,6 +105,14 @@ The functional completion campaign delivered the following discrete commits on b
   - **Produce & Consumer Commit Isolation:** Integrated `replicate_to_quorum_sync` into `BrokerServer::produce_with_identity` under `AckLevel::InRegionQuorum`. Fails closed without downgrade if a majority is unreachable. Bounded consumer fetches to $\min(\text{high\_watermark}, \text{commit\_index})$ (INV-4) to guarantee uncommitted speculative records are never exposed to consumers.
   - **Daemon CLI & Gateway Exposition:** Added `--node-id` and `--ack-level` CLI options to `kamish-broker`, added `GET /api/quorum` to `cmd/kamish-gateway/src/lib.rs`, and exported replica status types in TypeScript client.
 
+### Workstream I: Final Functional Gap Closure & Integration Hardening (Commits `add2ff8`, `b7cbeec`, `c9fe2da`, `fb6341d`)
+- **Problem Solved:** Integration edge cases across quorum offset watermarks, follower commit protection, KMS configuration wiring, tenant AAD binding, deterministic audit IDs, consumer partition ownership, and active tail retention.
+- **Implementation:**
+  - **Consensus & Watermarks (`add2ff8`):** Synchronized `target_hwm` (`offset + 1`) across produce and quorum replication. Added follower committed-history safety invariant in `handle_quorum_append` (`req.base_offset < local_commit` rejected). Added live `kamish_quorum_available` and `kamish_quorum_commit_index` metrics distinguishing configured, available, and committed states. Dynamically updated gateway `/api/authority` response.
+  - **Security & KMS Configuration (`b7cbeec`):** Upgraded AEAD nonce generation to `rand::rngs::OsRng` (OS CSPRNG). Bound tenant context into AAD (`compute_aead_aad_with_tenant`). Added `kms: Option<ExternalKmsConfig>` to `BrokerConfig` and wired into `main.rs` daemon startup with safe fail-closed behavior. Supported CLI override for `--ack-level`.
+  - **Audit Witness & Quarantine (`c9fe2da`):** Generated deterministic stable request IDs (`wit-req-<topic>-<partition>-<seq>-<hash>`) for idempotent remote delivery. Hardened journal persistence via `NamedTempFile::persist`. Added explicit `QuarantineStore::prune_quarantine` method.
+  - **Consumer Groups & Retention (`fb6341d`):** Enforced partition ownership validation on `commit_offset` (`validate_partition_commit`). Enforced tenant authorization on `JoinGroup`. Spawned autonomous `spawn_consumer_group_sweeper_worker` in `main.rs` with graceful shutdown. Preserved active segment tail in `reclaim_prefix_before_offset`. Bounded retention safe ceiling by quorum commit index. Added dual-durability benchmarking support to `benchmarks/orchestrator.mjs`.
+
 ---
 
 ## 4. Capability Matrix & Contract Alignment
@@ -108,15 +120,15 @@ The functional completion campaign delivered the following discrete commits on b
 | Capability Area | Operational Contract | Architectural Boundary / Fail-Closed Reality |
 |:---|:---|:---|
 | **Local Durability** | `AckLevel::LeaderFsync` | NVMe file sync barrier (`f.sync_all()`) before produce ACK; monotonic lease validation with 2.0s margin. |
-| **In-Region Quorum** | `AckLevel::InRegionQuorum` | Primary-backup majority quorum ($M = \lfloor V/2 \rfloor + 1$) across local TCP replicas. Replicas enforce term/epoch fencing, divergent suffix quarantine, and atomic consensus state. Consumers gated at $\min(\text{high\_watermark}, \text{commit\_index})$ (INV-4). |
+| **In-Region Quorum** | `AckLevel::InRegionQuorum` | Primary-backup majority quorum ($M = \lfloor V/2 \rfloor + 1$) across local TCP replicas. Replicas enforce term/epoch fencing, committed-history preservation, divergent suffix quarantine, and atomic consensus state. Consumers gated at $\min(\text{high\_watermark}, \text{commit\_index})$ (INV-4). |
 | **WAN Replication** | Asynchronous Outbox | Capacity-bounded queues, provenance watermarks, 500ms heartbeat sweeps, adaptive circuit breakers. |
-| **Divergent History** | Authoritative Quarantine | Divergent suffixes routed to `QuarantineStore` (100k bound) prior to atomic log truncation and repair. |
-| **Sealed Security** | Ring AEAD (ChaCha20 / AES-256) | 96-bit CSPRNG nonce, 6-element AAD binding. Fails closed with `"sealed_replication_not_configured"` if external KMS unconfigured. |
-| **Audit Witnessing** | Rolling SHA-256 & Ed25519 | Crash-safe journal (`witness_publisher_journal.json`), background daemon sweeps. Fails closed if witness unconfigured. |
-| **Consumer Groups** | Dynamic Round-Robin Coordinator | Dynamic join/heartbeat/leave, session timeouts, generation fencing on commit, crash-safe `consumer_groups.json`. |
-| **Log Retention** | Watermark-Bounded Garbage Collection | Monotonic `base_offset_floor` preservation, bounded by $\min(\text{consumer\_offsets}, \text{outbox\_watermarks})$. |
-| **Observability** | Prometheus Text Format 0.0.4 | Full broker telemetry exposed at `GET /metrics`. |
-| **Tooling & Benchmarks** | Schema-Validated Orchestration | Reproducible CLI runner with automated dependency checking and unexecuted manifest tracking. |
+| **Divergent History** | Authoritative Quarantine | Divergent suffixes routed to `QuarantineStore` (100k bound) prior to atomic log truncation and repair; explicit `prune_quarantine` policy. |
+| **Sealed Security** | Ring AEAD (ChaCha20 / AES-256) | 96-bit OsRng CSPRNG nonce, 7-element AAD binding (tenant, topic, partition, epoch, policy_version, key_id, key_version). Fails closed with `"sealed_replication_not_configured"` if external KMS unconfigured. |
+| **Audit Witnessing** | Rolling SHA-256 & Ed25519 | Crash-safe journal (`witness_publisher_journal.json`), stable request IDs, background daemon sweeps. Fails closed if witness unconfigured. |
+| **Consumer Groups** | Dynamic Round-Robin Coordinator | Dynamic join/heartbeat/leave, partition ownership verification on commit, autonomous session expiration sweeper, generation fencing on commit, crash-safe `consumer_groups.json`. |
+| **Log Retention** | Watermark-Bounded Garbage Collection | Monotonic `base_offset_floor` preservation, active tail preservation, bounded by $\min(\text{high\_watermark}, \text{quorum\_commit}, \text{consumer\_offsets}, \text{outbox\_watermarks})$. |
+| **Observability** | Prometheus Text Format 0.0.4 | Full broker telemetry at `GET /metrics`, distinguishing configured, available, and committed quorum states. |
+| **Tooling & Benchmarks** | Schema-Validated Orchestration | Reproducible CLI runner with automated dependency checking and unexecuted manifest tracking, supporting both `LeaderFsync` and `InRegionQuorum`. |
 
 ---
 

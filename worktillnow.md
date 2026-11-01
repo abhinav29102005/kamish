@@ -3592,3 +3592,43 @@ In strict compliance with governing directives:
 - **TypeScript Client SDK (`packages/kamish-client/src/types.ts`):**
   - Exported `AckLevel`, `ReplicaRole`, `PeerReplicaStatus`, and `QuorumStatusResponse` types.
   - Enriched `ProduceResult` with `ackLevel` field for client verification.
+
+
+---
+
+## 38. Final Functional Gap Closure & Integration Hardening (2026-11-01)
+
+### 38.1 Mission & Scope
+Following the implementation of In-Region Quorum Consensus (Section 37), a deep integration audit was conducted to reconcile the source code against all contract invariants and backlog items, closing all outstanding integration edge cases and hardening daemon operations.
+
+In strict accordance with governing directives:
+- **Zero Testing Mandate:** No unit tests, integration test suites, or benchmarks were executed or added.
+- **Zero Fake Capabilities:** No mock cryptography or unconfigured credentials were simulated; external KMS and remote witness destinations remain explicitly unconfigured while failing closed safely.
+- **Focused Conventional Commits:** Changes were committed in discrete, reviewable units: `add2ff8`, `b7cbeec`, `c9fe2da`, and `fb6341d`.
+
+### 38.2 Consensus & Quorum Integration Hardening (Commit `add2ff8`)
+- **Watermark Synchronization:** Reconciled `target_hwm` (`offset + 1`) across `BrokerServer::produce_at_epoch`, `replicate_to_quorum_sync`, and `advance_commit_index`, ensuring the exclusive upper bound is consistently used.
+- **Committed-History Protection:** In `QuorumReplicationManager::handle_quorum_append`, added invariant check `req.base_offset < local_commit`. Replicas reject any leader attempt to truncate or overwrite already majority-committed records, preserving consensus durability invariants.
+- **Telemetry & Gateway State:**
+  - Added `kamish_quorum_available` (gauging majority replica connectivity) and `kamish_quorum_commit_index` (per topic/partition) to `render_prometheus`.
+  - Updated gateway `authority_handler` to dynamically report live authority and backing (`IN_REGION_QUORUM_CONSENSUS` / `PRIMARY_BACKUP_QUORUM`), eliminating legacy static strings.
+
+### 38.3 Production AEAD & KMS Configuration Wiring (Commit `b7cbeec`)
+- **CSPRNG Nonces (`crates/kamish-seal`):** Upgraded AEAD encryption in `AeadSealEngine::seal` to draw 96-bit nonces exclusively from `rand::rngs::OsRng` (OS CSPRNG).
+- **Tenant Context Binding:** Extended Associated Authenticated Data (AAD) via `compute_aead_aad_with_tenant` to bind tenant context:
+  $$\text{AAD} = \text{tenant} \parallel \text{topic} \parallel \text{partition} \parallel \text{epoch} \parallel \text{policy\_version} \parallel \text{key\_id} \parallel \text{key\_version}$$
+- **Daemon Configuration Wiring:** Added `kms: Option<ExternalKmsConfig>` to `BrokerConfig` in `cmd/kamish-broker/src/config.rs`. Initialized `ExternalKmsProvider` in `cmd/kamish-broker/src/main.rs` when configured, preserving safe fail-closed behavior when unconfigured. Wired CLI `--ack-level` override.
+
+### 38.4 Audit Witness & Quarantine Hardening (Commit `c9fe2da`)
+- **Deterministic Checkpoint Identifiers:** Updated `WitnessCheckpointEnvelope::new` in `crates/kamish-audit/src/publisher.rs` to generate deterministic, stable request IDs (`wit-req-<topic>-<partition>-<seq>-<hash>`) ensuring idempotent remote delivery across retries and daemon restarts.
+- **Crash-Safe Journal Persistence:** Hardened `WitnessPublisher::persist_journal` using `tempfile::NamedTempFile` and `.persist()`, preventing partial writes and Windows file-sharing violations.
+- **Quarantine Retention Policy:** Added `QuarantineStore::prune_quarantine(&self, max_records: usize)` in `crates/kamish-own/src/lib.rs` with crash-safe atomic persistence, providing administrative retention control over divergent history.
+
+### 38.5 Consumer Group Partition Ownership & Safe Storage Lifecycle (Commit `fb6341d`)
+- **Partition Ownership Fencing:** Implemented `validate_partition_commit` in `ConsumerGroupCoordinator` (`cmd/kamish-broker/src/consumer_group.rs`). Verified that the committing member currently holds assignment authority for the specific partition, rejecting unauthorized partition commits with `BrokerError::PolicyDenied`.
+- **Tenant Authorization on Join:** In `BrokerServer::handle_request(BrokerRequest::JoinGroup)`, enforced tenant boundary checks so consumers cannot subscribe to topics owned by unauthorized tenants.
+- **Autonomous Session Sweeper:** Created `spawn_consumer_group_sweeper_worker` in `consumer_group.rs` and spawned it in `cmd/kamish-broker/src/main.rs` with graceful shutdown signal handling. Unresponsive consumers are automatically evicted upon session timeout, triggering partition rebalancing and advancing the group generation.
+- **Storage Retention Invariants:**
+  - In `crates/kamish-log/src/lib.rs` (`reclaim_prefix_before_offset`), added active segment tail preservation (`reclaim_before_offset.min(high_watermark - 1)`), guaranteeing the active segment head is never deleted.
+  - In `cmd/kamish-broker/src/retention.rs` (`evaluate_and_reclaim_with_quorum`), bounded the reclamation safe ceiling by the quorum commit index, ensuring uncommitted records are never reclaimed.
+- **Benchmark Dual Durability:** Updated `benchmarks/orchestrator.mjs` to support dual durability levels (`LeaderFsync` and `InRegionQuorum`), establishing fair, equivalent comparisons with Apache Kafka (`acks=all`) and Apache Pulsar (`ackQuorum=2`).
