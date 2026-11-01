@@ -217,31 +217,34 @@ impl Default for ReplicationRequest {
     }
 }
 
+/// Parameter struct for constructing a `ReplicationRequest` without argument-count bloat.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplicationRequestParams {
+    pub topic: String,
+    pub partition: u32,
+    pub source_region: String,
+    pub target_region: String,
+    pub class_id: String,
+    pub epoch: u64,
+    pub from_offset: u64,
+    pub to_offset: u64,
+    pub payload: Vec<u8>,
+    pub is_sealed: bool,
+}
+
 impl ReplicationRequest {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        topic: impl Into<String>,
-        partition: u32,
-        source_region: impl Into<String>,
-        target_region: impl Into<String>,
-        class_id: impl Into<String>,
-        epoch: u64,
-        from_offset: u64,
-        to_offset: u64,
-        payload: Vec<u8>,
-        is_sealed: bool,
-    ) -> Self {
+    pub fn new(params: ReplicationRequestParams) -> Self {
         Self {
-            topic: topic.into(),
-            partition,
-            source_region: source_region.into(),
-            target_region: target_region.into(),
-            class_id: class_id.into(),
-            epoch,
-            from_offset,
-            to_offset,
-            payload,
-            is_sealed,
+            topic: params.topic,
+            partition: params.partition,
+            source_region: params.source_region,
+            target_region: params.target_region,
+            class_id: params.class_id,
+            epoch: params.epoch,
+            from_offset: params.from_offset,
+            to_offset: params.to_offset,
+            payload: params.payload,
+            is_sealed: params.is_sealed,
             context: None,
             source_generation: 1,
             policy_version: 1,
@@ -3908,5 +3911,32 @@ mod tests {
         assert!(
             matches!(err_b, BrokerError::PolicyDenied(ref s) if s == "not_current_partition_owner")
         );
+    }
+
+    #[test]
+    fn test_replication_request_params_constructor() {
+        let params = ReplicationRequestParams {
+            topic: "audit-events".to_string(),
+            partition: 0,
+            source_region: "EU_WEST".to_string(),
+            target_region: "US_EAST".to_string(),
+            class_id: "general".to_string(),
+            epoch: 2,
+            from_offset: 10,
+            to_offset: 20,
+            payload: b"rep-payload".to_vec(),
+            is_sealed: false,
+        };
+        let req = ReplicationRequest::new(params.clone());
+        assert_eq!(req.topic, params.topic);
+        assert_eq!(req.partition, params.partition);
+        assert_eq!(req.source_region, params.source_region);
+        assert_eq!(req.target_region, params.target_region);
+        assert_eq!(req.class_id, params.class_id);
+        assert_eq!(req.epoch, params.epoch);
+        assert_eq!(req.from_offset, params.from_offset);
+        assert_eq!(req.to_offset, params.to_offset);
+        assert_eq!(req.payload, params.payload);
+        assert_eq!(req.is_sealed, params.is_sealed);
     }
 }
