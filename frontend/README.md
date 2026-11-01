@@ -11,7 +11,8 @@ The React/Vite frontend contains a **hybrid** architecture supporting both live 
   - Real record produce and offset fetch (`/api/produce`, `/api/fetch`).
   - Real regional gateway health and authority state (`/api/status`, `/api/authority`).
   - Real bounded destination outbox queue depth and replication lags (`/api/streams`).
-  - Aggregate accepted/denied decision counts, broker throughput, and p99 latency are **not currently exposed by the gateway API**; the dashboard displays `N/A` instead of substituting demo values.
+  - The Prometheus `/metrics` endpoint exposes a cumulative successful-produce counter; the dashboard derives a produce-per-second rate from consecutive live samples.
+  - Aggregate accepted/denied decision counts and p99 latency are **not currently exposed**; those values display `N/A` rather than substituting demo values.
   - Live cryptographic audit log verification (`/api/audit/verify`, `/api/audit`).
   - Reactive server-sent events (`/api/events`).
 - Live cluster badge dynamically displays true gateway connection state (`CONNECTED`, `CONNECTING`, `AUTH REQUIRED`, `GATEWAY UNAVAILABLE`, or `CONFIG ERROR`), eliminating false-green indicators when the backend is offline.
