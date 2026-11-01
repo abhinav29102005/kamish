@@ -227,7 +227,7 @@ export default function DashboardPage({ onNavigate }) {
             {/* Sparkline */}
             <svg width="100%" height="24" viewBox="0 0 240 24" fill="none">
               <path
-                d={s.path}
+                d={isLiveMode ? '' : s.path}
                 stroke="#c084fc"
                 strokeWidth="2"
                 strokeLinecap="round"
@@ -264,7 +264,9 @@ export default function DashboardPage({ onNavigate }) {
                 fontWeight: 600,
               }}
             >
-              {isLiveMode ? 'LIVE THROUGHPUT METRIC NOT EXPOSED BY GATEWAY' : `SIMULATED THROUGHPUT (${(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)`}
+              {isLiveMode
+                ? `LIVE PRODUCE RATE: ${liveThroughputEps === null ? 'N/A (waiting for counter samples)' : `${liveThroughputEps.toFixed(1)} PRODUCE/S`}`
+                : `SIMULATED THROUGHPUT (${(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)`}
             </div>
             <span
               style={{
