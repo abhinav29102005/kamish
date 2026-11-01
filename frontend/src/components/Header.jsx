@@ -6,13 +6,58 @@ export default function Header({ onNavigate }) {
     nodes,
     isLiveMode,
     toggleMode,
+    connectionStatus,
     currentUser,
     logoutFromGateway,
     gatewayStatus,
-    isSessionExpired,
   } = useKamish();
 
   const activeRegions = Object.values(nodes).filter((node) => node.status === "HEALTHY").length;
+
+  const getConnectionBadge = () => {
+    if (!isLiveMode) {
+      return {
+        dotColor: "#f59e0b",
+        shadow: "0 0 8px #f59e0b",
+        label: `DEMO SIMULATION · ${activeRegions}/3 NODES (LOCAL)`,
+      };
+    }
+    switch (connectionStatus) {
+      case "connected":
+        return {
+          dotColor: "#10b981",
+          shadow: "0 0 8px #10b981",
+          label: `CONNECTED · REGION: ${gatewayStatus?.region || "EU_WEST"}`,
+        };
+      case "connecting":
+        return {
+          dotColor: "#facc15",
+          shadow: "0 0 8px #facc15",
+          label: "CONNECTING TO GATEWAY...",
+        };
+      case "auth_required":
+        return {
+          dotColor: "#f59e0b",
+          shadow: "0 0 8px #f59e0b",
+          label: `AUTH REQUIRED · ${gatewayStatus?.region || "EU_WEST"}`,
+        };
+      case "config_error":
+        return {
+          dotColor: "#ef4444",
+          shadow: "0 0 8px #ef4444",
+          label: "GATEWAY CONFIG ERROR",
+        };
+      case "unavailable":
+      default:
+        return {
+          dotColor: "#ef4444",
+          shadow: "0 0 8px #ef4444",
+          label: "GATEWAY UNAVAILABLE",
+        };
+    }
+  };
+
+  const badge = getConnectionBadge();
 
   return (
     <header
@@ -31,12 +76,11 @@ export default function Header({ onNavigate }) {
         flexWrap: "wrap",
       }}
     >
-      {/* Top Left: Brutalist Logo Box */}
+      {/* Top Left: Logo Box & Connection Status */}
       <div style={{ display: "flex", alignItems: "center", gap: "1.25rem", flexWrap: "wrap" }}>
-
-
-        {/* Live Cluster Health Badge */}
+        {/* Real Cluster Connection Health Badge */}
         <div
+          id="gateway-connection-badge"
           style={{
             display: "inline-flex",
             alignItems: "center",
@@ -55,14 +99,12 @@ export default function Header({ onNavigate }) {
               width: "8px",
               height: "8px",
               borderRadius: "50%",
-              background: activeRegions > 0 ? "#10b981" : "#f43f5e",
-              boxShadow: activeRegions > 0 ? "0 0 8px #10b981" : "0 0 8px #f43f5e",
+              background: badge.dotColor,
+              boxShadow: badge.shadow,
               display: "inline-block",
             }}
           />
-          <span>
-            {activeRegions}/3 NODES ACTIVE · REGION: {gatewayStatus?.region || "EU_WEST"}
-          </span>
+          <span>{badge.label}</span>
         </div>
 
         {/* PROMINENT LIVE VS DEMO TOGGLE */}

@@ -11,25 +11,38 @@
 | Prepared | 1 November 2026 |
 | Project | **Kamish**, originally documented as **Hydra Stream** |
 | Repository | `https://github.com/abhinav29102005/kamish` |
-| Verified Release Revision | `3bab180` (rebased on `6c0562e`) |
+| Tested Source Revision | `3bab180` (reported 261/261 passing) |
+| Documentation/Evidence Revision | `aa5d652` |
+| Release Candidate Revision | **Not yet designated** |
 | Workspace Verification Run | `run-verification-20261101-113645` |
 | Last recorded comprehensive validation | `audit/release_verification_20261101/REPORT.md` |
 | Rust workspace version | `0.1.0` |
 | Node SDK version | `0.1.0-alpha.1` |
 | Automated tests passing | **261 / 261 (100% PASS)** |
-| Development status | **Verified distributed event broker and regional replication system** |
-| Public-production release status | **APPROVED / RELEASE READY** |
-| Current phase | **Verification & Hardening Phase Complete — Release Ready** |
+| Development status | **Local automated verification reported passing; external/deployed claims scoped in reconciliation report** |
+| Public-production release status | **Not established by local verification alone** |
+| Current phase | **Frontend/backend integration & release evidence reconciliation (Branch: `audit/evidence-contract-frontend-reconciliation-2026-11-01` / PR #1)** |
 
-**FULL VERIFICATION & RELEASE READINESS (Run ID: `run-verification-20261101-113645`):**
+**FRONTEND/BACKEND INTEGRATION & RELEASE EVIDENCE RECONCILIATION (Branch: `audit/evidence-contract-frontend-reconciliation-2026-11-01` / PR #1):**
+- Implemented configurable gateway URL resolution with `VITE_KAMISH_GATEWAY_URL`; full URL parsing now rejects unsupported schemes, missing hosts, credentials, query strings, and fragments. Local development defaults to relative paths through the Vite same-origin proxy.
+- Added Vite development server proxy in `frontend/vite.config.ts` and `frontend/vite.config.js` forwarding `/api` and `/metrics` to `127.0.0.1:3001`. Created `frontend/.env.example`.
+- Created production reverse-proxy template `frontend/nginx.conf.example` configuring same-origin deployment with SSE streaming (`proxy_buffering off`), REST proxying, and SPA fallback routing.
+- Added `--allowed-origins` CLI flag and `KAMISH_GATEWAY_ALLOWED_ORIGINS` environment variable. Credentialed CORS now requires exact configured-origin matching; local development defaults to the Vite same-origin proxy.
+- Added typed `ConnectionStatus` (`"connecting" | "connected" | "auth_required" | "unavailable" | "config_error"`) to `useKamish.ts` and `KamishContext.tsx`. Replaced static node count in `Header.jsx` and `Navbar.jsx` with real `connectionStatus`, eliminating false-green indicators when offline.
+- Separated Live vs Demo data boundaries: Live produce/audit operations call the gateway; Demo mode uses browser-local WebCrypto and chaos simulations. The UI mode switch no longer mutates broker server-side mode. Live produce rate is derived from the Prometheus successful-produce counter; accepted/denied aggregate decisions and p99 latency show `N/A` because the gateway exposes no corresponding metrics. Gateway outbox depth is shown only while connected.
+- Gated dev credentials and quick preset buttons on `SignInPage.jsx` behind `isDevLoginEnabled` (`import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true"`).
+- Reconciled documentation across `docs/CONTRACT.md`, `IMPLEMENTATION_INVENTORY.md`, `REMAINING_WORK_BACKLOG.md`, `FINAL_FUNCTIONAL_COMPLETION_REPORT.md`, `frontend/README.md`, and `audit/release_verification_20261101/RECONCILIATION_REPORT.md`.
+- Follow-up functionality pass: **NO TESTS, `cargo check`, or frontend build commands were run**. Earlier compile results belong to the previously reported revision and do not verify these latest edits. Runtime browser-to-gateway smoke verification remains pending.
+
+**LOCAL VERIFICATION RESULT (Run ID: `run-verification-20261101-113645`; source revision `3bab180`):**
 - Completed exhaustive workspace verification across all 15 crates and integration test suites.
-- 261 automated tests executed and verified passing (0 failures).
+- Verification report records 261 automated tests passing (0 failures); preserve raw test output and toolchain metadata as release evidence.
 - In-Region Multi-Node Quorum durability (`InRegionQuorum`) verified with 3-replica quorum, majority commit advancement, and INV-4 fetch isolation.
 - Production AEAD ciphers (ChaCha20-Poly1305, AES-256-GCM), tenant AAD context binding, and KMS boundaries tested and verified.
 - Dynamic Consumer Group Coordinator tested for multi-member rebalance, generation fencing, partition ownership validation, and disk state recovery.
 - Storage retention coordinator verified for active tail preservation, watermark bounding, and crash-safe prefix reclamation.
 - TypeScript SDK and package verified via local tarball packing and isolated consumer integration tests.
-- Full verification audit evidence recorded in `audit/release_verification_20261101/REPORT.md`.
+- Full verification report is `audit/release_verification_20261101/REPORT.md`. The benchmark run was `CONFIGURED_UNEXECUTED`; live external infrastructure and separately hosted frontend/backend integration remain unverified. See `audit/release_verification_20261101/RECONCILIATION_REPORT.md`.
 
 The original walkthrough describes `170de8e`, whose change clarifies PowerShell
 demo output. A fresh baseline at `77bb051` additionally includes frontend logo
@@ -3639,3 +3652,38 @@ In strict accordance with governing directives:
   - In `crates/kamish-log/src/lib.rs` (`reclaim_prefix_before_offset`), added active segment tail preservation (`reclaim_before_offset.min(high_watermark - 1)`), guaranteeing the active segment head is never deleted.
   - In `cmd/kamish-broker/src/retention.rs` (`evaluate_and_reclaim_with_quorum`), bounded the reclamation safe ceiling by the quorum commit index, ensuring uncommitted records are never reclaimed.
 - **Benchmark Dual Durability:** Updated `benchmarks/orchestrator.mjs` to support dual durability levels (`LeaderFsync` and `InRegionQuorum`), establishing fair, equivalent comparisons with Apache Kafka (`acks=all`) and Apache Pulsar (`ackQuorum=2`).
+
+
+---
+
+## 39. Frontend/Backend Integration & Gateway API Harmonization (2026-11-01)
+
+### 39.1 Mission & Scope
+As part of the active draft PR #1 (`audit/evidence-contract-frontend-reconciliation-2026-11-01`), a targeted source-level functionality review of the frontend–backend integration was executed. Concrete integration defects across authentication, audit verification, real-time event streaming, client type schemas, and telemetry display were resolved to ensure full end-to-end fidelity between the React dashboard and the Axum gateway daemon.
+
+In strict compliance with execution directives:
+- **Zero Testing Mandate:** No unit tests, integration suites, builds (`cargo check`, `npm run build`), linters, or benchmarks were executed or added.
+- **Strictly Functionality-First:** Only demonstrable integration defects supported by existing contracts and source code were modified.
+- **Empirical Boundary Integrity:** Synthetic metrics were strictly isolated to Demo mode, while Live mode displays real gateway telemetry and clear disclaimers for unexecuted benchmarks.
+
+### 39.2 Server-Sent Events (SSE) Query Token Extraction (`cmd/kamish-gateway/src/lib.rs`)
+- **Native Browser `EventSource` Limitation:** Browser standard `EventSource` cannot send custom `Authorization: Bearer <token>` headers. In cross-origin deployments or environments restricting third-party credentials, this caused gateway SSE streaming to fail with `401 Unauthorized`.
+- **Query Parameter Fallback:** Updated `security_middleware` in `cmd/kamish-gateway/src/lib.rs` to extract session tokens from query string `?token=<tok>` strictly when accessing `/api/events`, while preserving mandatory header/cookie extraction for all other API endpoints.
+- **Client Propagation:** Updated `subscribeEvents` in `frontend/src/utils/gatewayClient.ts` to append `?token=${encodeURIComponent(this.sessionToken)}` when an active session token exists.
+
+### 39.3 Audit Verification Property & Ledger Anchor Mapping (`frontend/src/context/KamishContext.tsx`)
+- **Verification Property Mismatch:** Axum endpoint `POST /api/audit/verify` returns `{ verification_result: "PASS" | "FAIL", hash_chain_valid: bool, total_entries: u64, ... }`. `KamishContext.tsx` checked nonexistent fields `res.valid`, `res.verified_entries_count`, and `res.error_message`, causing audit verification to permanently report failure in Live mode. Corrected to check `res.verification_result === "PASS" && res.hash_chain_valid !== false` and extract `total_entries ?? total_checkpoints_verified`.
+- **Checkpoint Anchor Ingestion:** Axum endpoint `GET /api/audit` returns `{ audit_ledger_status, checkpoints_count, checkpoint_anchors: [...] }`. `KamishContext.tsx` previously looked for `auditRes.entries`, resulting in a no-op. Updated mapping to ingest `checkpoint_anchors` as `CheckpointCommit` audit records into `liveAuditLedger`.
+
+### 39.4 Real-Time Event Stream Connection (`frontend/src/context/KamishContext.tsx`)
+- **Wired SSE Listener:** Connected `gatewayClient.subscribeEvents` during active Live mode sessions. Parsed incoming gateway broadcast lines (`PRODUCE`, `POLICY_UPDATE`, `PROMOTION`, `MODE_CHANGE`), dynamically prepending ingested records to `recentEvents` and triggering live telemetry refreshes with clean unsubscribe teardown on unmount or mode switch.
+
+### 39.5 Gateway Client Schema Harmonization (`frontend/src/utils/gatewayClient.ts`)
+- **Quorum Status Schema:** Corrected `QuorumStatusResponse` interface: `local_node_id` and `peers.node_id` typed as `string` (matching Rust `String`, previously incorrectly typed as `number`), and added `group_id`, `role`, `current_term`, `leader_id`, and `total_voters`.
+- **Consumer Group Summary:** Updated `ConsumerGroupsResponse` to match Rust `GroupSummary` (`state`, `generation_id`, `member_count`, `leader_id`, `subscribed_topics`).
+- **Retention Status:** Added `active_retention_rules` to match the exact JSON key emitted by Axum.
+- **Missing API Client Methods:** Added `getQuarantine()` (`/api/partitions/quarantine`) and `promotePartition(...)` (`/api/partitions/promote`).
+
+### 39.6 Live Telemetry Realism & RBAC Awareness (`frontend/src/pages/`)
+- **`TelemetryPage.jsx` Realism:** Replaced hardcoded simulated values (12,479 msg/s, 1.4M records) in Live mode with real broker telemetry from `currentTelemetry` (sustained throughput `throughputEps`, outbox depth `outboxDepth`, replication lag `replicationLag`, local committed offset `localCommitted`). Added explicit disclaimers for latency percentiles (p50/p90/p99) noting that exact distributions require executing `benchmarks/orchestrator.mjs`, while preserving simulated demo metrics exclusively in Demo mode with clear `[SIMULATED]` indicators.
+- **`ProduceFetchPage.jsx` RBAC Status:** Added an active Operator Session & RBAC Status banner. Evaluates operator roles (`Producer`, `Consumer`, `Operator`, `Admin`) against backend gateway security middleware requirements, alerting unauthenticated or role-restricted operators before initiating requests.

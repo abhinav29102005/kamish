@@ -2,15 +2,15 @@
 
 **Based on Inspected Revision:** `3bab180` (Branch: `main`)  
 **Date:** 2026-11-01  
-**Status:** **AUTHORITATIVE POST-VERIFICATION AUDIT (RELEASE READY)**
+**Status:** POST-VERIFICATION AUDIT — LOCAL TEST CAMPAIGN REPORTED PASS; RELEASE GATES REMAIN
 
 ---
 
 ## 1. Backlog Governance & Current Status
 
-Following the completion of the In-Region Quorum Directive, the Final Functional Gap Closure campaign, and the comprehensive Workspace Verification Campaign (`run-verification-20261101-113645`), all in-scope functional backlog items across Kamish are implemented, integrated into daemon execution paths, verified with 261 automated tests passing, and committed to `main`.
+Following the completion of the In-Region Quorum Directive, the Final Functional Gap Closure campaign, and the comprehensive Workspace Verification Campaign (`run-verification-20261101-113645`), the local verification report records 261 automated tests passing at source revision `3bab180`. This does not close external infrastructure, deployment integration, or explicitly documented restart-persistence gaps.
 
-No implementation blockers, test failures, or unintegrated core features remain open. The only open item is explicitly categorized as an **External Infrastructure Dependency**, which requires external cloud infrastructure custody agreements for live KMS unwrapping.
+Open reconciliation items include live cloud KMS key custody, independent external audit witnessing, benchmark execution, producer deduplication semantics across restart, and browser-to-deployed-gateway integration. See [reconciliation report](audit/release_verification_20261101/RECONCILIATION_REPORT.md).
 
 ---
 

@@ -7,6 +7,7 @@ export default function Navbar({ currentRoute, onNavigate }) {
     nodes,
     isLiveMode,
     toggleMode,
+    connectionStatus,
     currentUser,
     logoutFromGateway,
     gatewayStatus,
@@ -171,9 +172,24 @@ export default function Navbar({ currentRoute, onNavigate }) {
               justifyContent: "space-between",
             }}
           >
-            <span>REGIONAL CLUSTER</span>
-            <span style={{ color: activeRegions > 0 ? "#4ade80" : "#f43f5e", fontWeight: 700 }}>
-              {activeRegions}/3 NODES · {gatewayStatus?.region || "EU_WEST"}
+            <span>GATEWAY / CLUSTER</span>
+            <span
+              style={{
+                color: isLiveMode
+                  ? connectionStatus === "connected"
+                    ? "#4ade80"
+                    : connectionStatus === "connecting"
+                    ? "#facc15"
+                    : "#f43f5e"
+                  : "#facc15",
+                fontWeight: 700,
+              }}
+            >
+              {isLiveMode
+                ? connectionStatus === "connected"
+                  ? `CONNECTED · ${gatewayStatus?.region || "EU_WEST"}`
+                  : connectionStatus.toUpperCase()
+                : `${activeRegions}/3 NODES (DEMO)`}
             </span>
           </div>
 
@@ -320,7 +336,7 @@ export default function Navbar({ currentRoute, onNavigate }) {
               alignItems: "stretch",
             }}
           >
-            {navItems.map((item, idx) => {
+            {navItems.map((item) => {
               const isActive = currentRoute === item.id;
               return (
                 <button

@@ -1,9 +1,9 @@
 # Kamish contract — approved Phase 0 amendments
 
-**Status: FULLY IMPLEMENTED & VERIFIED — 1 November 2026.**  
-Verified across 261 automated workspace tests under Run ID `run-verification-20261101-113645`.  
-External etcd 3.7.3 authority, local monotonic clock safety margins, in-region quorum durability ($M = \lfloor V/2 \rfloor + 1$), AEAD sealed replication, dynamic consumer groups, safe segment retention, and trusted audit witnessing are implemented, tested, and validated.
-Release revision: `3bab180` (rebased on `6c0562e`). Full verification evidence recorded in [audit/release_verification_20261101/REPORT.md](../audit/release_verification_20261101/REPORT.md).
+**Status: CONTRACT BASELINE WITH PARTIALLY VERIFIED IMPLEMENTATION — 1 November 2026.**  
+The repository reports 261 automated tests passing under Run ID `run-verification-20261101-113645`, with tested source revision `3bab18053c9d7a7256d8e00981531cf67a815b50`. The current documentation/evidence revision is `aa5d652beed7aa48db33fd94d06a1662327c25e3`; the exact release candidate must be stated separately.  
+Local test results do not by themselves prove live external etcd/KMS/witness operation, independent physical-region resilience, or deployed frontend/backend connectivity. Sealed replication remains disabled unless an authorized live key-custody path is configured and verified. Producer deduplication is currently documented as in-memory and does not survive broker restart.  
+Evidence reconciliation: [RECONCILIATION_REPORT.md](../audit/release_verification_20261101/RECONCILIATION_REPORT.md). Reported verification results are not an independent certification.
 
 This is an approved implementation direction, not a description of completed
 behavior. **No W01–W38 item is closed by this document.** Requirement identifiers

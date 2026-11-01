@@ -42,6 +42,10 @@ struct Args {
     /// Allow non-loopback binding without TLS (insecure dev mode)
     #[arg(long, default_value_t = false)]
     insecure_dev: bool,
+
+    /// Allowed CORS origins for separate-origin deployments (comma-separated, e.g. "https://console.example.com,http://localhost:5173")
+    #[arg(long, default_value = "")]
+    allowed_origins: String,
 }
 
 #[tokio::main]
@@ -122,7 +126,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let user_store = Arc::new(kamish_gateway::auth::UserStore::load_from_env_or_file(
         args.dev,
     )?);
-    let state = GatewayState::new_with_store(broker, user_store);
+    let origins_str = if args.allowed_origins.is_empty() {
+        std::env::var("KAMISH_GATEWAY_ALLOWED_ORIGINS").unwrap_or_default()
+    } else {
+        args.allowed_origins.clone()
+    };
+    let allowed_origins: Vec<String> = origins_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let state = GatewayState::new_with_store(broker, user_store).with_allowed_origins(allowed_origins);
     let app = app(state);
 
     let bind_addr = format!("{}:{}", args.host, args.port);

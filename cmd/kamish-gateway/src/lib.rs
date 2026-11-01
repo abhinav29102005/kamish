@@ -35,6 +35,7 @@ pub struct GatewayState {
     pub rate_limiter: Arc<RateLimiter>,
     pub event_tx: broadcast::Sender<String>,
     pub demo_mode_enabled: Arc<RwLock<bool>>,
+    pub allowed_origins: Arc<Vec<String>>,
 }
 
 impl GatewayState {
@@ -47,6 +48,7 @@ impl GatewayState {
             rate_limiter: Arc::new(RateLimiter::new(120, Duration::from_secs(60))), // 120 req/min
             event_tx,
             demo_mode_enabled: Arc::new(RwLock::new(false)),
+            allowed_origins: Arc::new(Vec::new()),
         }
     }
 
@@ -59,7 +61,13 @@ impl GatewayState {
             rate_limiter: Arc::new(RateLimiter::new(120, Duration::from_secs(60))),
             event_tx,
             demo_mode_enabled: Arc::new(RwLock::new(false)),
+            allowed_origins: Arc::new(Vec::new()),
         }
+    }
+
+    pub fn with_allowed_origins(mut self, origins: Vec<String>) -> Self {
+        self.allowed_origins = Arc::new(origins);
+        self
     }
 }
 
@@ -112,7 +120,12 @@ pub fn app(state: GatewayState) -> Router {
 // Security Middleware (Rate Limiting, CSRF, Session Cookie Extraction)
 // ---------------------------------------------------------------------------
 
-fn apply_security_headers(headers: &mut HeaderMap, req_origin: Option<&str>, is_https: bool) {
+fn apply_security_headers(
+    headers: &mut HeaderMap,
+    req_origin: Option<&str>,
+    allowed_origins: &[String],
+    is_https: bool,
+) {
     headers.insert("x-content-type-options", "nosniff".parse().unwrap());
     headers.insert("x-frame-options", "DENY".parse().unwrap());
     headers.insert(
@@ -127,22 +140,30 @@ fn apply_security_headers(headers: &mut HeaderMap, req_origin: Option<&str>, is_
                 .unwrap(),
         );
     }
-    let origin_val = match req_origin {
-        Some(o) if o.starts_with("http://localhost:") || o.starts_with("http://127.0.0.1:") => o,
-        _ => "http://localhost:5173",
-    };
-    if let Ok(val) = origin_val.parse() {
-        headers.insert("access-control-allow-origin", val);
-    }
-    headers.insert("access-control-allow-credentials", "true".parse().unwrap());
-    headers.insert(
-        "access-control-allow-headers",
-        "content-type, authorization, x-csrf-token".parse().unwrap(),
-    );
-    headers.insert(
-        "access-control-allow-methods",
-        "GET, POST, PUT, DELETE, OPTIONS".parse().unwrap(),
-    );
+
+    // CORS is granted only to exact, explicitly configured origins. Local
+    // development should use the Vite same-origin proxy; direct-origin dev
+    // setups must opt in via --allowed-origins / KAMISH_GATEWAY_ALLOWED_ORIGINS.
+    let is_allowed = req_origin.is_some_and(|origin| {
+        allowed_origins.iter().any(|allowed| allowed.trim() == origin)
+    });
+
+    if is_allowed {
+        if let Some(o) = req_origin {
+            if let Ok(val) = o.parse() {
+                headers.insert("access-control-allow-origin", val);
+                headers.insert("access-control-allow-credentials", "true".parse().unwrap());
+                headers.insert(
+                    "access-control-allow-headers",
+                    "content-type, authorization, x-csrf-token".parse().unwrap(),
+                );
+                headers.insert(
+                    "access-control-allow-methods",
+                    "GET, POST, PUT, DELETE, OPTIONS".parse().unwrap(),
+                );
+            }
+        }
+
 }
 
 async fn security_middleware(
@@ -177,7 +198,7 @@ async fn security_middleware(
             })),
         )
             .into_response();
-        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
+        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
         return Ok(resp);
     }
 
@@ -186,19 +207,32 @@ async fn security_middleware(
 
     if method == Method::OPTIONS {
         let mut resp = StatusCode::NO_CONTENT.into_response();
-        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
+        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
         return Ok(resp);
     }
 
     // Public endpoints that do not require authentication
     if !path.starts_with("/api/") || path == "/api/auth/login" || path == "/metrics" {
         let mut resp = next.run(req).await;
-        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
+        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
         return Ok(resp);
     }
 
     // 2. Authentication Enforcement for all protected API endpoints
-    let token = extract_token_from_headers(req.headers());
+    let token = extract_token_from_headers(req.headers()).or_else(|| {
+        if path == "/api/events" {
+            req.uri().query().and_then(|q| {
+                for pair in q.split('&') {
+                    if let Some(tok) = pair.strip_prefix("token=") {
+                        return Some(tok.to_string());
+                    }
+                }
+                None
+            })
+        } else {
+            None
+        }
+    });
     let session = match token
         .as_deref()
         .and_then(|tok| state.session_store.validate_session(tok))
@@ -212,7 +246,7 @@ async fn security_middleware(
                 })),
             )
                 .into_response();
-            apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
+            apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
             return Ok(resp);
         }
     };
@@ -231,7 +265,7 @@ async fn security_middleware(
                 })),
             )
                 .into_response();
-            apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
+            apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
             return Ok(resp);
         }
     }
@@ -258,13 +292,13 @@ async fn security_middleware(
             })),
         )
             .into_response();
-        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
+        apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
         return Ok(resp);
     }
 
     req.extensions_mut().insert(session);
     let mut response = next.run(req).await;
-    apply_security_headers(response.headers_mut(), origin_opt.as_deref(), is_https);
+    apply_security_headers(response.headers_mut(), origin_opt.as_deref(), &state.allowed_origins, is_https);
     Ok(response)
 }
 

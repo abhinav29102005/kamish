@@ -3,11 +3,14 @@ import type { RegionId, ResidencyPolicy, AuditRecord, StreamEvent, RegionNodeSta
   LinkState, TelemetrySample, ScenarioState, ScenarioId } from "../types";
 import type { GatewayUser, GatewayStatus, AuthorityState } from "../utils/gatewayClient";
 
+export type ConnectionStatus = "connecting" | "connected" | "auth_required" | "unavailable" | "config_error";
+
 export interface KamishContextType {
   nodes: Record<RegionId, RegionNodeState>;
   links: LinkState[];
   telemetryHistory: TelemetrySample[];
   currentTelemetry: TelemetrySample;
+  liveThroughputEps: number | null;
   auditLedger: AuditRecord[];
   auditError: string | null;
   recentEvents: StreamEvent[];
@@ -29,6 +32,8 @@ export interface KamishContextType {
   // Phase 5 Gateway Connectivity & Session
   isLiveMode: boolean;
   toggleMode: () => Promise<void>;
+  connectionStatus: ConnectionStatus;
+  connectionError: string | null;
   gatewayStatus: GatewayStatus | null;
   gatewayAuthority: AuthorityState | null;
   currentUser: GatewayUser | null;
