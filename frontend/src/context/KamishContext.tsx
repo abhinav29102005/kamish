@@ -391,6 +391,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const refreshLiveTelemetry = async () => {
     const cfgErr = gatewayClient.getConfigError();
     if (cfgErr) {
+      liveProduceCounterRef.current = null;
+      setLiveThroughputEps(null);
       setConnectionStatus("config_error");
       setConnectionError(cfgErr);
       setGatewayError(cfgErr);
@@ -498,6 +500,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
     } catch (err: any) {
+      liveProduceCounterRef.current = null;
+      setLiveThroughputEps(null);
       const msg = err?.message || String(err);
       if (msg.includes("Session expired") || msg.includes("Unauthorized") || msg.includes("401")) {
         setIsSessionExpired(true);
