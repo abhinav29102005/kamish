@@ -97,9 +97,11 @@ def run_e2e_tests():
             print("    [✓] Semantic HTML & Accessibility verified!")
 
             # -------------------------------------------------------------
-            # TEST 2: LIVE vs DEMO Mode Toggle
+            # TEST 2: LIVE vs DEMO Mode Toggle (in Settings)
             # -------------------------------------------------------------
             print("[*] TEST 2: LIVE vs DEMO Mode Toggle...")
+            page.click("#settings-btn")
+            page.wait_for_selector("#mode-badge", timeout=5000)
             badge = page.locator("#mode-badge")
             assert "LIVE BROKER" in badge.inner_text(), "Initial mode should be LIVE BROKER"
 
@@ -133,13 +135,17 @@ def run_e2e_tests():
             page.fill("#password", "kamish-admin-2026")
             page.click("#signin-btn")
 
-            # Check user badge in header
+            # Check user badge in settings drawer
+            page.click("#settings-btn")
             page.wait_for_selector("#user-badge", timeout=5000)
             user_badge_text = page.locator("#user-badge").inner_text()
             print(f"    User badge in header: {user_badge_text}")
             assert "admin" in user_badge_text.lower(), "User badge missing username"
             assert "admin" in user_badge_text.lower(), "User badge missing role"
             print("    [✓] Authentication & session creation verified!")
+            # Close settings drawer before continuing navigation
+            page.click("#settings-btn")
+            page.wait_for_timeout(200)
 
             # -------------------------------------------------------------
             # TEST 4: Topic Catalog Management
@@ -219,6 +225,8 @@ def run_e2e_tests():
             # TEST 8: Logout & Session Expiry
             # -------------------------------------------------------------
             print("[*] TEST 8: Logout & Session Invalidation...")
+            page.click("#settings-btn")
+            page.wait_for_selector("#logout-btn", timeout=5000)
             page.click("#logout-btn")
             page.wait_for_timeout(300)
             assert page.locator("#user-badge").count() == 0, "User badge should disappear on logout"
