@@ -1,0 +1,121 @@
+   Compiling kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.40s
+     Running unittests src/lib.rs (target/debug/deps/kamish_broker-584a11f70dd57221)
+
+running 25 tests
+test config::tests::test_invalid_toml_fails_closed ... ok
+test config::tests::test_load_from_file ... ok
+test config::tests::test_custom_toml_parsing ... ok
+test config::tests::test_default_config_roundtrip ... ok
+test tls::tests::test_client_identity_roles_and_tenant_check ... ok
+test tls::tests::test_extract_client_identity_structured_cn ... ok
+test tls::tests::test_build_configs_and_verify_valid_tls13 ... ok
+test tls::tests::test_extract_client_identity_standard_x509_fields ... ok
+test tests::startup_restores_sessions_and_preserves_narrowing_without_optional_hook ... ok
+test tests::fetch_cannot_relabel_stored_records ... ok
+test tests::changing_stream_policy_is_rejected_without_consuming_producer_sequence ... ok
+test tests::test_broker_outbox_replication_filter ... ok
+test tests::registered_wrong_or_expired_owner_cannot_acknowledge ... ok
+test tests::replication_rejects_stale_conflicting_and_invalid_ranges_before_ack ... ok
+test tests::topic_paths_cannot_escape_data_directory ... ok
+test tests::test_broker_produce_fetch_and_deduplication ... ok
+test tests::test_ingress_and_egress_interceptor_hooks ... ok
+test tests::test_broker_strict_residency_rejection ... ok
+test tests::test_async_framed_tcp_listener_and_client ... ok
+test tests::test_broker_claim_partition_ownership_and_epoch_fencing ... ok
+test tests::unsupported_sealed_replication_fails_before_storage_even_with_forged_flag ... ok
+test tests::test_regional_outage_buffering_and_recovery ... ok
+test tests::test_multi_broker_replication_and_watermark_catchup ... ok
+test tests::simultaneous_retries_append_once_and_reject_changed_payload ... ok
+test tests::test_concurrent_multi_partition_lock_striping_and_reader_decoupling ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/main.rs (target/debug/deps/kamish_broker-f6e7d6695e35a38c)
+
+running 1 test
+test tests::cli_arguments_are_valid ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/admission_control_race.rs (target/debug/deps/admission_control_race-29bfaeaf5fd2c21e)
+
+running 5 tests
+test test_multi_destination_partial_saturation_atomic_rollback ... ok
+test test_producer_retry_after_rejection_no_duplicates ... ok
+test test_destination_recovery_after_saturation ... ok
+test test_concurrent_producers_outbox_saturation_zero_silent_drop ... ok
+test test_broker_restart_with_pending_replication_obligations ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/multiregion_ownership.rs (target/debug/deps/multiregion_ownership-38c7dd86f1afbcff)
+
+running 1 test
+test test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeeds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/outbox_commit_resilience.rs (target/debug/deps/outbox_commit_resilience-d3c597c268231444)
+
+running 7 tests
+test test_reservation_accounting_lifecycle_exhaustive ... ok
+test test_capacity_reservation_fails_before_wal_append ... ok
+test test_exact_preallocation_guarantees_infallible_commit ... ok
+test test_record_size_exceeding_estimate_retains_durable_wal_obligation ... ok
+test test_multi_destination_partial_saturation_atomic_rollback ... ok
+test test_concurrent_producers_competing_under_bounded_capacity ... ok
+test test_restart_recovery_of_unreplicated_obligations ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/reservation_lifecycle_and_crash.rs (target/debug/deps/reservation_lifecycle_and_crash-cb21c30abd003c3d)
+
+running 6 tests
+test test_reservation_lifecycle_and_accounting_invariants ... ok
+test test_watermark_edge_cases_beyond_hwm_and_stale ... ok
+test test_repeated_saturation_and_drain_cycles ... ok
+test test_synchronized_barrier_concurrent_producers_stress ... ok
+test test_multi_partition_restart_reconciliation_isolation ... ok
+test test_producer_cancellation_releases_reservation ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/server_limits_and_locks.rs (target/debug/deps/server_limits_and_locks-ad1a4c6ff12f94e1)
+
+running 5 tests
+test test_toml_config_daemon_loading_and_limits ... ok
+test test_server_limits_max_payload_rejection ... ok
+test test_server_limits_max_frame_rejection ... ok
+test test_two_broker_daemons_on_same_partition_log_reject ... ok
+test test_server_limits_connection_limiter ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/three_region_convergence_audit.rs (target/debug/deps/three_region_convergence_audit-b80c3b0247efc119)
+
+running 5 tests
+test test_receiver_idempotent_deduplication_and_conflict_rejection ... ok
+test test_receiver_offset_gap_detection_and_watermark_preservation ... ok
+test test_three_region_saturation_and_independent_progress ... ok
+test test_policy_revocation_blocks_outbox_recovery_repopulation ... ok
+test test_broker_restart_recovery_and_watermark_advancement ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/tls_mutual_auth.rs (target/debug/deps/tls_mutual_auth-fc00c5cae3359e14)
+
+running 4 tests
+test test_plaintext_connection_rejected_by_tls_listener ... ok
+test test_unknown_peer_certificate_rejected ... ok
+test test_tls13_mutual_auth_success ... ok
+test test_per_client_roles_producer_and_consumer_authorization ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests kamish_broker
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -1,0 +1,446 @@
+   Compiling kamish-checkers v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-checkers)
+   Compiling kamish-log v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-log)
+   Compiling kamish-meta v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-meta)
+   Compiling kamish-own v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-own)
+   Compiling kamish-agent v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-agent)
+   Compiling kamish-client v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-client)
+   Compiling kamish-ctl v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-ctl)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.77s
+     Running unittests src/lib.rs (target/debug/deps/kamish_agent-e18b03b6679f26d2)
+
+running 9 tests
+test tests::test_bounded_replication_queue_and_backpressure ... ok
+test tests::test_agent_simulated_slow_link ... ok
+test tests::test_missing_offset_range_gap_rejection ... ok
+test tests::test_stale_replication_worker_after_epoch_change ... ok
+test tests::test_agent_replication_and_lag_monitoring ... ok
+test tests::test_offset_cursor_synchronization_and_deduplication_on_reconnect ... ok
+test tests::test_destination_persistence_followed_by_lost_ack ... ok
+test tests::test_partial_overlap_resynchronization ... ok
+test tests::test_retry_worker_with_backoff_and_recovery ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running unittests src/main.rs (target/debug/deps/kamish_agent-b319240aff936189)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/replication_liveness_remediation.rs (target/debug/deps/replication_liveness_remediation-2e7c5bfa116d3855)
+
+running 9 tests
+test test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers ... ok
+test test_conflicting_duplicate_halts_batch_distinct_from_gap ... ok
+test test_healthy_destination_independent_progress_on_peer_gap ... ok
+test test_partial_overlap_halts_batch_without_record_loss ... ok
+test test_failed_destination_does_not_starve_healthy_destination ... ok
+test test_broker_restart_resumes_replication_without_produce ... ok
+test test_watermarks_and_accounting_correctness_throughout_retries ... ok
+test test_repeated_failures_do_not_create_busy_loop ... ok
+test test_three_failures_do_not_permanently_stall_pending_obligation ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.91s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_audit-57d156264c8fe37a)
+
+running 4 tests
+test tests::test_hash_chain_genesis_and_progression ... ok
+test tests::test_tamper_detection ... ok
+test tests::test_disk_persistence_and_reopen_verification ... ok
+test tests::test_audit_witness_lifecycle_and_truncation_detection ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/integrity_contract.rs (target/debug/deps/integrity_contract-09d75f0c00f6974e)
+
+running 5 tests
+test adjacent_field_boundaries_are_authenticated ... ok
+test read_only_verification_never_creates_missing_evidence ... ok
+test unsupported_format_is_rejected_without_modifying_existing_file ... ok
+test disk_tampering_by_repartitioning_fields_is_detected ... ok
+test failed_disk_append_latches_writer_until_reopen ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_broker-ad038eb56bb0523a)
+
+running 21 tests
+test config::tests::test_invalid_toml_fails_closed ... ok
+test config::tests::test_load_from_file ... ok
+test config::tests::test_custom_toml_parsing ... ok
+test config::tests::test_default_config_roundtrip ... ok
+test tests::registered_wrong_or_expired_owner_cannot_acknowledge ... ok
+test tests::topic_paths_cannot_escape_data_directory ... ok
+test tests::replication_rejects_stale_conflicting_and_invalid_ranges_before_ack ... ok
+test tests::startup_restores_sessions_and_preserves_narrowing_without_optional_hook ... ok
+test tests::test_ingress_and_egress_interceptor_hooks ... ok
+test tests::fetch_cannot_relabel_stored_records ... ok
+test tests::test_async_framed_tcp_listener_and_client ... ok
+test tests::test_broker_outbox_replication_filter ... ok
+test tests::test_broker_strict_residency_rejection ... ok
+test tests::changing_stream_policy_is_rejected_without_consuming_producer_sequence ... ok
+test tests::test_broker_produce_fetch_and_deduplication ... ok
+test tests::test_regional_outage_buffering_and_recovery ... ok
+test tests::test_broker_claim_partition_ownership_and_epoch_fencing ... ok
+test tests::test_multi_broker_replication_and_watermark_catchup ... ok
+test tests::unsupported_sealed_replication_fails_before_storage_even_with_forged_flag ... ok
+test tests::simultaneous_retries_append_once_and_reject_changed_payload ... ok
+test tests::test_concurrent_multi_partition_lock_striping_and_reader_decoupling ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/main.rs (target/debug/deps/kamish_broker-d0608df93e2596fc)
+
+running 1 test
+test tests::cli_arguments_are_valid ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/admission_control_race.rs (target/debug/deps/admission_control_race-27f9bbbb0aba3da0)
+
+running 5 tests
+test test_producer_retry_after_rejection_no_duplicates ... ok
+test test_destination_recovery_after_saturation ... ok
+test test_multi_destination_partial_saturation_atomic_rollback ... ok
+test test_concurrent_producers_outbox_saturation_zero_silent_drop ... ok
+test test_broker_restart_with_pending_replication_obligations ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/multiregion_ownership.rs (target/debug/deps/multiregion_ownership-38c8da2a12ae1751)
+
+running 1 test
+test test_multiregion_mode_unregistered_stream_fails_closed_and_registered_succeeds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/outbox_commit_resilience.rs (target/debug/deps/outbox_commit_resilience-7533fd0f0d56975f)
+
+running 7 tests
+test test_reservation_accounting_lifecycle_exhaustive ... ok
+test test_capacity_reservation_fails_before_wal_append ... ok
+test test_multi_destination_partial_saturation_atomic_rollback ... ok
+test test_exact_preallocation_guarantees_infallible_commit ... ok
+test test_record_size_exceeding_estimate_retains_durable_wal_obligation ... ok
+test test_concurrent_producers_competing_under_bounded_capacity ... ok
+test test_restart_recovery_of_unreplicated_obligations ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/reservation_lifecycle_and_crash.rs (target/debug/deps/reservation_lifecycle_and_crash-8c6946b0c8894b3d)
+
+running 6 tests
+test test_watermark_edge_cases_beyond_hwm_and_stale ... ok
+test test_reservation_lifecycle_and_accounting_invariants ... ok
+test test_repeated_saturation_and_drain_cycles ... ok
+test test_synchronized_barrier_concurrent_producers_stress ... ok
+test test_multi_partition_restart_reconciliation_isolation ... ok
+test test_producer_cancellation_releases_reservation ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/server_limits_and_locks.rs (target/debug/deps/server_limits_and_locks-25368db3a17913b6)
+
+running 5 tests
+test test_toml_config_daemon_loading_and_limits ... ok
+test test_server_limits_max_payload_rejection ... ok
+test test_server_limits_max_frame_rejection ... ok
+test test_two_broker_daemons_on_same_partition_log_reject ... ok
+test test_server_limits_connection_limiter ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/three_region_convergence_audit.rs (target/debug/deps/three_region_convergence_audit-3393eaed286bba59)
+
+running 5 tests
+test test_receiver_offset_gap_detection_and_watermark_preservation ... ok
+test test_receiver_idempotent_deduplication_and_conflict_rejection ... ok
+test test_three_region_saturation_and_independent_progress ... ok
+test test_policy_revocation_blocks_outbox_recovery_repopulation ... ok
+test test_broker_restart_recovery_and_watermark_advancement ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_checkers-1799dbd48bd2ea5c)
+
+running 2 tests
+test tests::test_ordering_checker_detects_gap ... ok
+test tests::test_canary_scanner_detects_leak ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_client-2596d869227102f6)
+
+running 1 test
+test tests::test_client_produce_and_consume_workflow ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/main.rs (target/debug/deps/kamish_ctl-4b9a6456ef99bb40)
+
+running 1 test
+test cli_tests::every_subcommand_accepts_help ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_enforce-bf174cda960afe48)
+
+running 4 tests
+test tests::audit_failure_denies_previously_allowed_operation ... ok
+test tests::ciphertext_does_not_authorize_an_unlisted_relay ... ok
+test tests::sealed_only_region_cannot_process_or_export_cleartext ... ok
+test tests::test_enforce_e1_to_e10 ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/red_team_residency.rs (target/debug/deps/red_team_residency-2aae57c8ac06bc2b)
+
+running 6 tests
+test test_missing_policy_denies_all_operations_closed ... ok
+test test_cross_border_key_custody_denial ... ok
+test test_audit_ledger_zero_payload_disclosure ... ok
+test test_unauthorized_destination_egress_denial ... ok
+test test_invalid_signature_and_tampered_policy_rejection ... ok
+test test_expired_policy_denies_operations ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.11s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_log-1db52d9f8678ec55)
+
+running 6 tests
+test session_tests::test_idempotent_session_deduplication ... ok
+test tests::test_stale_epoch_rejection ... ok
+test tests::test_two_processes_opening_same_log_directory_reject ... ok
+test tests::test_monotonic_offset_and_crc_verification ... ok
+test tests::test_torn_write_tail_truncation_recovery ... ok
+test tests::test_fsync_flush_durability_and_sequential_reads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/adversarial_durability.rs (target/debug/deps/adversarial_durability-537ecd6da36b43e5)
+
+running 4 tests
+test test_middle_of_segment_corruption_detected ... ok
+test test_truncated_header_recovery ... ok
+test test_truncated_payload_recovery ... ok
+test test_repeated_restarts_and_monotonicity ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/append_io_failures.rs (target/debug/deps/append_io_failures-dc2c1d6eab9de8db)
+
+running 13 tests
+test test_failed_repair_permanently_fences_live_instance_and_all_clones ... ok
+test test_flush_failure_rollback_and_subsequent_append_success ... ok
+test test_reads_and_read_range_serve_committed_records_when_fenced ... ok
+test test_all_append_entry_points_honour_fence ... ok
+test test_body_write_failure_rollback_and_subsequent_append_success ... ok
+test test_epoch_advancement_preserved_on_failed_append ... ok
+test test_reopen_validates_complete_segment_before_permitting_writes ... ok
+test test_truncation_repair_failure_fences_writer ... ok
+test test_repair_sync_failure_fences_writer ... ok
+test test_length_write_failure_rollback_and_subsequent_append_success ... ok
+test test_sync_failure_state_b_record_torn_on_disk_truncates_and_recovers ... ok
+test test_sync_failure_fences_writer_and_rejects_subsequent_appends ... ok
+test test_sync_failure_state_a_record_persisted_on_disk_recovers_and_deduplicates ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/record_context.rs (target/debug/deps/record_context-d79699a1c4980cc5)
+
+running 3 tests
+test new_producer_epoch_resets_sequence_and_stale_epoch_is_rejected ... ok
+test legacy_records_remain_readable_without_fabricated_admission_context ... ok
+test context_survives_restart_and_is_covered_by_checksum ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_meta-4e2a1acec8f5aaf2)
+
+running 9 tests
+test tests::test_lease_monotonic_clock_pause_skew_and_expiry ... ok
+test tests::test_metadata_authority_multi_region_cannot_set_ownership_except_through_cas ... ok
+test tests::test_metadata_authority_audit_checkpoints ... ok
+test tests::test_metadata_authority_cas_and_leases ... ok
+test tests::test_metadata_authority_policy_floor_and_source_identity ... ok
+test tests::test_replication_lag_metric_calculation ... ok
+test tests::test_restricted_replication_policy ... ok
+test tests::test_strict_local_residency_enforcement ... ok
+test tests::test_synthetic_chaos_delay_and_partition ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/developer_b_scenarios.rs (target/debug/deps/developer_b_scenarios-8bb13c056a1ac37d)
+
+running 3 tests
+test test_scenario_a_residency_enforcement_demo ... ok
+test test_scenario_c_regional_outage_and_recovery_demo ... ok
+test test_scenario_b_slow_link_and_backpressure_demo ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/etcd_authority.rs (target/debug/deps/etcd_authority-75acd289421425b5)
+
+running 8 tests
+test test_02_epoch_never_regresses_after_owner_key_expiry ... ok
+test test_03_lease_ttl_expiry_under_paused_client_and_monotonic_clock ... ok
+test test_04_keepalive_lost_broker_stops_acking ... ok
+test test_01_competing_claimants_race_for_epoch_1_repeated ... ok
+test test_05_policy_floor_and_source_generation ... ok
+test test_07_quorum_loss_fail_closed_and_member_restart ... ok
+test test_06_ambiguous_commit_outcome_handling_and_retry_idempotence ... ok
+test test_08_cold_restart_epoch_and_fence_persistence ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_outbox-3a2820451cec79ac)
+
+running 3 tests
+test tests::test_outbox_bounded_capacity ... ok
+test tests::test_outbox_atomic_reservation_and_rollback ... ok
+test tests::test_outbox_enqueue_advance_and_trim ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/stream_isolation.rs (target/debug/deps/stream_isolation-e8aedfafb59d605c)
+
+running 4 tests
+test ack_does_not_hide_a_new_partition_or_topic ... ok
+test arithmetic_overflow_cannot_bypass_capacity ... ok
+test unscoped_ack_cannot_initialize_an_unknown_stream ... ok
+test commit_growth_must_fit_capacity_and_failed_commit_releases_reservation ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_own-fce3f24686e915a7)
+
+running 3 tests
+test tests::test_promotion_after_lease_expires_succeeds ... ok
+test tests::test_promotion_before_lease_expires_fails ... ok
+test tests::test_quarantine_superseded_records ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_policy-bc5d82676651f952)
+
+running 2 tests
+test tests::test_policy_signing_and_verification ... ok
+test tests::test_policy_rollback_rejection ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/signature_contract.rs (target/debug/deps/signature_contract-9285093a768a4c65)
+
+running 5 tests
+test expiry_is_exclusive_and_overflow_fails_closed ... ok
+test legacy_or_unknown_signature_formats_are_not_silently_accepted ... ok
+test map_and_set_order_is_irrelevant_but_preference_order_is_signed ... ok
+test changed_same_version_and_policy_identity_are_rejected ... ok
+test signature_survives_repeated_wire_roundtrips ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_route-388e875e2ae48fdb)
+
+running 1 test
+test tests::test_hard_policy_filter_before_scoring ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/route_safety.rs (target/debug/deps/route_safety-fa1ee0c9c4e43cab)
+
+running 5 tests
+test invalid_measurements_cannot_win_or_retain_a_route ... ok
+test retained_route_uses_current_measurements ... ok
+test class_caches_are_isolated_and_plaintext_never_gets_a_relay ... ok
+test unknown_relays_and_wrong_destinations_are_rejected ... ok
+test revocation_bypasses_dwell_and_revalidates_cached_route ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (target/debug/deps/kamish_seal-adadc6a2d2b208e0)
+
+running 1 test
+test tests::test_sealed_encryption_and_cross_border_key_denial ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_agent
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_audit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_broker
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_checkers
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_client
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_enforce
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_log
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_meta
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_outbox
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_own
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_policy
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_route
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_seal
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

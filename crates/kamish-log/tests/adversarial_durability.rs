@@ -85,6 +85,9 @@ fn test_truncated_payload_recovery() {
     assert_eq!(o2, 2);
     assert_eq!(recovered.high_watermark(), 3);
 
+    // Drop recovered before reopening to release partition lock (W14)
+    drop(recovered);
+
     // 5. Reopen again, all 3 records intact
     let reopened = PartitionLog::open(&path, 1).unwrap();
     assert_eq!(reopened.high_watermark(), 3);

@@ -1,0 +1,58 @@
+   Compiling kamish-log v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-log)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.71s
+     Running unittests src/lib.rs (target/debug/deps/kamish_log-0f2a4b6243a7cbcf)
+
+running 6 tests
+test session_tests::test_idempotent_session_deduplication ... ok
+test tests::test_stale_epoch_rejection ... ok
+test tests::test_monotonic_offset_and_crc_verification ... ok
+test tests::test_two_processes_opening_same_log_directory_reject ... ok
+test tests::test_torn_write_tail_truncation_recovery ... ok
+test tests::test_fsync_flush_durability_and_sequential_reads ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/adversarial_durability.rs (target/debug/deps/adversarial_durability-58121ca13f637773)
+
+running 4 tests
+test test_middle_of_segment_corruption_detected ... ok
+test test_truncated_header_recovery ... ok
+test test_truncated_payload_recovery ... ok
+test test_repeated_restarts_and_monotonicity ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/append_io_failures.rs (target/debug/deps/append_io_failures-76cfd8d05fd63291)
+
+running 13 tests
+test test_all_append_entry_points_honour_fence ... ok
+test test_failed_repair_permanently_fences_live_instance_and_all_clones ... ok
+test test_epoch_advancement_preserved_on_failed_append ... ok
+test test_reads_and_read_range_serve_committed_records_when_fenced ... ok
+test test_length_write_failure_rollback_and_subsequent_append_success ... ok
+test test_body_write_failure_rollback_and_subsequent_append_success ... ok
+test test_repair_sync_failure_fences_writer ... ok
+test test_flush_failure_rollback_and_subsequent_append_success ... ok
+test test_truncation_repair_failure_fences_writer ... ok
+test test_sync_failure_state_b_record_torn_on_disk_truncates_and_recovers ... ok
+test test_reopen_validates_complete_segment_before_permitting_writes ... ok
+test test_sync_failure_fences_writer_and_rejects_subsequent_appends ... ok
+test test_sync_failure_state_a_record_persisted_on_disk_recovers_and_deduplicates ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/record_context.rs (target/debug/deps/record_context-fc2bb2982f411af9)
+
+running 3 tests
+test new_producer_epoch_resets_sequence_and_stale_epoch_is_rejected ... ok
+test legacy_records_remain_readable_without_fabricated_admission_context ... ok
+test context_survives_restart_and_is_covered_by_checksum ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests kamish_log
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

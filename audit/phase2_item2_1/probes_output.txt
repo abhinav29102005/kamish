@@ -1,0 +1,39 @@
+   Compiling kamish-log v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/crates/kamish-log)
+   Compiling kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+   Compiling kamish-repo-review v0.0.0 (/mnt/storage/Projects/crowded-mausoleum/early_research/probes)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.82s
+     Running unittests src/lib.rs (early_research/probes/target/debug/deps/kamish_repo_review-afb6e4ef6463e092)
+
+running 11 tests
+test review::audit_hash_binds_field_boundaries ... ok
+test review::broker_obeys_metadata_owner ... ok
+test review::recovery_preserves_per_record_residency ... ok
+test review::oversized_outbox_write_is_not_acknowledged ... ok
+test review::ack_of_one_partition_preserves_other_partition ... ok
+test review::signed_policy_survives_wire_roundtrip ... ok
+test review::sealed_destination_does_not_persist_plaintext ... ok
+test review::pending_replication_survives_broker_restart ... ok
+test review::fetch_cannot_bypass_record_policy_with_another_class ... ok
+test review::retry_after_restart_is_idempotent ... ok
+test review::concurrent_retries_append_once ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/remaining_gaps.rs (early_research/probes/target/debug/deps/remaining_gaps-a5fcf63ff6cf9799)
+
+running 6 tests
+test duplicate_offset_with_different_content_must_be_rejected ... ok
+test stale_epoch_duplicate_must_not_acknowledge_a_new_epoch_history ... ok
+test claimed_multi_record_range_must_match_the_persisted_record_count ... ok
+test independent_regions_must_not_both_accept_unregistered_epoch_one_writes ... ok
+test mixed_replication_contract_must_not_create_an_unfillable_mirror_gap ... ok
+test audit_tail_removal_requires_a_trusted_checkpoint_to_be_detectable ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+   Doc-tests kamish_repo_review
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

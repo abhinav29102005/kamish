@@ -29,8 +29,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+pub mod config;
+pub mod tls;
+pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig};
+use std::pin::Pin;
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+pub use tls::{
+    ClientIdentity, TlsError, build_client_config, build_server_config, extract_client_identity,
+};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Debug, Error)]
@@ -55,6 +64,18 @@ pub enum BrokerError {
 
     #[error("Authority error: {0}")]
     Authority(String),
+
+    #[error("Broker data directory {0:?} is locked by another running process (W14)")]
+    DataDirectoryLocked(PathBuf),
+
+    #[error("Payload size {size} exceeds maximum allowed payload limit {max}")]
+    PayloadTooLarge { size: usize, max: usize },
+
+    #[error("Frame size {size} exceeds maximum allowed frame limit {max}")]
+    FrameTooLarge { size: usize, max: usize },
+
+    #[error("Connection limit reached: server rejected connection (max {0})")]
+    ConnectionLimitReached(usize),
 }
 
 /// Helper function to parse region string into strongly-typed RegionId.
@@ -240,6 +261,8 @@ pub struct BrokerServer {
     pub local_tracker: Arc<dyn LocalReplicationTracker>,
     pub policy_engine: Option<Arc<dyn PolicyEngine>>,
     pub known_peers: Vec<String>,
+    pub limits: ServerLimits,
+    connection_semaphore: Arc<tokio::sync::Semaphore>,
     data_dir: PathBuf,
     logs: Arc<StripedStore<(String, u32), PartitionLog>>,
     sessions: Arc<StripedStore<(String, u32), SessionManager>>,
@@ -310,6 +333,9 @@ impl BrokerServer {
         let data_dir_buf = data_dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&data_dir_buf)?;
 
+        let limits = ServerLimits::default();
+        let connection_semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
+
         let mut outboxes_map = HashMap::new();
         for peer in &known_peers {
             outboxes_map.insert(
@@ -326,6 +352,8 @@ impl BrokerServer {
             local_tracker,
             policy_engine: None,
             known_peers,
+            limits,
+            connection_semaphore,
             data_dir: data_dir_buf,
             logs: Arc::new(StripedStore::new()),
             sessions: Arc::new(StripedStore::new()),
@@ -355,6 +383,13 @@ impl BrokerServer {
             broker.refill_outbox(peer)?;
         }
         Ok(broker)
+    }
+
+    /// Configures custom server limits (frame size, payload size, connection limit).
+    pub fn with_limits(mut self, limits: ServerLimits) -> Self {
+        self.connection_semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
+        self.limits = limits;
+        self
     }
 
     /// Attaches a concrete PolicyEngine instance for ingress and egress policy enforcement (§3.B).
@@ -428,6 +463,12 @@ impl BrokerServer {
     /// deduplication, disk persistence, and outbox egress replication planning.
     pub fn produce(&self, req: ProduceRequest) -> Result<ProduceResponse, BrokerError> {
         Self::validate_topic(&req.topic)?;
+        if req.payload.len() > self.limits.max_payload_size {
+            return Err(BrokerError::PayloadTooLarge {
+                size: req.payload.len(),
+                max: self.limits.max_payload_size,
+            });
+        }
         let operation = self
             .partition_operations
             .get_or_insert_with((req.topic.clone(), req.partition), || {
@@ -1158,9 +1199,30 @@ impl BrokerServer {
         let handle = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
-                    Ok((stream, _peer_addr)) => {
+                    Ok((mut stream, _peer_addr)) => {
+                        let permit =
+                            match Arc::clone(&self.connection_semaphore).try_acquire_owned() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        max = self.limits.max_connections,
+                                        "Broker connection limit reached; rejecting connection"
+                                    );
+                                    let err_resp = BrokerResponse::Error(format!(
+                                        "Server connection limit reached (max {})",
+                                        self.limits.max_connections
+                                    ));
+                                    if let Ok(mut bytes) = serde_json::to_vec(&err_resp) {
+                                        bytes.push(b'\n');
+                                        let _ = stream.write_all(&bytes).await;
+                                        let _ = stream.flush().await;
+                                    }
+                                    continue;
+                                }
+                            };
                         let server = Arc::clone(&self);
                         tokio::spawn(async move {
+                            let _permit = permit;
                             let _ = server.handle_connection(stream).await;
                         });
                     }
@@ -1175,18 +1237,135 @@ impl BrokerServer {
         Ok((local_addr, handle))
     }
 
+    /// Spawns an async framed TLS 1.3 listener on `bind_addr` enforcing mutual authentication (W09).
+    pub async fn start_tls_listener(
+        self: Arc<Self>,
+        bind_addr: &str,
+        acceptor: tokio_rustls::TlsAcceptor,
+    ) -> Result<(std::net::SocketAddr, tokio::task::JoinHandle<()>), std::io::Error> {
+        let listener = TcpListener::bind(bind_addr).await?;
+        let local_addr = listener.local_addr()?;
+
+        let handle = tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((stream, _peer_addr)) => {
+                        let permit =
+                            match Arc::clone(&self.connection_semaphore).try_acquire_owned() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        max = self.limits.max_connections,
+                                        "Broker connection limit reached; rejecting connection"
+                                    );
+                                    continue;
+                                }
+                            };
+                        let server = Arc::clone(&self);
+                        let acceptor = acceptor.clone();
+                        tokio::spawn(async move {
+                            let _permit = permit;
+                            // TLS 1.3 Handshake: unknown peers and invalid certs fail-closed (W09)
+                            let tls_stream = match acceptor.accept(stream).await {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "TLS 1.3 handshake failed; rejecting untrusted or unknown peer (W09)"
+                                    );
+                                    return;
+                                }
+                            };
+
+                            // Extract verified client identity from peer certificate
+                            let client_identity = {
+                                let (_, session) = tls_stream.get_ref();
+                                match session.peer_certificates().and_then(|certs| certs.first()) {
+                                    Some(cert) => match extract_client_identity(cert.as_ref()) {
+                                        Ok(id) => Some(id),
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "Failed to extract client identity from certificate"
+                                            );
+                                            return;
+                                        }
+                                    },
+                                    None => None,
+                                }
+                            };
+
+                            let _ = server.handle_stream(tls_stream, client_identity).await;
+                        });
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Accept error in broker TLS listener");
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok((local_addr, handle))
+    }
+
     async fn handle_connection(
         self: Arc<Self>,
         stream: TcpStream,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let (reader, mut writer) = stream.into_split();
-        let mut lines = BufReader::new(reader).lines();
+        self.handle_stream(stream, None).await
+    }
 
-        while let Some(line) = lines.next_line().await? {
-            if line.trim().is_empty() {
+    async fn handle_stream<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
+        self: Arc<Self>,
+        stream: S,
+        client_identity: Option<ClientIdentity>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (reader, mut writer) = tokio::io::split(stream);
+        let mut buf_reader = BufReader::new(reader);
+        let max_frame = self.limits.max_frame_size;
+
+        loop {
+            let mut line = Vec::new();
+            let mut take = (&mut buf_reader).take((max_frame + 1) as u64);
+            let n = take.read_until(b'\n', &mut line).await?;
+            if n == 0 {
+                break;
+            }
+
+            if line.len() > max_frame {
+                let err_resp = BrokerResponse::Error(format!(
+                    "Frame size {} exceeds maximum allowed limit {}",
+                    line.len(),
+                    max_frame
+                ));
+                let mut serialized = serde_json::to_vec(&err_resp)?;
+                serialized.push(b'\n');
+                let _ = writer.write_all(&serialized).await;
+                let _ = writer.flush().await;
+                return Err(Box::new(BrokerError::FrameTooLarge {
+                    size: line.len(),
+                    max: max_frame,
+                }));
+            }
+
+            let line_str = match std::str::from_utf8(&line) {
+                Ok(s) => s.trim(),
+                Err(e) => {
+                    let err_resp = BrokerResponse::Error(format!("Malformed UTF-8: {}", e));
+                    let mut serialized = serde_json::to_vec(&err_resp)?;
+                    serialized.push(b'\n');
+                    writer.write_all(&serialized).await?;
+                    writer.flush().await?;
+                    continue;
+                }
+            };
+
+            if line_str.is_empty() {
                 continue;
             }
-            let req: BrokerRequest = match serde_json::from_str(&line) {
+
+            let req: BrokerRequest = match serde_json::from_str(line_str) {
                 Ok(r) => r,
                 Err(e) => {
                     let err_resp = BrokerResponse::Error(format!("Malformed JSON request: {}", e));
@@ -1198,11 +1377,47 @@ impl BrokerServer {
                 }
             };
 
+            // Per-client identity & role enforcement (W09/W13):
+            if let Some(ref identity) = client_identity {
+                match &req {
+                    BrokerRequest::Produce(_) if !identity.has_role("Producer") => {
+                        let err_resp = BrokerResponse::Error(format!(
+                            "Authorization denied: principal {:?} lacks Producer role (W09)",
+                            identity.principal
+                        ));
+                        let mut serialized = serde_json::to_vec(&err_resp)?;
+                        serialized.push(b'\n');
+                        writer.write_all(&serialized).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+                    BrokerRequest::Fetch(_) if !identity.has_role("Consumer") => {
+                        let err_resp = BrokerResponse::Error(format!(
+                            "Authorization denied: principal {:?} lacks Consumer role (W09/W13)",
+                            identity.principal
+                        ));
+                        let mut serialized = serde_json::to_vec(&err_resp)?;
+                        serialized.push(b'\n');
+                        writer.write_all(&serialized).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+                    BrokerRequest::Replicate(_) if !identity.has_role("Agent") => {
+                        let err_resp = BrokerResponse::Error(format!(
+                            "Authorization denied: principal {:?} lacks Agent role (W09)",
+                            identity.principal
+                        ));
+                        let mut serialized = serde_json::to_vec(&err_resp)?;
+                        serialized.push(b'\n');
+                        writer.write_all(&serialized).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+
             // Non-blocking Tokio worker thread dispatch:
-            // Offload disk I/O requests (Produce, Fetch, Replicate) to Tokio's dedicated
-            // blocking threadpool via spawn_blocking, preventing worker threads from blocking
-            // on fsync barriers or disk reads. Lightweight state queries (Ping, Watermark)
-            // execute immediately in-memory.
             let resp = match req {
                 BrokerRequest::Produce(_)
                 | BrokerRequest::Fetch(_)
@@ -1224,18 +1439,41 @@ impl BrokerServer {
     }
 }
 
-/// Lightweight async framed TCP client connecting to a remote Kamish Broker daemon.
+/// Lightweight async framed client connecting to a remote Kamish Broker daemon (plain TCP or TLS 1.3 mTLS).
 pub struct BrokerClient {
-    lines: tokio::io::Lines<BufReader<tokio::net::tcp::OwnedReadHalf>>,
-    writer: tokio::net::tcp::OwnedWriteHalf,
+    reader: Pin<Box<dyn AsyncBufRead + Send>>,
+    writer: Pin<Box<dyn AsyncWrite + Send>>,
 }
 
 impl BrokerClient {
+    /// Connect over plain TCP.
     pub async fn connect(addr: impl tokio::net::ToSocketAddrs) -> Result<Self, std::io::Error> {
         let stream = TcpStream::connect(addr).await?;
-        let (reader, writer) = stream.into_split();
-        let lines = BufReader::new(reader).lines();
-        Ok(Self { lines, writer })
+        let (reader, writer) = tokio::io::split(stream);
+        let buf_reader = BufReader::new(reader);
+        Ok(Self {
+            reader: Box::pin(buf_reader),
+            writer: Box::pin(writer),
+        })
+    }
+
+    /// Connect over TLS 1.3 with mutual authentication (mTLS).
+    pub async fn connect_tls(
+        addr: impl tokio::net::ToSocketAddrs,
+        domain: rustls::pki_types::ServerName<'static>,
+        connector: tokio_rustls::TlsConnector,
+    ) -> Result<Self, std::io::Error> {
+        let tcp_stream = TcpStream::connect(addr).await?;
+        let tls_stream = connector
+            .connect(domain, tcp_stream)
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::ConnectionRefused, e))?;
+        let (reader, writer) = tokio::io::split(tls_stream);
+        let buf_reader = BufReader::new(reader);
+        Ok(Self {
+            reader: Box::pin(buf_reader),
+            writer: Box::pin(writer),
+        })
     }
 
     pub async fn send_request(
@@ -1247,17 +1485,17 @@ impl BrokerClient {
         self.writer.write_all(&payload).await?;
         self.writer.flush().await?;
 
-        match self.lines.next_line().await? {
-            Some(line) => {
-                let resp: BrokerResponse = serde_json::from_str(&line)?;
-                Ok(resp)
-            }
-            None => Err(std::io::Error::new(
+        let mut line = String::new();
+        let n = self.reader.read_line(&mut line).await?;
+        if n == 0 {
+            return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
                 "Connection closed by remote broker",
             )
-            .into()),
+            .into());
         }
+        let resp: BrokerResponse = serde_json::from_str(line.trim())?;
+        Ok(resp)
     }
 
     pub async fn produce(

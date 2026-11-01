@@ -132,6 +132,8 @@ fn test_record_size_exceeding_estimate_retains_durable_wal_obligation() {
         .append_with_context(1, "replicated-stream", 1, vec![b'A'; 36], Some(context))
         .expect("Direct WAL append should succeed");
     assert_eq!(offset, 0);
+    // Drop direct handle so broker can open partition log without conflict (W14)
+    drop(log);
 
     // 4. Actual range size is 100 bytes (payload 36 + 64), which exceeds the 50-byte estimate by 50 bytes.
     // The available capacity is only 20 bytes, so commit growth fails with QueueCapacityExceeded!

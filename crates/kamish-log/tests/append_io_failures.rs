@@ -56,7 +56,8 @@ fn test_length_write_failure_rollback_and_subsequent_append_success() {
     assert_eq!(log.next_offset(), 2);
     assert_eq!(log.high_watermark(), 2);
 
-    // 4. Reopen and verify data integrity
+    // 4. Reopen and verify data integrity (drop previous writer lock first)
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.next_offset(), 2);
     assert_eq!(reopened.high_watermark(), 2);
@@ -112,6 +113,7 @@ fn test_body_write_failure_rollback_and_subsequent_append_success() {
     assert_eq!(log.next_offset(), 2);
     assert_eq!(log.high_watermark(), 2);
 
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.high_watermark(), 2);
     let records = reopened.read(0, 10);
@@ -156,6 +158,7 @@ fn test_flush_failure_rollback_and_subsequent_append_success() {
     assert_eq!(log.next_offset(), 2);
     assert_eq!(log.high_watermark(), 2);
 
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.high_watermark(), 2);
     assert_eq!(reopened.read(1, 1)[0].payload, b"record-1-success");
@@ -206,7 +209,8 @@ fn test_sync_failure_fences_writer_and_rejects_subsequent_appends() {
     assert_eq!(committed.len(), 1);
     assert_eq!(committed[0].payload, b"baseline-0");
 
-    // Reopen clears fence and recovers exact pre-failure state
+    // Reopen clears fence and recovers exact pre-failure state (drop previous writer lock first)
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert!(!reopened.is_fenced());
     assert_eq!(reopened.next_offset(), 1);
@@ -253,7 +257,8 @@ fn test_truncation_repair_failure_fences_writer() {
     // Reads still succeed for committed records
     assert_eq!(log.read(0, 10).len(), 1);
 
-    // Restart recovery detects the torn write tail on disk and recovers clean baseline
+    // Restart recovery detects the torn write tail on disk and recovers clean baseline (drop previous writer lock first)
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.next_offset(), 1);
     assert_eq!(reopened.high_watermark(), 1);
@@ -294,7 +299,8 @@ fn test_repair_sync_failure_fences_writer() {
         .unwrap_err();
     assert!(matches!(sub_err, LogError::WriterFenced(_)));
 
-    // Reopen recovers cleanly
+    // Reopen recovers cleanly (drop previous writer lock first)
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.next_offset(), 1);
     assert_eq!(reopened.high_watermark(), 1);
@@ -486,7 +492,8 @@ fn test_sync_failure_state_a_record_persisted_on_disk_recovers_and_deduplicates(
         raw_file.sync_all().unwrap();
     }
 
-    // 3. Restart recovery: PartitionLog::open validates the complete segment
+    // 3. Restart recovery: PartitionLog::open validates the complete segment (drop previous writer lock first)
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.high_watermark(), 2);
     assert_eq!(reopened.next_offset(), 2);
@@ -549,7 +556,8 @@ fn test_sync_failure_state_b_record_torn_on_disk_truncates_and_recovers() {
     }
     assert!(std::fs::metadata(dir.join("partition.data")).unwrap().len() > baseline_len);
 
-    // Restart recovery: PartitionLog::open detects EOF torn write and cleanly truncates
+    // Restart recovery: PartitionLog::open detects EOF torn write and cleanly truncates (drop previous writer lock first)
+    drop(log);
     let reopened = PartitionLog::open(dir, 1).unwrap();
     assert_eq!(reopened.high_watermark(), 1);
     assert_eq!(reopened.next_offset(), 1);

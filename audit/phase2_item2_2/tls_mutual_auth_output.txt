@@ -1,0 +1,12 @@
+   Compiling kamish-broker v0.1.0 (/mnt/storage/Projects/crowded-mausoleum/cmd/kamish-broker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.48s
+     Running tests/tls_mutual_auth.rs (target/debug/deps/tls_mutual_auth-fc00c5cae3359e14)
+
+running 4 tests
+test test_plaintext_connection_rejected_by_tls_listener ... ok
+test test_unknown_peer_certificate_rejected ... ok
+test test_tls13_mutual_auth_success ... ok
+test test_per_client_roles_producer_and_consumer_authorization ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
