@@ -117,12 +117,17 @@ Prompt A GATE 5 is met (or I have told you in writing which parts are intentiona
 
 DELIVERABLES
 
-1. PACKAGE LAYOUT (propose in decisions.md, wait for my pick)
-   - @kamish/client: the Node SDK (library, ESM, typed).
-   - @kamish/cli: global command "kamish" (bin entry).
-   - @kamish/gateway or a bundled "kamish" package that runs gateway + dashboard.
-   - Rust binaries (kamish-broker, kamish-agent, kamish-ctl): distribution method.
-   Check name and scope availability on the npm registry (read-only lookup) and report it. If the scope is not available or not mine, propose alternatives. Do not register or reserve anything.
+1. ALL-IN-ONE PACKAGING LAYOUT (ADR-006 approved architecture)
+   1. Primary package "kamish": a single global install (npm install -g kamish) providing one command "kamish". Subcommands as already specified, plus: kamish start (broker + gateway + dashboard in one process), kamish doctor, kamish init (first-run setup that creates an admin account interactively or from a secret file; no default credentials ship).
+   2. One Rust executable per platform containing broker, agent, and gateway, with the built dashboard embedded (rust-embed or equivalent). Report the binary size and the embed approach, and verify the embedded static files are served with correct caching, CSP, and no external network requests.
+   3. Per-platform npm packages as optionalDependencies selected by os/cpu: linux-x64, linux-arm64, darwin-x64, darwin-arm64, win32-x64. Built in CI from a pinned toolchain. No install-time downloads without a verified checksum. Works offline from the tarball.
+   4. @kamish/client stays a separate, small SDK package. The "kamish" package may depend on it; the SDK must not depend on the dashboard.
+   5. etcd is NOT bundled. kamish doctor detects it and gives actionable instructions. Provide a Docker Compose file and a checksum-verified download script for the 3-member test cluster. Single-node mode must work with no etcd and say clearly what it does not provide.
+   6. Fallback distribution: GitHub Releases artifacts with SHA-256 checksums; optional Docker image built from the same binary. Do not publish either.
+   7. Size and assets: set a size budget for the main tarball and each platform package. The 53 MB 3D models must be compressed or made an optional lazy download, with a lightweight default and a recorded license for every asset. If the budget is exceeded, report it and stop.
+   8. Dependency control: pin all JS and Rust dependencies, commit lockfiles, run license and vulnerability scans, and list every bundled third-party component in a NOTICE file.
+   9. Clean-room test: install the tarballs into a fresh container or temp prefix on Linux, macOS and Windows; run kamish --version, doctor, init, start; open the dashboard; log in; produce and fetch a record; stop; uninstall. Save transcripts.
+   10. Publishing stays disabled: no npm publish, tags, or registry pushes without my explicit written approval. Check scope and package-name availability read-only and report.
 
 2. CLI SPECIFICATION (implement and test)
    Commands: kamish --help, --version; kamish init (writes a config skeleton and a dev policy, never overwriting existing files without --force); kamish start (broker + gateway in dev mode, with the explicit --insecure-dev flag if TLS is absent); kamish status; kamish topic create|list; kamish produce; kamish consume|fetch; kamish policy sign|verify|publish; kamish verify-audit; kamish doctor (checks versions, ports, etcd availability, certificates, config validity, prints actionable errors); kamish demo (runs the labelled demo with REAL vs SIMULATED markers).
