@@ -180,7 +180,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_limits(config.limits)
         .with_catalog(catalog)
         .with_replica_group(config.replica_group.clone())
-        .with_ack_level(config.ack_level.unwrap_or(kamish_broker::AckLevel::LeaderFsync)),
+        .with_ack_level(
+            config
+                .ack_level
+                .unwrap_or(kamish_broker::AckLevel::LeaderFsync),
+        ),
     );
 
     // Start proactive lease renewal worker conforming to CONTRACT.md §2.3.2 (10s TTL, 3s interval, 1s timeout)

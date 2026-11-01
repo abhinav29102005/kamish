@@ -184,13 +184,13 @@ impl PersistentConsensusState {
                 .map(|m| m.len() == 0)
                 .unwrap_or(true);
 
-        if main_empty_or_missing && tmp_file.exists() {
-            if let Ok(content) = std::fs::read(&tmp_file)
-                && let Ok(state) = serde_json::from_slice::<Self>(&content)
-            {
-                let _ = std::fs::rename(&tmp_file, &main_file);
-                return Ok(state);
-            }
+        if main_empty_or_missing
+            && tmp_file.exists()
+            && let Ok(content) = std::fs::read(&tmp_file)
+            && let Ok(state) = serde_json::from_slice::<Self>(&content)
+        {
+            let _ = std::fs::rename(&tmp_file, &main_file);
+            return Ok(state);
         }
 
         // 2. Normal read from main file

@@ -36,11 +36,6 @@ pub mod metrics;
 pub mod quorum_manager;
 pub mod retention;
 pub mod tls;
-pub use quorum_manager::{
-    PeerReplicaStatus, QuorumAppendRequest, QuorumAppendResponse, QuorumHeartbeatRequest,
-    QuorumHeartbeatResponse, QuorumReplicationManager, QuorumStatusResponse, QuorumVoteRequest,
-    QuorumVoteResponse, spawn_quorum_heartbeat_worker,
-};
 pub use catalog::{TenantCatalog, TopicMetadata};
 pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig, TopicConfig};
 pub use consumer_group::{
@@ -49,6 +44,11 @@ pub use consumer_group::{
     LeaveGroupRequest, LeaveGroupResponse,
 };
 pub use metrics::BrokerMetricsRegistry;
+pub use quorum_manager::{
+    PeerReplicaStatus, QuorumAppendRequest, QuorumAppendResponse, QuorumHeartbeatRequest,
+    QuorumHeartbeatResponse, QuorumReplicationManager, QuorumStatusResponse, QuorumVoteRequest,
+    QuorumVoteResponse, spawn_quorum_heartbeat_worker,
+};
 pub use retention::{
     RetentionCoordinator, RetentionMetrics, TopicRetentionPolicy, spawn_retention_worker,
 };
@@ -760,7 +760,11 @@ impl BrokerServer {
 
     pub fn with_ack_level(mut self, ack_level: AckLevel) -> Self {
         self.ack_level = ack_level;
-        if let Ok(mgr) = QuorumReplicationManager::new(self.quorum.group_config().cloned(), &self.data_dir, ack_level) {
+        if let Ok(mgr) = QuorumReplicationManager::new(
+            self.quorum.group_config().cloned(),
+            &self.data_dir,
+            ack_level,
+        ) {
             self.quorum = Arc::new(mgr);
         }
         self
@@ -775,6 +779,11 @@ impl BrokerServer {
     /// Returns a copy of all committed consumer checkpoints across all groups and topics.
     pub fn get_all_consumer_checkpoints(&self) -> HashMap<(String, String, u32), u64> {
         self.consumer_checkpoints.read().unwrap().clone()
+    }
+
+    /// Returns the active data directory path where partitions and logs reside.
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
     }
 
     /// Returns a copy of all registered destination outbox channels.
@@ -1733,9 +1742,13 @@ impl BrokerServer {
                 offset,
                 quorum_timeout,
             )?;
-            self.metrics.quorum_appends_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.metrics
+                .quorum_appends_total
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         } else {
-            let _ = self.quorum.advance_commit_index(&req.topic, req.partition, offset);
+            let _ = self
+                .quorum
+                .advance_commit_index(&req.topic, req.partition, offset);
         }
 
         Ok(ProduceResponse {
@@ -1806,14 +1819,18 @@ impl BrokerServer {
         }
 
         let log = self.get_or_create_log(&req.topic, req.partition, 1)?;
-        let visible_hwm = if self.quorum.is_configured() || self.ack_level == AckLevel::InRegionQuorum {
-            log.high_watermark().min(self.quorum.get_commit_index(&req.topic, req.partition))
-        } else {
-            log.high_watermark()
-        };
+        let visible_hwm =
+            if self.quorum.is_configured() || self.ack_level == AckLevel::InRegionQuorum {
+                log.high_watermark()
+                    .min(self.quorum.get_commit_index(&req.topic, req.partition))
+            } else {
+                log.high_watermark()
+            };
 
         let mut records = if req.start_offset < visible_hwm {
-            let max_fetch = req.max_records.min((visible_hwm - req.start_offset) as usize);
+            let max_fetch = req
+                .max_records
+                .min((visible_hwm - req.start_offset) as usize);
             log.read(req.start_offset, max_fetch)
         } else {
             Vec::new()
@@ -2582,17 +2599,17 @@ impl BrokerServer {
                 Ok(res) => BrokerResponse::QuorumAppend(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
-            BrokerRequest::QuorumHeartbeat(req) => match self.quorum.handle_quorum_heartbeat(req, self) {
-                Ok(res) => BrokerResponse::QuorumHeartbeat(res),
-                Err(e) => BrokerResponse::Error(e.to_string()),
-            },
+            BrokerRequest::QuorumHeartbeat(req) => {
+                match self.quorum.handle_quorum_heartbeat(req, self) {
+                    Ok(res) => BrokerResponse::QuorumHeartbeat(res),
+                    Err(e) => BrokerResponse::Error(e.to_string()),
+                }
+            }
             BrokerRequest::QuorumVote(req) => match self.quorum.handle_quorum_vote(req, self) {
                 Ok(res) => BrokerResponse::QuorumVote(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
-            BrokerRequest::QuorumStatus => {
-                BrokerResponse::QuorumStatus(self.quorum.status(self))
-            }
+            BrokerRequest::QuorumStatus => BrokerResponse::QuorumStatus(self.quorum.status(self)),
             BrokerRequest::Ping => BrokerResponse::Pong,
         }
     }

@@ -207,17 +207,20 @@ export default function KamishDragon3D({ isFlameOn = false, isShadowForm = false
       const delta = clock.getDelta();
       const elapsedTime = clock.getElapsedTime();
 
-      // Play Blender Wing Animation
-      if (mixer) {
+      // Check prefers-reduced-motion
+      const prefersReducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // Play Blender Wing Animation (suppressed if reduced motion is preferred)
+      if (mixer && !prefersReducedMotion) {
         mixer.update(delta);
       }
 
       // Harmonized Aerodynamic Body Lift & Pitch synced with wing stroke
-      const flightSpeed = 0.92 * (2 * Math.PI / 3.0); // ~1.93 rad/s (matches ~2.6s wing cycle)
-      const liftY = Math.sin(elapsedTime * flightSpeed) * 0.055;
-      const pitchX = Math.cos(elapsedTime * flightSpeed) * 0.032;
-      const bankedYaw = Math.sin(elapsedTime * (flightSpeed * 0.35)) * 0.05;
-      const rollZ = Math.sin(elapsedTime * (flightSpeed * 0.5)) * 0.02;
+      const flightSpeed = prefersReducedMotion ? 0 : 0.92 * (2 * Math.PI / 3.0);
+      const liftY = prefersReducedMotion ? 0 : Math.sin(elapsedTime * flightSpeed) * 0.055;
+      const pitchX = prefersReducedMotion ? 0 : Math.cos(elapsedTime * flightSpeed) * 0.032;
+      const bankedYaw = prefersReducedMotion ? 0 : Math.sin(elapsedTime * (flightSpeed * 0.35)) * 0.05;
+      const rollZ = prefersReducedMotion ? 0 : Math.sin(elapsedTime * (flightSpeed * 0.5)) * 0.02;
 
       dragonRoot.position.y = liftY;
       dragonRoot.rotation.x = pitchX;
@@ -309,8 +312,71 @@ export default function KamishDragon3D({ isFlameOn = false, isShadowForm = false
     };
   }, []);
 
+  if (isWebGlError) {
+    return (
+      <div
+        role="img"
+        aria-label="Kamish Sovereign Dragon (Static graphic fallback)"
+        style={{
+          position: 'relative',
+          width: '100%',
+          height: '100%',
+          minHeight: '300px',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'radial-gradient(circle, rgba(16,8,32,0.92) 0%, rgba(9,4,18,0.98) 100%)',
+          border: '1px solid var(--border-glow, rgba(168, 85, 247, 0.3))',
+          borderRadius: '8px',
+          padding: '2rem',
+          userSelect: 'none',
+        }}
+      >
+        <svg
+          width="120"
+          height="120"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#c084fc"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+        </svg>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '1rem',
+            color: 'var(--text-bright, #f3e8ff)',
+            letterSpacing: '0.15em',
+            marginTop: '1rem',
+            fontWeight: 700,
+          }}
+        >
+          KAMISH SOVEREIGN DRAGON
+        </div>
+        <div
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.75rem',
+            color: 'var(--text-dim, #a855f7)',
+            marginTop: '0.4rem',
+            letterSpacing: '0.08em',
+          }}
+        >
+          HARDWARE ACCELERATION DISABLED · GRAPHIC FALLBACK
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
+      role="img"
+      aria-label="3D animated Kamish Dragon representing cluster consensus and sovereignty"
       style={{
         position: 'relative',
         width: '100%',

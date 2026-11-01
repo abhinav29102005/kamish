@@ -48,7 +48,9 @@ pub enum OwnershipError {
     #[error("Node is not the in-region partition leader (current leader: {leader:?})")]
     NotLeader { leader: Option<String> },
 
-    #[error("In-region log history diverged: local offset {local_offset}, incoming offset {incoming_offset}")]
+    #[error(
+        "In-region log history diverged: local offset {local_offset}, incoming offset {incoming_offset}"
+    )]
     HistoryDiverged {
         local_offset: u64,
         incoming_offset: u64,
@@ -70,8 +72,8 @@ use kamish_log::{PartitionLog, RecordContext};
 
 pub mod quorum;
 pub use quorum::{
-    calculate_quorum_frontier, PersistentConsensusState, ReplicaGroupConfig, ReplicaPeerConfig,
-    ReplicaRole,
+    PersistentConsensusState, ReplicaGroupConfig, ReplicaPeerConfig, ReplicaRole,
+    calculate_quorum_frontier,
 };
 
 /// In-region 3-replica quorum group enforcing INV-2, INV-3, W04, and W20.

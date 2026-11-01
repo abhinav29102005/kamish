@@ -96,9 +96,7 @@ impl BrokerMetricsRegistry {
             self.fetch_error_total.load(Ordering::Relaxed)
         ));
 
-        out.push_str(
-            "# HELP kamish_fetch_bytes_total Total payload bytes read from broker log.\n",
-        );
+        out.push_str("# HELP kamish_fetch_bytes_total Total payload bytes read from broker log.\n");
         out.push_str("# TYPE kamish_fetch_bytes_total counter\n");
         out.push_str(&format!(
             "kamish_fetch_bytes_total{{region=\"{}\"}} {}\n",
@@ -239,7 +237,9 @@ impl BrokerMetricsRegistry {
 
         // In-Region Quorum Consensus metrics
         let q_status = broker.quorum.status(broker);
-        out.push_str("# HELP kamish_quorum_configured Whether in-region replica group is configured.\n");
+        out.push_str(
+            "# HELP kamish_quorum_configured Whether in-region replica group is configured.\n",
+        );
         out.push_str("# TYPE kamish_quorum_configured gauge\n");
         out.push_str(&format!(
             "kamish_quorum_configured{{region=\"{}\"}} {}\n",
@@ -252,23 +252,29 @@ impl BrokerMetricsRegistry {
         out.push_str(&format!(
             "kamish_quorum_is_leader{{region=\"{}\"}} {}\n",
             region,
-            if q_status.role == kamish_own::ReplicaRole::Leader { 1 } else { 0 }
+            if q_status.role == kamish_own::ReplicaRole::Leader {
+                1
+            } else {
+                0
+            }
         ));
 
-        out.push_str("# HELP kamish_quorum_voters_total Total voting nodes in the regional group.\n");
+        out.push_str(
+            "# HELP kamish_quorum_voters_total Total voting nodes in the regional group.\n",
+        );
         out.push_str("# TYPE kamish_quorum_voters_total gauge\n");
         out.push_str(&format!(
             "kamish_quorum_voters_total{{region=\"{}\"}} {}\n",
-            region,
-            q_status.total_voters
+            region, q_status.total_voters
         ));
 
-        out.push_str("# HELP kamish_quorum_size Strict majority quorum size required for durable ack.\n");
+        out.push_str(
+            "# HELP kamish_quorum_size Strict majority quorum size required for durable ack.\n",
+        );
         out.push_str("# TYPE kamish_quorum_size gauge\n");
         out.push_str(&format!(
             "kamish_quorum_size{{region=\"{}\"}} {}\n",
-            region,
-            q_status.quorum_size
+            region, q_status.quorum_size
         ));
 
         out.push_str("# HELP kamish_quorum_appends_total Total produce appends requiring in-region quorum.\n");
