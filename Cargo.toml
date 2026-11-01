@@ -15,6 +15,7 @@ members = [
     "cmd/kamish-broker",
     "cmd/kamish-agent",
     "cmd/kamish-ctl",
+    "cmd/kamish-gateway",
 ]
 
 [workspace.package]

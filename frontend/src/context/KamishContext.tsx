@@ -12,6 +12,7 @@ import type {
   ScenarioId,
 } from '../types';
 import { computeAuditEntryHash, GENESIS_HASH } from '../utils/crypto';
+import gatewayClient, { type GatewayUser, type GatewayStatus, type AuthorityState } from '../utils/gatewayClient';
 import { validateDemoPolicy } from '../utils/demoPolicy.js';
 
 const INITIAL_NODES: Record<RegionId, RegionNodeState> = {
@@ -150,6 +151,14 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     steps: [],
     logs: [],
   });
+
+  // Phase 5 Gateway states
+  const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
+  const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
+  const [gatewayAuthority, setGatewayAuthority] = useState<AuthorityState | null>(null);
+  const [currentUser, setCurrentUser] = useState<GatewayUser | null>(() => gatewayClient.getCurrentUser());
+  const [gatewayError, setGatewayError] = useState<string | null>(null);
+  const [isSessionExpired, setIsSessionExpired] = useState<boolean>(false);
 
   const ledgerRef = useRef<AuditRecord[]>([]);
   const auditQueue = useRef<Promise<void>>(Promise.resolve());
@@ -387,7 +396,83 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   // Produce a custom event
-  const produceCustomEvent = async (
+  
+  // Phase 5 Gateway telemetry refresh
+  const refreshLiveTelemetry = async () => {
+    try {
+      const [status, authority, streams] = await Promise.all([
+        gatewayClient.getStatus(),
+        gatewayClient.getAuthority(),
+        gatewayClient.getStreams(),
+      ]);
+
+      setGatewayStatus(status);
+      setGatewayAuthority(authority);
+      setGatewayError(null);
+      setIsSessionExpired(false);
+
+      setNodes((prev) => {
+        const updated = { ...prev };
+        if (updated[status.region as RegionId]) {
+          updated[status.region as RegionId] = {
+            ...updated[status.region as RegionId],
+            status: status.status === "HEALTHY" ? "HEALTHY" : "DEGRADED",
+            activeEpoch: authority.ownerships[0]?.epoch || updated[status.region as RegionId].activeEpoch,
+            leaseExpiresInSec: authority.ownerships[0]?.active_lease ? 30.0 : 0.0,
+          };
+        }
+        return updated;
+      });
+
+      if (streams.streams.length > 0) {
+        const stream0 = streams.streams[0];
+        const lagUs = stream0.replication_lags["US_EAST"] || 0;
+        setCurrentTelemetry((prev) => ({
+          ...prev,
+          replicationLag: lagUs,
+          remoteWatermark: lagUs,
+        }));
+      }
+
+      if (gatewayClient.isAuthenticated() && !currentUser) {
+        gatewayClient.getMe().then(me => setCurrentUser(me.user)).catch(() => {});
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes("Session expired")) {
+        setIsSessionExpired(true);
+      } else {
+        setGatewayError(err.message || "Gateway disconnected");
+      }
+    }
+  };
+
+  const toggleMode = async () => {
+    const nextMode = isLiveMode ? "DEMO" : "LIVE";
+    try {
+      if (gatewayClient.isAuthenticated()) {
+        await gatewayClient.setMode(nextMode);
+      }
+      setIsLiveMode(nextMode === "LIVE");
+    } catch {
+      setIsLiveMode(nextMode === "LIVE");
+    }
+  };
+
+  const loginToGateway = async (u: string, p: string) => {
+    const res = await gatewayClient.login(u, p);
+    setCurrentUser(res.user);
+    setIsSessionExpired(false);
+    setGatewayError(null);
+    await refreshLiveTelemetry();
+  };
+
+  const logoutFromGateway = async () => {
+    await gatewayClient.logout();
+    setCurrentUser(null);
+    setIsSessionExpired(false);
+  };
+
+const produceCustomEvent = async (
     topic: string,
     key: string,
     policy: ResidencyPolicy,
@@ -856,9 +941,21 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         resetCluster,
         produceCustomEvent,
         verifyAuditLedgerIntegrity,
+        isLiveMode,
+        toggleMode,
+        gatewayStatus,
+        gatewayAuthority,
+        currentUser,
+        gatewayError,
+        isSessionExpired,
+        loginToGateway,
+        logoutFromGateway,
+        refreshLiveTelemetry,
       }}
     >
       {children}
     </KamishContext.Provider>
   );
 };
+
+export { useKamish } from "./useKamish";

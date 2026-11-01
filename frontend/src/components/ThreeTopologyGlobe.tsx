@@ -40,6 +40,7 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
   const { nodes, wanDelayMs, isPartitioned, adaptiveRoutingActive, isShadowMonarchMode } = useKamish();
   const [selectedRegion, setSelectedRegion] = useState<RegionId>('EU_WEST');
   const [autoRotate, setAutoRotate] = useState<boolean>(true);
+  const [isWebGlError, setIsWebGlError] = useState<boolean>(false);
 
   // References to mutable Three.js objects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -117,12 +118,19 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
     camera.position.set(0, isGlobalBackground ? 4 : 8, isGlobalBackground ? 26 : 24);
     cameraRef.current = camera;
 
-    // 3. Renderer setup
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    rendererRef.current = renderer;
+    // 3. Renderer setup with WebGL fallback
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      rendererRef.current = renderer;
+    } catch (e) {
+      console.warn("WebGL renderer creation failed for Globe:", e);
+      setIsWebGlError(true);
+      return;
+    }
 
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
@@ -552,6 +560,21 @@ export const ThreeTopologyGlobe: React.FC<ThreeTopologyGlobeProps> = ({
   }, [wanDelayMs, isPartitioned, adaptiveRoutingActive, isShadowMonarchMode]);
 
   const currentNode = nodes[selectedRegion];
+
+  if (isWebGlError) {
+    return (
+      <div className={`relative ${isGlobalBackground ? "fixed inset-0 pointer-events-none z-0" : "w-full h-full min-h-[480px]"} flex items-center justify-center bg-[#05020c]`}>
+        <div className="text-center font-mono p-6 border border-purple-500/30 rounded-xl bg-black/60 max-w-md pointer-events-auto">
+          <Globe className="w-12 h-12 text-purple-400 mx-auto mb-3" />
+          <h3 className="text-sm font-bold text-white mb-1">2D WAN TOPOLOGY SCHEMATIC</h3>
+          <p className="text-xs text-slate-400 mb-3">EU_WEST (Leader) ↔ US_EAST (Replica) ↔ AP_SOUTH (Relay)</p>
+          <span className="text-[10px] text-purple-400 border border-purple-500/20 px-2 py-0.5 rounded">
+            WebGL Acceleration Offline · High-Contrast Fallback
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={isGlobalBackground ? "fixed inset-0 w-full h-full pointer-events-none z-0 overflow-hidden select-none" : "topology-card relative overflow-hidden flex flex-col h-full"}>
