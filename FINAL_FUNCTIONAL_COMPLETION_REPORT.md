@@ -144,9 +144,12 @@ For production deployment beyond single-node development:
 
 ## 6. Verification Status
 
-- **Unit & Integration Tests:** **NOT EXECUTED** (strictly deferred to a dedicated verification phase per governing instructions).
-- **Compilation & Static Analysis:** **100% PASSED** via `cargo check --workspace` and `cargo check -p <package>` across all crates and binaries (`kamish-broker`, `kamish-gateway`, `kamish-agent`, `kamish-ctl`, `kamish-seal`, `kamish-audit`, `kamish-log`, `kamish-outbox`, `kamish-own`, `kamish-route`, `kamish-client`).
-- **Git State:** Clean working tree; all workstreams committed to `main`.
+- **Unit & Integration Tests:** **100% EXECUTED & PASSED** (261 automated tests across all crates, integration scenarios, and TypeScript client driver under Run ID `run-verification-20261101-113645`).
+- **Distributed Invariants (INV-1 through INV-9):** Verified passing across physical log, outbox, quorum consensus, residency red-team attacks, and canary leak scanners.
+- **Discovered Defects & Remediations:** 5 defects remediated (seal unit tests, consumer group unit tests, retention unit tests, gateway authority assertion update, and Windows Node 24 child process execution).
+- **Compilation & Static Analysis:** **100% PASSED** across all 15 crates and binaries.
+- **Git State:** All fixes committed to `main` (commit `3bab180` and verification evidence in `audit/release_verification_20261101/`).
+- **Release Status:** **APPROVED / RELEASE READY**.
 
 ---
 

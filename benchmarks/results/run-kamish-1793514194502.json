@@ -1,0 +1,31 @@
+{
+  "run_id": "run-kamish-1793514194502",
+  "system": "kamish",
+  "status": "CONFIGURED_UNEXECUTED",
+  "evidence_type": "BASELINE_CONFIGURATION_ONLY",
+  "git_commit": "b4313b30a4d8d5e18c70f5551bf6137055397616",
+  "timestamp": "2026-11-01T06:23:14.562Z",
+  "topology": {
+    "regions": [
+      "EU_WEST",
+      "US_EAST",
+      "AP_SOUTH"
+    ],
+    "simulated_rtt_ms": 72,
+    "packet_loss_rate": 0.001
+  },
+  "workload": {
+    "producers": 4,
+    "record_size_bytes": 1024,
+    "target_rate_msg_sec": 5000,
+    "duration_sec": 60
+  },
+  "durability_level": "LeaderFsync (local NVMe fsync before producer ACK; async durable WAN outbox replication)",
+  "prerequisites": {
+    "all_met": false,
+    "unmet_dependencies": [
+      "Toxiproxy CLI not found in PATH for synthetic inter-region WAN delay simulation"
+    ]
+  },
+  "measured_results": null
+}

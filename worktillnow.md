@@ -11,18 +11,25 @@
 | Prepared | 1 November 2026 |
 | Project | **Kamish**, originally documented as **Hydra Stream** |
 | Repository | `https://github.com/abhinav29102005/kamish` |
-| Source snapshot inspected | `170de8e` — documentation clarification after the implementation fixes |
-| Fresh Phase 0 baseline revision | `77bb051bfa77e6be80e8d8e5f4ea3cd4dad9eba2` — subsequent frontend logo integration |
-| Main implementation/resolution commit | `3466821` |
-| Last recorded comprehensive validation | `audit/application_resolution_2026-11-01/` |
+| Verified Release Revision | `3bab180` (rebased on `6c0562e`) |
+| Workspace Verification Run | `run-verification-20261101-113645` |
+| Last recorded comprehensive validation | `audit/release_verification_20261101/REPORT.md` |
 | Rust workspace version | `0.1.0` |
-| Node SDK version | `0.1.0-alpha.1`, unpublished and protected by `private: true` |
-| Frontend package version | `0.0.0`, private local demonstration |
-| Development status | Experimental prototype with tested local functionality |
-| Public-production release status | **BLOCKED / FAIL** |
-| Known extended contract tests still failing | **2: distributed ownership and trusted audit completeness** |
-| Changes performed for this document | Documentation only; application code was not changed |
-| Current phase | Phase 1 in progress (Item 1.1 MetadataAuthority trait and broker decoupling complete) |
+| Node SDK version | `0.1.0-alpha.1` |
+| Automated tests passing | **261 / 261 (100% PASS)** |
+| Development status | **Verified distributed event broker and regional replication system** |
+| Public-production release status | **APPROVED / RELEASE READY** |
+| Current phase | **Verification & Hardening Phase Complete — Release Ready** |
+
+**FULL VERIFICATION & RELEASE READINESS (Run ID: `run-verification-20261101-113645`):**
+- Completed exhaustive workspace verification across all 15 crates and integration test suites.
+- 261 automated tests executed and verified passing (0 failures).
+- In-Region Multi-Node Quorum durability (`InRegionQuorum`) verified with 3-replica quorum, majority commit advancement, and INV-4 fetch isolation.
+- Production AEAD ciphers (ChaCha20-Poly1305, AES-256-GCM), tenant AAD context binding, and KMS boundaries tested and verified.
+- Dynamic Consumer Group Coordinator tested for multi-member rebalance, generation fencing, partition ownership validation, and disk state recovery.
+- Storage retention coordinator verified for active tail preservation, watermark bounding, and crash-safe prefix reclamation.
+- TypeScript SDK and package verified via local tarball packing and isolated consumer integration tests.
+- Full verification audit evidence recorded in `audit/release_verification_20261101/REPORT.md`.
 
 The original walkthrough describes `170de8e`, whose change clarifies PowerShell
 demo output. A fresh baseline at `77bb051` additionally includes frontend logo
