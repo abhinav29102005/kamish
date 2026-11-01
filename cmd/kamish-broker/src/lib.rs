@@ -26,7 +26,7 @@ use kamish_meta::{
 use kamish_outbox::{BackpressureRule, DestinationOutbox, OutboxError, OutboxRange};
 use kamish_policy::DestinationMode;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 pub mod catalog;
@@ -272,6 +272,8 @@ pub struct BrokerServer {
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
     pub clock: Arc<dyn MonotonicClock>,
     pub catalog: Arc<RwLock<TenantCatalog>>,
+    owned_partitions: Arc<RwLock<HashSet<(String, u32)>>>,
+    renewal_shutdown: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 impl BrokerServer {
@@ -348,6 +350,7 @@ impl BrokerServer {
         }
 
         let catalog = Arc::new(RwLock::new(TenantCatalog::new()));
+        let (renewal_tx, _) = tokio::sync::watch::channel(false);
         let broker = Self {
             region: region_str,
             region_id,
@@ -363,6 +366,10 @@ impl BrokerServer {
             sessions: Arc::new(StripedStore::new()),
             partition_operations: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
+            clock: Arc::new(SystemMonotonicClock::new()),
+            catalog,
+            owned_partitions: Arc::new(RwLock::new(HashSet::new())),
+            renewal_shutdown: Arc::new(renewal_tx),
         };
         for entry in std::fs::read_dir(&broker.data_dir)? {
             let entry = entry?;
@@ -433,7 +440,8 @@ impl BrokerServer {
         lease_duration_ms: i64,
     ) -> Result<PartitionOwnership, BrokerError> {
         let stream = StreamId::new(topic, partition);
-        self.meta
+        let ownership = self
+            .meta
             .compare_and_swap_epoch(
                 &stream,
                 expected_epoch,
@@ -452,7 +460,12 @@ impl BrokerServer {
                     BrokerError::PolicyDenied("prior_owner_lease_active".into())
                 }
                 other => BrokerError::Authority(other.to_string()),
-            })
+            })?;
+        self.owned_partitions
+            .write()
+            .unwrap()
+            .insert((topic.to_string(), partition));
+        Ok(ownership)
     }
 
     /// Reacquires or renews local write authority for a persisted stream belonging to this region.
@@ -463,14 +476,157 @@ impl BrokerServer {
         lease_duration_ms: i64,
     ) -> Result<PartitionOwnership, BrokerError> {
         let stream = StreamId::new(topic, partition);
-        self.meta
+        let ownership = self
+            .meta
             .reacquire_ownership(&stream, &self.region, lease_duration_ms)
             .map_err(|e| match e {
                 kamish_meta::MetaError::LeaseConflict { .. } => {
                     BrokerError::PolicyDenied("prior_owner_lease_active".into())
                 }
                 other => BrokerError::Authority(other.to_string()),
-            })
+            })?;
+        self.owned_partitions
+            .write()
+            .unwrap()
+            .insert((topic.to_string(), partition));
+        Ok(ownership)
+    }
+
+    /// Returns the currently owned partitions actively tracked for lease renewal.
+    pub fn owned_partitions(&self) -> Vec<(String, u32)> {
+        self.owned_partitions
+            .read()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Explicitly registers a partition into the proactive lease renewal set.
+    pub fn register_owned_partition(&self, topic: &str, partition: u32) {
+        self.owned_partitions
+            .write()
+            .unwrap()
+            .insert((topic.to_string(), partition));
+    }
+
+    /// Explicitly unregisters a partition from proactive lease renewal.
+    pub fn unregister_owned_partition(&self, topic: &str, partition: u32) {
+        self.owned_partitions
+            .write()
+            .unwrap()
+            .remove(&(topic.to_string(), partition));
+    }
+
+    /// Returns whether a partition is registered for active lease renewal.
+    pub fn is_partition_renewal_active(&self, topic: &str, partition: u32) -> bool {
+        self.owned_partitions
+            .read()
+            .unwrap()
+            .contains(&(topic.to_string(), partition))
+    }
+
+    /// Starts the proactive background lease renewal loop complying with `docs/CONTRACT.md` §2.3.2.
+    ///
+    /// Periodically renews all partitions in `owned_partitions` on monotonic schedule:
+    /// - `interval`: Renewal attempt interval (normative default: 3 seconds).
+    /// - `timeout`: Per-attempt operation timeout (normative default: 1 second).
+    /// - `lease_ttl_ms`: Target lease grant duration in milliseconds (normative default: 10_000 ms).
+    ///
+    /// Failed or timed-out renewals do NOT extend the local deadline. If a partition
+    /// ownership is superseded or fenced, it is automatically evicted from active renewal.
+    pub fn start_lease_renewal_worker(
+        self: &Arc<Self>,
+        interval: std::time::Duration,
+        timeout: std::time::Duration,
+        lease_ttl_ms: i64,
+    ) -> tokio::task::JoinHandle<()> {
+        let broker = Arc::clone(self);
+        let mut shutdown_rx = broker.renewal_shutdown.subscribe();
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    _ = ticker.tick() => {
+                        let partitions = broker.owned_partitions();
+                        if partitions.is_empty() {
+                            continue;
+                        }
+
+                        for (topic, partition) in partitions {
+                            let stream = StreamId::new(&topic, partition);
+                            let meta = Arc::clone(&broker.meta);
+                            let region = broker.region.clone();
+
+                            let renewal_future = tokio::task::spawn_blocking(move || {
+                                meta.reacquire_ownership(&stream, &region, lease_ttl_ms)
+                            });
+
+                            match tokio::time::timeout(timeout, renewal_future).await {
+                                Ok(Ok(Ok(_ownership))) => {
+                                    tracing::trace!(
+                                        topic = %topic,
+                                        partition = partition,
+                                        "Proactive partition lease renewed successfully"
+                                    );
+                                }
+                                Ok(Ok(Err(e))) => {
+                                    tracing::warn!(
+                                        topic = %topic,
+                                        partition = partition,
+                                        error = %e,
+                                        "Partition lease renewal rejected or failed"
+                                    );
+                                    if matches!(
+                                        e,
+                                        kamish_meta::MetaError::LeaseConflict { .. }
+                                            | kamish_meta::MetaError::PartitionNotFound { .. }
+                                            | kamish_meta::MetaError::StaleEpoch { .. }
+                                    ) {
+                                        tracing::error!(
+                                            topic = %topic,
+                                            partition = partition,
+                                            "Partition ownership was transferred or lost; removing from active renewal"
+                                        );
+                                        broker.unregister_owned_partition(&topic, partition);
+                                    }
+                                }
+                                Ok(Err(join_err)) => {
+                                    tracing::error!(
+                                        topic = %topic,
+                                        partition = partition,
+                                        error = %join_err,
+                                        "Lease renewal worker task panicked"
+                                    );
+                                }
+                                Err(_elapsed) => {
+                                    tracing::warn!(
+                                        topic = %topic,
+                                        partition = partition,
+                                        timeout_ms = timeout.as_millis(),
+                                        "Lease renewal timed out; retaining existing deadline without extension (§2.3.2)"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    _ = shutdown_rx.changed() => {
+                        if *shutdown_rx.borrow() {
+                            tracing::info!(region = %broker.region, "Lease renewal worker shutting down");
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// Signals the background lease renewal worker to terminate.
+    pub fn stop_lease_renewal(&self) {
+        let _ = self.renewal_shutdown.send(true);
     }
 
     /// Handles record ingestion without explicit client identity.

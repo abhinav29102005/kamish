@@ -132,7 +132,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let policy_cache = Arc::new(RwLock::new(cache));
     let audit_log = AuditLog::open(format!("{}/audit.log", config.data_dir))?;
     let enforcer = Arc::new(Enforcer::new(&config.region, policy_cache, audit_log));
-    let meta = Arc::new(MetadataStore::new());
+    let meta: Arc<dyn kamish_meta::MetadataAuthority> = if !config.metadata_endpoints.is_empty() {
+        info!(
+            endpoints = ?config.metadata_endpoints,
+            "Connecting to external etcd 3.7.3 metadata cluster"
+        );
+        let ca_cert = config.tls.as_ref().map(|t| t.ca_cert_path.as_str());
+        let client_cert = config.tls.as_ref().map(|t| t.cert_path.as_str());
+        let client_key = config.tls.as_ref().map(|t| t.key_path.as_str());
+        Arc::new(kamish_meta::EtcdMetadataAuthority::new(
+            config.metadata_endpoints.clone(),
+            ca_cert,
+            client_cert,
+            client_key,
+            None,
+        )?)
+    } else {
+        Arc::new(MetadataStore::new())
+    };
 
     let catalog = config.build_catalog();
     let broker = Arc::new(
@@ -145,6 +162,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?
         .with_limits(config.limits)
         .with_catalog(catalog),
+    );
+
+    // Start proactive lease renewal worker conforming to CONTRACT.md §2.3.2 (10s TTL, 3s interval, 1s timeout)
+    let renewal_task = broker.start_lease_renewal_worker(
+        std::time::Duration::from_secs(3),
+        std::time::Duration::from_secs(1),
+        10_000,
     );
 
     let bind_addr = format!("{}:{}", config.host, config.port);
@@ -165,9 +189,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tls_cfg.require_client_auth,
         )?;
         let acceptor = tokio_rustls::TlsAcceptor::from(server_tls_config);
-        broker.start_tls_listener(&bind_addr, acceptor).await?
+        broker.clone().start_tls_listener(&bind_addr, acceptor).await?
     } else {
-        broker.start_tcp_listener(&bind_addr).await?
+        broker.clone().start_tcp_listener(&bind_addr).await?
     };
 
     info!(
@@ -180,11 +204,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             info!("Received shutdown signal, terminating broker.");
+            broker.stop_lease_renewal();
+            let _ = renewal_task.await;
         }
         res = server_task => {
             if let Err(e) = res {
                 error!(error = %e, "Broker listener task aborted");
             }
+            broker.stop_lease_renewal();
+            let _ = renewal_task.await;
         }
     }
 
