@@ -149,3 +149,4 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   console.log(`[Manifest Generated]: ${outputFile}`);
   console.log(`[Status]: ${manifest.status} (${manifest.evidence_type})`);
 }
+

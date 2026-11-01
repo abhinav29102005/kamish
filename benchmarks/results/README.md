@@ -13,3 +13,4 @@ In accordance with Kamish's architectural reality and audit principles:
    - Multi-node in-region quorum durability is not claimed until intra-region cluster consensus is verified.
 3. **Artifact Immutability:**
    - Historical evidence files are preserved with unique run IDs (`run-<system>-<timestamp>.json`) and linked to the exact git commit SHA.
+
