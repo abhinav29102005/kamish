@@ -141,14 +141,12 @@ fn apply_security_headers(
         );
     }
 
-    // Determine whether origin is authorized via loopback dev or explicit allowed_origins list
-    let is_allowed = match req_origin {
-        Some(o) => {
-            let is_loopback = o.starts_with("http://localhost:") || o.starts_with("http://127.0.0.1:");
-            is_loopback || allowed_origins.iter().any(|allowed| allowed.trim() == o)
-        }
-        None => false,
-    };
+    // CORS is granted only to exact, explicitly configured origins. Local
+    // development should use the Vite same-origin proxy; direct-origin dev
+    // setups must opt in via --allowed-origins / KAMISH_GATEWAY_ALLOWED_ORIGINS.
+    let is_allowed = req_origin.is_some_and(|origin| {
+        allowed_origins.iter().any(|allowed| allowed.trim() == origin)
+    });
 
     if is_allowed {
         if let Some(o) = req_origin {
@@ -165,19 +163,7 @@ fn apply_security_headers(
                 );
             }
         }
-    } else if req_origin.is_none() && allowed_origins.is_empty() {
-        // Fallback default for local test clients without origin header
-        headers.insert("access-control-allow-origin", "http://localhost:5173".parse().unwrap());
-        headers.insert("access-control-allow-credentials", "true".parse().unwrap());
-        headers.insert(
-            "access-control-allow-headers",
-            "content-type, authorization, x-csrf-token".parse().unwrap(),
-        );
-        headers.insert(
-            "access-control-allow-methods",
-            "GET, POST, PUT, DELETE, OPTIONS".parse().unwrap(),
-        );
-    }
+
 }
 
 async fn security_middleware(
