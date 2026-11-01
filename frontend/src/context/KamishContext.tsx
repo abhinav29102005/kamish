@@ -359,6 +359,9 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Phase 5 Gateway telemetry refresh
   const refreshLiveTelemetry = async () => {
+    if (!gatewayClient.isAuthenticated()) {
+      return;
+    }
     try {
       const [status, authority, streams] = await Promise.all([
         gatewayClient.getStatus(),
@@ -464,7 +467,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const next = [...prev, sample];
         return next.length > 50 ? next.slice(next.length - 50) : next;
       });
-    }, 500);
+    }, isLiveMode ? 2500 : 500);
 
     return () => clearInterval(timer);
   }, [isLiveMode]);
