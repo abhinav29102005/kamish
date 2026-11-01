@@ -1,9 +1,13 @@
 # KAMISH — IMPLEMENTATION INVENTORY
 
-**Inspected Revision:** `3bab180` (Branch: `main`)  
+**Inspected Source Revision:** `3bab180` (Branch: `main` at test time)  
 **Date:** 2026-11-01  
 **Method:** Static Source Inspection, Git Commit History, Full Automated Test Suite Execution  
-**Status:** **AUTHORITATIVE POST-VERIFICATION INVENTORY (RELEASE READY)**
+**Status:** POST-VERIFICATION SOURCE INVENTORY — EXTERNAL/DEPLOYED VERIFICATION OPEN
+
+
+
+> **Evidence scope:** The verification report records 261/261 automated tests at source revision `3bab180`. The subsequent documentation/evidence revision is `aa5d652`; do not conflate these SHAs. Benchmark execution is recorded as `CONFIGURED_UNEXECUTED`, live cloud KMS/witness/etcd validation is not established by local tests, and producer deduplication is in-memory across process lifetime only. The frontend is hybrid live/demo and separately hosted frontend-to-gateway connectivity remains unverified. See [reconciliation report](audit/release_verification_20261101/RECONCILIATION_REPORT.md).
 
 ---
 
