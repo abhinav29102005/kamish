@@ -33,9 +33,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 pub mod catalog;
 pub mod config;
+pub mod consumer_group;
 pub mod tls;
 pub use catalog::{TenantCatalog, TopicMetadata};
 pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig, TopicConfig};
+pub use consumer_group::{
+    ConsumerGroup, ConsumerGroupCoordinator, GroupMember, GroupState, GroupSummary,
+    HeartbeatGroupRequest, HeartbeatGroupResponse, JoinGroupRequest, JoinGroupResponse,
+    LeaveGroupRequest, LeaveGroupResponse,
+};
 use std::pin::Pin;
 use thiserror::Error;
 pub use tls::{
@@ -83,6 +89,12 @@ pub enum BrokerError {
 
     #[error("Connection limit reached: server rejected connection (max {0})")]
     ConnectionLimitReached(usize),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Consumer group error: {0}")]
+    ConsumerGroup(String),
 }
 
 /// Helper function to parse region string into strongly-typed RegionId.
@@ -305,6 +317,10 @@ pub struct CommitOffsetRequest {
     pub topic: String,
     pub partition: u32,
     pub offset: u64,
+    #[serde(default)]
+    pub generation_id: Option<u32>,
+    #[serde(default)]
+    pub member_id: Option<String>,
 }
 
 /// Consumer-group offset fetch request (W22).
@@ -341,6 +357,13 @@ pub enum BrokerRequest {
         agreed_watermark: u64,
     },
     Heartbeat(HeartbeatRequest),
+    JoinGroup(JoinGroupRequest),
+    HeartbeatGroup(HeartbeatGroupRequest),
+    LeaveGroup(LeaveGroupRequest),
+    ListGroups,
+    DescribeGroup {
+        group_id: String,
+    },
     Ping,
 }
 
@@ -379,6 +402,11 @@ pub enum BrokerResponse {
         partition: u32,
         quarantined_count: usize,
     },
+    GroupJoined(JoinGroupResponse),
+    GroupHeartbeat(HeartbeatGroupResponse),
+    GroupLeft(LeaveGroupResponse),
+    GroupsListed(Vec<GroupSummary>),
+    GroupDescribed(Option<ConsumerGroup>),
     Pong,
     Error(String),
 }
@@ -485,6 +513,7 @@ pub struct BrokerServer {
     pub ack_level: AckLevel,
     pub key_provider: Option<Arc<dyn kamish_seal::KeyProvider>>,
     pub witness_publisher: Arc<kamish_audit::WitnessPublisher>,
+    pub consumer_groups: Arc<ConsumerGroupCoordinator>,
 }
 
 impl BrokerServer {
@@ -593,6 +622,7 @@ impl BrokerServer {
                 Arc::new(kamish_audit::UnconfiguredWitnessDestination),
                 10_000,
             )),
+            consumer_groups: Arc::new(ConsumerGroupCoordinator::new(&data_dir_buf)),
         };
 
         // Load existing consumer checkpoints from disk (W22)
@@ -650,6 +680,12 @@ impl BrokerServer {
 
     /// Commits consumer group offset with crash-safe durable persistence (W22).
     pub fn commit_offset(&self, req: CommitOffsetRequest) -> Result<u64, BrokerError> {
+        self.consumer_groups.validate_commit(
+            &req.group_id,
+            req.member_id.as_deref(),
+            req.generation_id,
+        )?;
+
         let mut checkpoints = self.consumer_checkpoints.write().unwrap();
         checkpoints.insert(
             (req.group_id.clone(), req.topic.clone(), req.partition),
@@ -2346,6 +2382,44 @@ impl BrokerServer {
                     offset,
                 }
             }
+            BrokerRequest::JoinGroup(req) => {
+                let topic_counts: HashMap<String, u32> = {
+                    let cat = self.catalog.read().unwrap();
+                    req.subscribed_topics
+                        .iter()
+                        .map(|t| (t.clone(), cat.get_topic(t).map(|m| m.partitions).unwrap_or(1)))
+                        .collect()
+                };
+                match self.consumer_groups.join_group(req, &topic_counts) {
+                    Ok(res) => BrokerResponse::GroupJoined(res),
+                    Err(e) => BrokerResponse::Error(e.to_string()),
+                }
+            }
+            BrokerRequest::HeartbeatGroup(req) => {
+                match self.consumer_groups.heartbeat(req) {
+                    Ok(res) => BrokerResponse::GroupHeartbeat(res),
+                    Err(e) => BrokerResponse::Error(e.to_string()),
+                }
+            }
+            BrokerRequest::LeaveGroup(req) => {
+                let topic_counts: HashMap<String, u32> = {
+                    let cat = self.catalog.read().unwrap();
+                    cat.topics
+                        .values()
+                        .map(|t| (t.topic.clone(), t.partitions))
+                        .collect()
+                };
+                match self.consumer_groups.leave_group(req, &topic_counts) {
+                    Ok(res) => BrokerResponse::GroupLeft(res),
+                    Err(e) => BrokerResponse::Error(e.to_string()),
+                }
+            }
+            BrokerRequest::ListGroups => {
+                BrokerResponse::GroupsListed(self.consumer_groups.list_groups())
+            }
+            BrokerRequest::DescribeGroup { group_id } => {
+                BrokerResponse::GroupDescribed(self.consumer_groups.describe_group(&group_id))
+            }
             BrokerRequest::PromotePartition {
                 topic,
                 partition,
@@ -2602,11 +2676,17 @@ impl BrokerServer {
                         writer.flush().await?;
                         continue;
                     }
-                    BrokerRequest::CommitOffset(_) | BrokerRequest::FetchOffset(_)
-                        if !identity.has_role("Consumer") =>
+                    BrokerRequest::CommitOffset(_)
+                    | BrokerRequest::FetchOffset(_)
+                    | BrokerRequest::JoinGroup(_)
+                    | BrokerRequest::HeartbeatGroup(_)
+                    | BrokerRequest::LeaveGroup(_)
+                    | BrokerRequest::ListGroups
+                    | BrokerRequest::DescribeGroup { .. }
+                        if !identity.has_role("Consumer") && !identity.has_role("Admin") =>
                     {
                         let err_resp = BrokerResponse::Error(format!(
-                            "Authorization denied: principal {:?} lacks Consumer role for offset checkpoints",
+                            "Authorization denied: principal {:?} lacks Consumer role for consumer operations",
                             identity.principal
                         ));
                         let mut serialized = serde_json::to_vec(&err_resp)?;

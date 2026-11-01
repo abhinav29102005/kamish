@@ -95,3 +95,53 @@ export interface ProducerOptions {
   /** Sequence/pending state is never silently evicted. New streams reject at this bound. */
   maxStreams?: number;
 }
+
+export interface JoinGroupRequest {
+  groupId: string;
+  memberId?: string;
+  clientId: string;
+  clientHost?: string;
+  protocolType?: string;
+  sessionTimeoutMs?: number;
+  subscribedTopics: readonly string[];
+}
+
+export interface JoinGroupResult {
+  groupId: string;
+  memberId: string;
+  generationId: number;
+  leaderId: string;
+  state: string;
+  assignedPartitions: Record<string, number[]>;
+}
+
+export interface HeartbeatGroupRequest {
+  groupId: string;
+  memberId: string;
+  generationId: number;
+}
+
+export interface LeaveGroupRequest {
+  groupId: string;
+  memberId: string;
+}
+
+export interface CommitOffsetRequest extends StreamRef {
+  groupId: string;
+  offset: bigint;
+  generationId?: number;
+  memberId?: string;
+}
+
+export interface FetchOffsetRequest extends StreamRef {
+  groupId: string;
+}
+
+export interface GroupSummary {
+  groupId: string;
+  state: string;
+  generationId: number;
+  memberCount: number;
+  leaderId: string | null;
+  subscribedTopics: string[];
+}

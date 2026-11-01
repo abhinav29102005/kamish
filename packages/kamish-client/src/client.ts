@@ -73,6 +73,99 @@ export class KamishClient {
     return fetchResult(await this.request(fetchWire(snapshot), false, options), snapshot, this.maxPayloadBytes);
   }
 
+  async joinGroup(request: import('./types.js').JoinGroupRequest, options: RequestOptions = {}): Promise<import('./types.js').JoinGroupResult> {
+    const wire = {
+      action: 'JoinGroup',
+      payload: {
+        group_id: request.groupId,
+        member_id: request.memberId ?? null,
+        client_id: request.clientId,
+        client_host: request.clientHost ?? null,
+        protocol_type: request.protocolType ?? 'consumer',
+        session_timeout_ms: request.sessionTimeoutMs ?? 10000,
+        subscribed_topics: Array.from(request.subscribedTopics),
+      },
+    };
+    const resp = await this.request(wire, true, options);
+    if (resp.status === 'GroupJoined' && typeof resp.payload === 'object' && resp.payload !== null) {
+      const p = resp.payload as Record<string, unknown>;
+      return {
+        groupId: String(p.group_id),
+        memberId: String(p.member_id),
+        generationId: Number(p.generation_id),
+        leaderId: String(p.leader_id),
+        state: String(p.state),
+        assignedPartitions: (p.assigned_partitions ?? {}) as Record<string, number[]>,
+      };
+    }
+    throw new ProtocolError(`Unexpected joinGroup response: ${JSON.stringify(resp)}`);
+  }
+
+  async heartbeatGroup(request: import('./types.js').HeartbeatGroupRequest, options: RequestOptions = {}): Promise<void> {
+    const wire = {
+      action: 'HeartbeatGroup',
+      payload: {
+        group_id: request.groupId,
+        member_id: request.memberId,
+        generation_id: request.generationId,
+      },
+    };
+    const resp = await this.request(wire, false, options);
+    if (resp.status !== 'GroupHeartbeat') {
+      throw new ProtocolError(`Unexpected heartbeatGroup response: ${JSON.stringify(resp)}`);
+    }
+  }
+
+  async leaveGroup(request: import('./types.js').LeaveGroupRequest, options: RequestOptions = {}): Promise<void> {
+    const wire = {
+      action: 'LeaveGroup',
+      payload: {
+        group_id: request.groupId,
+        member_id: request.memberId,
+      },
+    };
+    const resp = await this.request(wire, true, options);
+    if (resp.status !== 'GroupLeft') {
+      throw new ProtocolError(`Unexpected leaveGroup response: ${JSON.stringify(resp)}`);
+    }
+  }
+
+  async commitOffset(request: import('./types.js').CommitOffsetRequest, options: RequestOptions = {}): Promise<bigint> {
+    const wire = {
+      action: 'CommitOffset',
+      payload: {
+        group_id: request.groupId,
+        topic: request.topic,
+        partition: request.partition,
+        offset: Number(request.offset),
+        generation_id: request.generationId ?? null,
+        member_id: request.memberId ?? null,
+      },
+    };
+    const resp = await this.request(wire, true, options);
+    if (resp.status === 'OffsetCommitted' && typeof resp.payload === 'object' && resp.payload !== null) {
+      return BigInt((resp.payload as { offset: number }).offset);
+    }
+    throw new ProtocolError(`Unexpected commitOffset response: ${JSON.stringify(resp)}`);
+  }
+
+  async fetchOffset(request: import('./types.js').FetchOffsetRequest, options: RequestOptions = {}): Promise<bigint | null> {
+    const wire = {
+      action: 'FetchOffset',
+      payload: {
+        group_id: request.groupId,
+        topic: request.topic,
+        partition: request.partition,
+      },
+    };
+    const resp = await this.request(wire, false, options);
+    if (resp.status === 'OffsetFetched' && typeof resp.payload === 'object' && resp.payload !== null) {
+      const off = (resp.payload as { offset: number | null }).offset;
+      return off !== null && off !== undefined ? BigInt(off) : null;
+    }
+    throw new ProtocolError(`Unexpected fetchOffset response: ${JSON.stringify(resp)}`);
+  }
+
   async getWatermark(request: WatermarkRequest, options: RequestOptions = {}): Promise<bigint> {
     return watermarkResult(await this.request(watermarkWire(request), false, options));
   }
