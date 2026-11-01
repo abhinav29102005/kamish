@@ -1,0 +1,105 @@
+commit 9abaa440fb01f839352a1a1dc37c7cc95290e151
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 09:30:22 2026 +0530
+
+    docs: add deep reconnaissance audit report, implementation inventory, and remaining work backlog
+
+ DEEP_RECONNAISSANCE_REPORT.md | 390 ++++++++++++++++++++++++++++++++++++++++++
+ IMPLEMENTATION_INVENTORY.md   |  71 ++++++++
+ REMAINING_WORK_BACKLOG.md     | 149 ++++++++++++++++
+ worktillnow.md                |  17 ++
+ 4 files changed, 627 insertions(+)
+
+commit 6a5ef4a4802e613441cdc8a3ce5e225add236a2c
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 09:17:08 2026 +0530
+
+    docs: finalize functional completion reconnaissance, report, and section 34
+
+ FINAL_FUNCTIONAL_COMPLETION_REPORT.md   | 165 ++++++++++++++++++++++++++++++++
+ FUNCTIONAL_COMPLETION_RECONNAISSANCE.md |  70 +++++++++-----
+ worktillnow.md                          |  40 ++++++++
+ 3 files changed, 253 insertions(+), 22 deletions(-)
+
+commit 1908aa3835cd0124d629a7ccab8549b0969fbc02
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 09:14:49 2026 +0530
+
+    feat(broker,seal): enforce comprehensive backend RBAC, fsync consumer checkpoints, and document sealed AEAD contract
+
+ cmd/kamish-broker/src/lib.rs  | 66 ++++++++++++++++++++++++++++++++++++++++---
+ crates/kamish-seal/src/lib.rs |  6 +++-
+ 2 files changed, 67 insertions(+), 5 deletions(-)
+
+commit 7eb18b5ba9793c63c586529a2683583ead0d1215
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 09:14:31 2026 +0530
+
+    feat(agent): integrate circuit breaker observations and provenance-aware outbox advancement
+
+ cmd/kamish-agent/src/lib.rs | 70 +++++++++++++++++++++++++++++++++------------
+ 1 file changed, 51 insertions(+), 19 deletions(-)
+
+commit bb8a75b89b6fe5d86b525a7e286fbbb2eee3e93d
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 09:14:15 2026 +0530
+
+    feat(outbox,own): bind outbox watermark advancing to source provenance and bound quarantine storage
+
+ crates/kamish-outbox/src/lib.rs | 31 +++++++++++++++++++++++++++----
+ crates/kamish-own/src/lib.rs    |  7 +++++++
+ 2 files changed, 34 insertions(+), 4 deletions(-)
+
+commit 5b67864b7e5a9964f556a4c863e1eb7c989a54e6
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 08:57:12 2026 +0530
+
+    docs: append newline and test confirmation status in reconnaissance doc
+
+ FUNCTIONAL_COMPLETION_RECONNAISSANCE.md | 1 +
+ 1 file changed, 1 insertion(+)
+
+commit 5c4b011092f46dfc6a3a568c3f05530126b7c186
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 08:49:48 2026 +0530
+
+    docs: add consolidated functional completion reconnaissance report and section 33
+
+ FUNCTIONAL_COMPLETION_RECONNAISSANCE.md | 207 ++++++++++++++++++++++++++++++++
+ worktillnow.md                          |  41 +++++++
+ 2 files changed, 248 insertions(+)
+
+commit a9586b3f806008ff3395e4a7968a01644b46c787
+Merge: 01e183f 8949289
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 08:48:12 2026 +0530
+
+    Merge branch 'main' of https://github.com/abhinav29102005/kamish
+
+commit 01e183fc026a09c45413a08398c054bb45a5cdc9
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 08:48:03 2026 +0530
+
+    feat(gateway): add partition promotion, quarantine inspection, and reconciliation endpoints
+
+ cmd/kamish-gateway/src/lib.rs | 188 ++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 179 insertions(+), 9 deletions(-)
+
+commit 9f6dd63db484a56c6608211f57e82c8ac07ee9b1
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 08:47:48 2026 +0530
+
+    feat(agent): enforce ownership fencing on replication dispatch and wire retry worker
+
+ cmd/kamish-agent/src/lib.rs  | 47 ++++++++++++++++++++++++++++++++++++++++++++
+ cmd/kamish-agent/src/main.rs | 29 +++++++++++++++++++++++----
+ 2 files changed, 72 insertions(+), 4 deletions(-)
+
+commit 0895dd6bf975e092213f92726e15f7e650a993dd
+Author: Saksham Mishra <mishrasaksham080705@gmail.com>
+Date:   Sun Nov 1 08:47:31 2026 +0530
+
+    feat(broker): implement explicit ack durability levels and authoritative divergence quarantine
+
+ cmd/kamish-broker/src/lib.rs | 150 +++++++++++++++++++++++++++++++++----------
+ 1 file changed, 115 insertions(+), 35 deletions(-)
