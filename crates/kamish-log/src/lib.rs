@@ -586,6 +586,16 @@ impl PartitionLog {
         self.append_with_context(epoch, class_id, policy_version, payload, None)
     }
 
+    pub fn append_envelope(&self, envelope: RecordEnvelope) -> Result<u64, LogError> {
+        self.append_with_context(
+            envelope.epoch,
+            envelope.class_id,
+            envelope.policy_version,
+            envelope.payload,
+            envelope.context,
+        )
+    }
+
     pub fn append_with_context(
         &self,
         epoch: u64,

@@ -5,7 +5,8 @@
 //! - Bounded label cardinality (region, status, peer).
 //! - Zero leakage of sensitive key material, credentials, or plaintext payloads.
 //! - Complete coverage across produce, fetch, replication outbox, quarantine, ownership,
-//!   consumer groups, storage retention, audit witness, and sealed replication status.
+//!   consumer groups, storage retention, audit witness, sealed replication status, and
+//!   in-region quorum consensus replication.
 //! - Renders standard Prometheus text format 0.0.4 with `# HELP` and `# TYPE`.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -37,6 +38,10 @@ pub struct BrokerMetricsRegistry {
     pub consumer_offset_commits_total: AtomicU64,
     pub consumer_offset_fetches_total: AtomicU64,
     pub consumer_rebalances_total: AtomicU64,
+
+    // In-Region Quorum Consensus metrics
+    pub quorum_appends_total: AtomicU64,
+    pub quorum_appends_failed: AtomicU64,
 }
 
 impl BrokerMetricsRegistry {
@@ -66,7 +71,7 @@ impl BrokerMetricsRegistry {
         ));
 
         out.push_str(
-            "# HELP kamish_produce_bytes_total Total payload bytes committed by broker.\n",
+            "# HELP kamish_produce_bytes_total Total payload bytes written to broker log.\n",
         );
         out.push_str("# TYPE kamish_produce_bytes_total counter\n");
         out.push_str(&format!(
@@ -77,7 +82,7 @@ impl BrokerMetricsRegistry {
 
         // Fetch metrics
         out.push_str(
-            "# HELP kamish_fetch_requests_total Total fetch requests handled by broker.\n",
+            "# HELP kamish_fetch_requests_total Total fetch requests received by broker.\n",
         );
         out.push_str("# TYPE kamish_fetch_requests_total counter\n");
         out.push_str(&format!(
@@ -91,28 +96,78 @@ impl BrokerMetricsRegistry {
             self.fetch_error_total.load(Ordering::Relaxed)
         ));
 
-        // Outbox queue gauges
         out.push_str(
-            "# HELP kamish_outbox_queued_bytes Current bytes staged in destination outboxes.\n",
+            "# HELP kamish_fetch_bytes_total Total payload bytes read from broker log.\n",
         );
-        out.push_str("# TYPE kamish_outbox_queued_bytes gauge\n");
-        let outboxes = broker.get_all_outboxes();
-        for (peer, ob) in &outboxes {
+        out.push_str("# TYPE kamish_fetch_bytes_total counter\n");
+        out.push_str(&format!(
+            "kamish_fetch_bytes_total{{region=\"{}\"}} {}\n",
+            region,
+            self.fetch_bytes_total.load(Ordering::Relaxed)
+        ));
+
+        // Replication metrics
+        out.push_str(
+            "# HELP kamish_replication_in_records_total Records received from peer brokers.\n",
+        );
+        out.push_str("# TYPE kamish_replication_in_records_total counter\n");
+        out.push_str(&format!(
+            "kamish_replication_in_records_total{{region=\"{}\",status=\"success\"}} {}\n",
+            region,
+            self.replication_in_success_total.load(Ordering::Relaxed)
+        ));
+        out.push_str(&format!(
+            "kamish_replication_in_records_total{{region=\"{}\",status=\"conflict\"}} {}\n",
+            region,
+            self.replication_in_conflict_total.load(Ordering::Relaxed)
+        ));
+
+        // Outbox queue metrics
+        out.push_str(
+            "# HELP kamish_outbox_queue_depth_bytes Current bytes buffered in destination outbox.\n",
+        );
+        out.push_str("# TYPE kamish_outbox_queue_depth_bytes gauge\n");
+        let all_outboxes = broker.get_all_outboxes();
+        for (target, outbox) in &all_outboxes {
             out.push_str(&format!(
-                "kamish_outbox_queued_bytes{{region=\"{}\",peer=\"{}\"}} {}\n",
+                "kamish_outbox_queue_depth_bytes{{region=\"{}\",target=\"{}\"}} {}\n",
                 region,
-                peer,
-                ob.queued_bytes()
+                target,
+                outbox.queued_bytes()
+            ));
+        }
+
+        out.push_str(
+            "# HELP kamish_outbox_queue_depth_records Current records pending replication.\n",
+        );
+        out.push_str("# TYPE kamish_outbox_queue_depth_records gauge\n");
+        for (target, outbox) in &all_outboxes {
+            out.push_str(&format!(
+                "kamish_outbox_queue_depth_records{{region=\"{}\",target=\"{}\"}} {}\n",
+                region,
+                target,
+                outbox.queued_ranges()
             ));
         }
 
         // Quarantine metrics
-        out.push_str("# HELP kamish_quarantine_records_total Total divergent records isolated in quarantine.\n");
+        out.push_str("# HELP kamish_quarantine_records_total Quarantined divergent records isolated on disk.\n");
         out.push_str("# TYPE kamish_quarantine_records_total gauge\n");
         out.push_str(&format!(
             "kamish_quarantine_records_total{{region=\"{}\"}} {}\n",
             region,
             broker.quarantine.records().len()
+        ));
+
+        // Ownership metrics
+        out.push_str(
+            "# HELP kamish_ownership_promotions_total Total partition ownership failover promotions.\n",
+        );
+        out.push_str("# TYPE kamish_ownership_promotions_total counter\n");
+        out.push_str(&format!(
+            "kamish_ownership_promotions_total{{region=\"{}\"}} {}\n",
+            region,
+            self.ownership_promotions_total.load(Ordering::Relaxed)
         ));
 
         // Consumer Group metrics
@@ -180,6 +235,56 @@ impl BrokerMetricsRegistry {
             "kamish_sealed_replication_configured{{region=\"{}\"}} {}\n",
             region,
             if broker.key_provider.is_some() { 1 } else { 0 }
+        ));
+
+        // In-Region Quorum Consensus metrics
+        let q_status = broker.quorum.status(broker);
+        out.push_str("# HELP kamish_quorum_configured Whether in-region replica group is configured.\n");
+        out.push_str("# TYPE kamish_quorum_configured gauge\n");
+        out.push_str(&format!(
+            "kamish_quorum_configured{{region=\"{}\"}} {}\n",
+            region,
+            if q_status.configured { 1 } else { 0 }
+        ));
+
+        out.push_str("# HELP kamish_quorum_is_leader Whether local node is the active in-region partition leader.\n");
+        out.push_str("# TYPE kamish_quorum_is_leader gauge\n");
+        out.push_str(&format!(
+            "kamish_quorum_is_leader{{region=\"{}\"}} {}\n",
+            region,
+            if q_status.role == kamish_own::ReplicaRole::Leader { 1 } else { 0 }
+        ));
+
+        out.push_str("# HELP kamish_quorum_voters_total Total voting nodes in the regional group.\n");
+        out.push_str("# TYPE kamish_quorum_voters_total gauge\n");
+        out.push_str(&format!(
+            "kamish_quorum_voters_total{{region=\"{}\"}} {}\n",
+            region,
+            q_status.total_voters
+        ));
+
+        out.push_str("# HELP kamish_quorum_size Strict majority quorum size required for durable ack.\n");
+        out.push_str("# TYPE kamish_quorum_size gauge\n");
+        out.push_str(&format!(
+            "kamish_quorum_size{{region=\"{}\"}} {}\n",
+            region,
+            q_status.quorum_size
+        ));
+
+        out.push_str("# HELP kamish_quorum_appends_total Total produce appends requiring in-region quorum.\n");
+        out.push_str("# TYPE kamish_quorum_appends_total counter\n");
+        out.push_str(&format!(
+            "kamish_quorum_appends_total{{region=\"{}\"}} {}\n",
+            region,
+            broker.quorum.quorum_appends_total.load(Ordering::Relaxed)
+        ));
+
+        out.push_str("# HELP kamish_quorum_appends_failed_total Total in-region quorum appends failed or timed out.\n");
+        out.push_str("# TYPE kamish_quorum_appends_failed_total counter\n");
+        out.push_str(&format!(
+            "kamish_quorum_appends_failed_total{{region=\"{}\"}} {}\n",
+            region,
+            broker.quorum.quorum_appends_failed.load(Ordering::Relaxed)
         ));
 
         out

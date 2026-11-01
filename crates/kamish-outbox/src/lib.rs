@@ -398,6 +398,10 @@ impl DestinationOutbox {
         self.inner.read().unwrap().queued_bytes
     }
 
+    pub fn queued_ranges(&self) -> usize {
+        self.inner.read().unwrap().ranges.len()
+    }
+
     pub fn has_capacity(&self, additional_bytes: usize) -> bool {
         let inner = self.inner.read().unwrap();
         additional_bytes <= inner.max_bytes.saturating_sub(inner.queued_bytes)

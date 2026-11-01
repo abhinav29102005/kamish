@@ -42,6 +42,18 @@ pub enum OwnershipError {
     #[error("In-region quorum not reached: needed 2 of 3 replicas to persist, but got {persisted}")]
     QuorumNotReached { persisted: usize },
 
+    #[error("In-region quorum unavailable: {0}")]
+    QuorumUnavailable(String),
+
+    #[error("Node is not the in-region partition leader (current leader: {leader:?})")]
+    NotLeader { leader: Option<String> },
+
+    #[error("In-region log history diverged: local offset {local_offset}, incoming offset {incoming_offset}")]
+    HistoryDiverged {
+        local_offset: u64,
+        incoming_offset: u64,
+    },
+
     #[error(
         "Promotion frontier verification failed (W04): candidate watermark {candidate_hwm} < quorum committed frontier {quorum_frontier}"
     )]

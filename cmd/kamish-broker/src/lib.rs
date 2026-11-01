@@ -33,8 +33,14 @@ pub mod catalog;
 pub mod config;
 pub mod consumer_group;
 pub mod metrics;
+pub mod quorum_manager;
 pub mod retention;
 pub mod tls;
+pub use quorum_manager::{
+    PeerReplicaStatus, QuorumAppendRequest, QuorumAppendResponse, QuorumHeartbeatRequest,
+    QuorumHeartbeatResponse, QuorumReplicationManager, QuorumStatusResponse, QuorumVoteRequest,
+    QuorumVoteResponse, spawn_quorum_heartbeat_worker,
+};
 pub use catalog::{TenantCatalog, TopicMetadata};
 pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig, TopicConfig};
 pub use consumer_group::{
@@ -372,6 +378,10 @@ pub enum BrokerRequest {
     DescribeGroup {
         group_id: String,
     },
+    QuorumAppend(QuorumAppendRequest),
+    QuorumHeartbeat(QuorumHeartbeatRequest),
+    QuorumVote(QuorumVoteRequest),
+    QuorumStatus,
     Ping,
 }
 
@@ -415,6 +425,10 @@ pub enum BrokerResponse {
     GroupLeft(LeaveGroupResponse),
     GroupsListed(Vec<GroupSummary>),
     GroupDescribed(Option<ConsumerGroup>),
+    QuorumAppend(QuorumAppendResponse),
+    QuorumHeartbeat(QuorumHeartbeatResponse),
+    QuorumVote(QuorumVoteResponse),
+    QuorumStatus(QuorumStatusResponse),
     Pong,
     Error(String),
 }
@@ -524,6 +538,7 @@ pub struct BrokerServer {
     pub consumer_groups: Arc<ConsumerGroupCoordinator>,
     pub retention: Arc<RetentionCoordinator>,
     pub metrics: Arc<BrokerMetricsRegistry>,
+    pub quorum: Arc<QuorumReplicationManager>,
 }
 
 impl BrokerServer {
@@ -635,6 +650,11 @@ impl BrokerServer {
             consumer_groups: Arc::new(ConsumerGroupCoordinator::new(&data_dir_buf)),
             retention: Arc::new(RetentionCoordinator::new()),
             metrics: Arc::new(BrokerMetricsRegistry::new()),
+            quorum: Arc::new(QuorumReplicationManager::new(
+                None,
+                &data_dir_buf,
+                AckLevel::LeaderFsync,
+            )?),
         };
 
         // Load existing consumer checkpoints from disk (W22)
@@ -731,6 +751,21 @@ impl BrokerServer {
             .copied()
     }
     /// Configures custom server limits (frame size, payload size, connection limit).
+    pub fn with_replica_group(mut self, config: Option<kamish_own::ReplicaGroupConfig>) -> Self {
+        if let Ok(mgr) = QuorumReplicationManager::new(config, &self.data_dir, self.ack_level) {
+            self.quorum = Arc::new(mgr);
+        }
+        self
+    }
+
+    pub fn with_ack_level(mut self, ack_level: AckLevel) -> Self {
+        self.ack_level = ack_level;
+        if let Ok(mgr) = QuorumReplicationManager::new(self.quorum.group_config().cloned(), &self.data_dir, ack_level) {
+            self.quorum = Arc::new(mgr);
+        }
+        self
+    }
+
     pub fn with_limits(mut self, limits: ServerLimits) -> Self {
         self.connection_semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
         self.limits = limits;
@@ -1466,7 +1501,7 @@ impl BrokerServer {
                 committed_epoch: epoch,
                 sovereignty_allowed: true,
                 denial_reason: "idempotent_duplicate".to_string(),
-                ack_level: Some(AckLevel::LeaderFsync),
+                ack_level: Some(self.ack_level),
             });
         }
 
@@ -1688,6 +1723,21 @@ impl BrokerServer {
             }
         }
 
+        if self.ack_level == AckLevel::InRegionQuorum {
+            let quorum_timeout = std::time::Duration::from_millis(3000);
+            self.quorum.replicate_to_quorum_sync(
+                &req.topic,
+                req.partition,
+                epoch,
+                vec![committed_env.clone()],
+                offset,
+                quorum_timeout,
+            )?;
+            self.metrics.quorum_appends_total.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            let _ = self.quorum.advance_commit_index(&req.topic, req.partition, offset);
+        }
+
         Ok(ProduceResponse {
             base_offset: offset,
             count: 1,
@@ -1756,7 +1806,19 @@ impl BrokerServer {
         }
 
         let log = self.get_or_create_log(&req.topic, req.partition, 1)?;
-        let records = log.read(req.start_offset, req.max_records);
+        let visible_hwm = if self.quorum.is_configured() || self.ack_level == AckLevel::InRegionQuorum {
+            log.high_watermark().min(self.quorum.get_commit_index(&req.topic, req.partition))
+        } else {
+            log.high_watermark()
+        };
+
+        let mut records = if req.start_offset < visible_hwm {
+            let max_fetch = req.max_records.min((visible_hwm - req.start_offset) as usize);
+            log.read(req.start_offset, max_fetch)
+        } else {
+            Vec::new()
+        };
+        records.retain(|r| r.base_offset < visible_hwm);
         // Caller-supplied class is not authority for the records on disk. Deny
         // the entire response if any actual record cannot be served; do not leak
         // a permitted prefix before discovering a later restricted record.
@@ -1775,7 +1837,7 @@ impl BrokerServer {
             }
         }
         Ok(FetchResponse {
-            high_watermark: log.high_watermark(),
+            high_watermark: visible_hwm,
             records,
         })
     }
@@ -2516,6 +2578,21 @@ impl BrokerServer {
                 Ok(res) => BrokerResponse::Heartbeat(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
+            BrokerRequest::QuorumAppend(req) => match self.quorum.handle_quorum_append(req, self) {
+                Ok(res) => BrokerResponse::QuorumAppend(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::QuorumHeartbeat(req) => match self.quorum.handle_quorum_heartbeat(req, self) {
+                Ok(res) => BrokerResponse::QuorumHeartbeat(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::QuorumVote(req) => match self.quorum.handle_quorum_vote(req, self) {
+                Ok(res) => BrokerResponse::QuorumVote(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
+            BrokerRequest::QuorumStatus => {
+                BrokerResponse::QuorumStatus(self.quorum.status(self))
+            }
             BrokerRequest::Ping => BrokerResponse::Pong,
         }
     }
@@ -2753,6 +2830,24 @@ impl BrokerServer {
                         writer.flush().await?;
                         continue;
                     }
+                    BrokerRequest::QuorumAppend(_)
+                    | BrokerRequest::QuorumHeartbeat(_)
+                    | BrokerRequest::QuorumVote(_)
+                    | BrokerRequest::QuorumStatus
+                        if !identity.has_role("Replica")
+                            && !identity.has_role("Agent")
+                            && !identity.has_role("Admin") =>
+                    {
+                        let err_resp = BrokerResponse::Error(format!(
+                            "Authorization denied: principal {:?} lacks Replica/Agent/Admin role for quorum operations",
+                            identity.principal
+                        ));
+                        let mut serialized = serde_json::to_vec(&err_resp)?;
+                        serialized.push(b'\n');
+                        writer.write_all(&serialized).await?;
+                        writer.flush().await?;
+                        continue;
+                    }
                     BrokerRequest::Replicate(_) | BrokerRequest::Heartbeat(_)
                         if !identity.has_role("Agent") =>
                     {
@@ -2790,7 +2885,8 @@ impl BrokerServer {
             let resp = match req {
                 BrokerRequest::Produce(_)
                 | BrokerRequest::Fetch(_)
-                | BrokerRequest::Replicate(_) => tokio::task::spawn_blocking(move || {
+                | BrokerRequest::Replicate(_)
+                | BrokerRequest::QuorumAppend(_) => tokio::task::spawn_blocking(move || {
                     server.dispatch_with_identity(req, id.as_ref())
                 })
                 .await
