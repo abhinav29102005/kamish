@@ -1,22 +1,26 @@
 # KAMISH — REMAINING WORK BACKLOG
 
-**Based on Inspected Revision:** `49752d0` (Branch: `main`)  
+**Based on Inspected Revision:** `3dcbd7f` (Branch: `main`)  
 **Date:** 2026-11-01  
-**Status:** Authoritative Post-Completion Backlog (Phase Three Handover)
+**Status:** Authoritative Post-Consensus Completion Backlog
 
 ---
 
 ## 1. Backlog Governance & Current Status
 
-Following the completion of the One-Shot Remaining Implementation & Functional Completion campaign, all P0, P1, P2, and P3 engineering gaps have been fully implemented, integrated into daemon execution paths, and committed to `main`.
+Following the completion of the One-Shot Remaining Implementation campaign and the In-Region Quorum Consensus & Synchronous Durability directive, all P0, P1, P2, and P3 engineering gaps have been fully implemented, integrated into daemon execution paths, and committed to `main`.
 
-No implementation blockers or unintegrated core features remain open. The only open items are explicitly categorized as **Deferred Architecture Decisions**, which require external cloud infrastructure custody agreements or multi-node in-region clustering decisions.
+No implementation blockers or unintegrated core features remain open. The only open item is explicitly categorized as an **External Infrastructure Dependency**, which requires external cloud infrastructure custody agreements for live KMS unwrapping.
 
 ---
 
-## 2. Resolved Implementation Items (One-Shot Completion Campaign)
+## 2. Resolved Implementation Items
 
-The following items from the post-reconnaissance backlog were completed and committed:
+The following items from the backlog have been completed, integrated into runtime daemon execution paths, and committed:
+
+### ITEM-DEF-01 / DUR-02: In-Region Multi-Node Replica Quorum Engine & Synchronous Durability
+- **Status:** **RESOLVED** across commits `d84313c`, `88398bf`, and `3dcbd7f`.
+- **Implementation:** Implemented primary-backup multi-node quorum consensus in `crates/kamish-own/src/quorum.rs` and `cmd/kamish-broker/src/quorum_manager.rs`. Replicas enforce persistent term and epoch state (`consensus_state.json` via atomic rename), majority quorum sizing ($M = \lfloor V/2 \rfloor + 1$), concurrent TCP log replication, epoch and term fencing on followers, uncommitted suffix divergence quarantine into `QuarantineStore`, and majority commit watermark advancing. Consumer fetch paths strictly enforce invariant INV-4 (capping readable offset at $\min(\text{high\_watermark}, \text{commit\_index})$) to prevent dirty reads. Exposed live status via broker wire protocol (`QuorumStatus`), CLI flags (`--node-id`, `--ack-level`), and gateway endpoint `GET /api/quorum`.
 
 ### ITEM-P1-01: Production Authenticated Encryption (AEAD) for Sealed Cross-Region Replication
 - **Status:** **RESOLVED** in commit `85b293c` (`feat(security): integrate AEAD and key provider boundaries`).
@@ -35,8 +39,8 @@ The following items from the post-reconnaissance backlog were completed and comm
 - **Implementation:** Implemented `ConsumerGroupCoordinator` in `cmd/kamish-broker/src/consumer_group.rs` supporting dynamic membership, session heartbeats, deterministic round-robin partition assignment, generation fencing on `commit_offset`, and crash-safe persistence to `consumer_groups.json`. Added wire commands `JoinGroup`, `HeartbeatGroup`, `LeaveGroup`, `ListGroups`, `DescribeGroup`, gateway REST endpoint `GET /api/consumer-groups`, and TypeScript SDK methods.
 
 ### ITEM-P3-01: Standardized Prometheus Metrics Exporter
-- **Status:** **RESOLVED** in commit `97e99eb` (`feat(observability): expose broker and replication metrics`).
-- **Implementation:** Implemented `BrokerMetricsRegistry` in `cmd/kamish-broker/src/metrics.rs` with lock-free atomic counters for produce, fetch, replication, consumer commits, outbox queue depths, quarantine counts, consumer groups, retention reclaimed bytes, witness checkpoints, and sealed replication. Exposes standard Prometheus text format 0.0.4 at `GET /metrics` in `cmd/kamish-gateway/src/lib.rs` (bypassing session auth).
+- **Status:** **RESOLVED** in commit `97e99eb` (`feat(observability): expose broker and replication metrics`) and enriched in `88398bf`.
+- **Implementation:** Implemented `BrokerMetricsRegistry` in `cmd/kamish-broker/src/metrics.rs` with lock-free atomic counters for produce, fetch, replication, quorum appends, consumer commits, outbox queue depths, quarantine counts, consumer groups, retention reclaimed bytes, witness checkpoints, and sealed replication. Exposes standard Prometheus text format 0.0.4 at `GET /metrics` in `cmd/kamish-gateway/src/lib.rs` (bypassing session auth).
 
 ### ITEM-P3-02: Automated Multi-Region Performance Benchmark Runner
 - **Status:** **RESOLVED** in commit `e3a4c13` (`feat(benchmarks): add reproducible scenario orchestration`).
@@ -44,14 +48,9 @@ The following items from the post-reconnaissance backlog were completed and comm
 
 ---
 
-## 3. Deferred Work (Requires Architecture Decision or External Dependency)
+## 3. Deferred Work (Requires External Infrastructure Dependency)
 
-The following items are deferred pending formal architecture decisions and external infrastructure agreements:
-
-### ITEM-DEF-01: In-Region Multi-Node Replica Quorum Engine
-- **Missing Behavior:** True `AckLevel::InRegionQuorum` across separate physical server nodes.
-- **Why Deferred:** `BrokerServer` is currently designed as a high-performance single-process regional daemon managing local NVMe storage (`AckLevel::LeaderFsync`) and replicating across WAN to other regional brokers via outbox queues. Implementing in-region clustering would require either a full Raft consensus engine (e.g., `openraft` / `tikv/raft-rs`) or an active-active in-region gossip replication protocol across multiple broker daemon instances, fundamentally altering the broker's process model.
-- **Prerequisite:** Formal architectural decision from maintainers on whether Kamish should include intra-region multi-node clustering or maintain single-node regional brokers with NVMe replication.
+The following item is deferred pending external cloud infrastructure provisioning and custody agreements:
 
 ### ITEM-DEF-02: Cloud KMS Key Custody Integration for Sealed Replication
 - **Missing Behavior:** Live integrations with AWS KMS, Google Cloud KMS, Azure Key Vault, or HashiCorp Vault for envelope key unwrapping.

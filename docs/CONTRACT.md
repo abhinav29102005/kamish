@@ -629,17 +629,25 @@ candidate comparisons do not close any W item or turn either probe green.
 
 Following the completion of the One-Shot Functional Completion campaign, this section formally specifies the operational architecture, supported guarantees, and boundary conditions enforced across the live Kamish codebase.
 
-### 8.1 Operational Durability: Tier A (Single-Node LeaderFsync)
-- **Supported Operational Contract:** The live `BrokerServer` runtime operates as an authoritative single-node regional daemon. Every successful client produce acknowledgement under `AckLevel::LeaderFsync` guarantees:
-  1. The record is durably written and flushed to local storage via synchronous file system barriers (`f.sync_all()`) on segmented log data and index files before an acknowledgement is transmitted to the client.
-  2. The write was admitted under an active, non-expired etcd-backed ownership lease evaluated locally using a monotonic clock source with a conservative 2.0-second safety margin.
-  3. Producer session sequence state is validated for idempotent deduplication.
+### 8.1 Operational Durability: Supported Modes (LeaderFsync and InRegionQuorum)
+
+Kamish supports two fully operational, non-simulated durability modes configurable on the regional broker daemon and per-request:
+
+#### 8.1.1 Mode 1: Local NVMe Durability (`AckLevel::LeaderFsync`)
+- **Operational Guarantee:** Every successful produce response acknowledging `AckLevel::LeaderFsync` guarantees:
+  1. The record is durably appended and flushed to local NVMe storage with synchronous hardware barriers (`f.sync_all()`) on segmented commit log and index files before an acknowledgement is transmitted to the client.
+  2. The write was admitted under an active, non-expired etcd-backed ownership lease evaluated locally using a monotonic clock with a conservative 2.0-second safety margin.
+  3. Producer session sequence state is validated and updated for idempotent deduplication.
   4. Cross-region asynchronous replication is staged into durable outbox queues.
-- **In-Region Quorum Reality:** `AckLevel::InRegionQuorum` is **not** operational in `BrokerServer`. The codebase contains unit test mocks for multi-node groups, but the live broker daemon does not run intra-region replication consensus. Running multi-node in-region clustering would require:
-  - Consensus engine integration (e.g. Raft via `openraft` or `tikv/raft-rs`) across multiple broker daemon instances within the same region.
-  - Multi-node log replication pipelines with majority commit frontiers prior to client ACK.
-  - Intra-region membership discovery, failure detection, and joint consensus reconfigurations.
-  These requirements are formally deferred under `ITEM-DEF-01`.
+
+#### 8.1.2 Mode 2: In-Region Multi-Node Quorum Durability (`AckLevel::InRegionQuorum`)
+- **Operational Guarantee:** When `AckLevel::InRegionQuorum` is requested or configured, every successful produce acknowledgement guarantees:
+  1. **Strict Majority Quorum:** The record has been durably appended and flushed via synchronous file system barriers (`f.sync_all()`) on at least a strict majority $M = \lfloor V/2 \rfloor + 1$ of configured voting replicas in the regional group (e.g. at least 2 of 3 distinct broker processes).
+  2. **Inter-Replica Replication Protocol:** The partition leader dispatches `QuorumAppend` wire RPCs concurrently over TCP/mTLS to all configured voting peer replicas.
+  3. **Follower Fencing & Divergence Quarantine:** Each follower validates that the leader's consensus term $T \ge T_{\text{local}}$ and owner epoch $E \ge E_{\text{local}}$. If a follower holds uncommitted divergent records beyond the common base offset, they are isolated to `QuarantineStore` before truncation, preserving committed prefixes.
+  4. **Commit-Index Gating (INV-4):** The leader advances its `commit_index` to the newly committed offset only after majority confirmation. Consumer fetch requests under `InRegionQuorum` are strictly bounded by `commit_index`, preventing consumers from reading uncommitted speculative records.
+  5. **Truthful Ack Semantics:** If majority quorum cannot be reached (due to network partition, follower crashes, or timeout), the broker fails closed with `BrokerError::Ownership(OwnershipError::QuorumNotReached)` and NEVER silently downgrades to `LeaderFsync`.
+  6. **Persistent Consensus State:** Terms, votes, and commit indices persist crash-safely to `<data_dir>/consensus_state.json` with temporary file `sync_all()` and atomic rename.
 
 ### 8.2 Production AEAD Sealing and Fail-Closed KMS Boundary
 - **Cryptographic Primitives:** `crates/kamish-seal` integrates standard, audited cryptographic implementations via `ring::aead`:

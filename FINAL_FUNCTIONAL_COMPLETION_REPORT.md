@@ -31,6 +31,9 @@ The functional completion campaign delivered the following discrete commits on b
 | `97e99eb` | `feat(observability)` | expose broker and replication metrics | `cmd/kamish-broker/src/metrics.rs`, `cmd/kamish-broker/src/lib.rs`, `cmd/kamish-gateway/src/lib.rs` |
 | `e3a4c13` | `feat(benchmarks)` | add reproducible scenario orchestration | `benchmarks/schema.json`, `benchmarks/orchestrator.mjs`, `benchmarks/results/README.md`, `benchmarks/results/run-*-unexecuted.json` |
 | `49752d0` | `feat(core)` | integrate gateway consumer group and retention endpoints | `cmd/kamish-gateway/src/lib.rs` |
+| `d84313c` | `feat(consensus)` | add persistent regional replica membership and state | `crates/kamish-own/src/quorum.rs`, `crates/kamish-own/src/lib.rs` |
+| `88398bf` | `feat(replication)` | add in-region quorum log replication and protocol wire commands | `crates/kamish-log/src/lib.rs`, `crates/kamish-outbox/src/lib.rs`, `cmd/kamish-broker/src/quorum_manager.rs`, `cmd/kamish-broker/src/lib.rs`, `cmd/kamish-broker/src/metrics.rs` |
+| `3dcbd7f` | `feat(broker)` | enforce in-region quorum durability and commit gating in broker daemon | `cmd/kamish-broker/src/config.rs`, `cmd/kamish-broker/src/main.rs`, `cmd/kamish-gateway/src/lib.rs`, `packages/kamish-client/src/types.ts` |
 
 ---
 
@@ -90,6 +93,14 @@ The functional completion campaign delivered the following discrete commits on b
   - Added `GET /api/consumer-groups` returning active groups, member counts, and partition assignments.
   - Added `GET /api/retention` returning cumulative reclaimed bytes, reclaimed records, and active retention rules.
 
+### Workstream H: In-Region Quorum Consensus & Synchronous Durability (Commits `d84313c`, `88398bf`, `3dcbd7f`)
+- **Problem Solved:** The broker previously only supported `LeaderFsync` locally, with `InRegionQuorum` unintegrated across separate physical server processes.
+- **Implementation:**
+  - **Persistent Membership & Consensus State (`crates/kamish-own/src/quorum.rs`):** Implemented `ReplicaRole` (`Leader`, `Follower`, `Candidate`), `ReplicaGroupConfig` with majority voter sizing ($M = \lfloor V/2 \rfloor + 1$), and `PersistentConsensusState` with crash-safe atomic rename (`consensus_state.json`).
+  - **Quorum Replication Engine (`cmd/kamish-broker/src/quorum_manager.rs`):** Implemented `QuorumReplicationManager` coordinating concurrent TCP replication to peer brokers, term and epoch fencing on followers, uncommitted history divergence quarantine via `QuarantineStore`, local `sync_all` fsync append, and commit watermark progression.
+  - **Produce & Consumer Commit Isolation:** Integrated `replicate_to_quorum_sync` into `BrokerServer::produce_with_identity` under `AckLevel::InRegionQuorum`. Fails closed without downgrade if a majority is unreachable. Bounded consumer fetches to $\min(\text{high\_watermark}, \text{commit\_index})$ (INV-4) to guarantee uncommitted speculative records are never exposed to consumers.
+  - **Daemon CLI & Gateway Exposition:** Added `--node-id` and `--ack-level` CLI options to `kamish-broker`, added `GET /api/quorum` to `cmd/kamish-gateway/src/lib.rs`, and exported replica status types in TypeScript client.
+
 ---
 
 ## 4. Capability Matrix & Contract Alignment
@@ -97,7 +108,7 @@ The functional completion campaign delivered the following discrete commits on b
 | Capability Area | Operational Contract | Architectural Boundary / Fail-Closed Reality |
 |:---|:---|:---|
 | **Local Durability** | `AckLevel::LeaderFsync` | NVMe file sync barrier (`f.sync_all()`) before produce ACK; monotonic lease validation with 2.0s margin. |
-| **In-Region Quorum** | Documented Only / Not Effective | Single-node regional daemon. Multi-node clustering requires consensus engine (deferred under `ITEM-DEF-01`). |
+| **In-Region Quorum** | `AckLevel::InRegionQuorum` | Primary-backup majority quorum ($M = \lfloor V/2 \rfloor + 1$) across local TCP replicas. Replicas enforce term/epoch fencing, divergent suffix quarantine, and atomic consensus state. Consumers gated at $\min(\text{high\_watermark}, \text{commit\_index})$ (INV-4). |
 | **WAN Replication** | Asynchronous Outbox | Capacity-bounded queues, provenance watermarks, 500ms heartbeat sweeps, adaptive circuit breakers. |
 | **Divergent History** | Authoritative Quarantine | Divergent suffixes routed to `QuarantineStore` (100k bound) prior to atomic log truncation and repair. |
 | **Sealed Security** | Ring AEAD (ChaCha20 / AES-256) | 96-bit CSPRNG nonce, 6-element AAD binding. Fails closed with `"sealed_replication_not_configured"` if external KMS unconfigured. |
@@ -129,8 +140,7 @@ For production deployment beyond single-node development:
 
 ## 7. Deferred Architecture Backlog
 
-Only genuine architectural expansions requiring external infrastructure agreements remain open:
-- `ITEM-DEF-01`: In-Region Multi-Node Replica Quorum Engine (requires maintainer consensus decision on Raft vs single-node NVMe).
+Only genuine external infrastructure custody integrations remain open:
 - `ITEM-DEF-02`: Cloud KMS Key Custody Integration (requires target cloud infrastructure credentials).
 
 ---

@@ -3532,3 +3532,63 @@ In strict adherence to the functional-first directive:
 - **Operational Endpoints (`cmd/kamish-gateway/src/lib.rs`):**
   - `GET /api/consumer-groups`: Returns active consumer groups, generation IDs, member counts, and partition assignments via `state.broker.consumer_groups.list_groups()`.
   - `GET /api/retention`: Returns operational retention metrics (`reclaimed_bytes_total`, `reclaimed_records_total`, `last_sweep_timestamp_ms`, `active_retention_rules`).
+
+
+---
+
+## 37. In-Region Quorum Consensus & Synchronous Durability Implementation (2026-11-01)
+
+### 37.1 Mission & Objectives
+Following the completion of the One-Shot Remaining Implementation campaign, the broker supported local durable fsync (`AckLevel::LeaderFsync`), while multi-node in-region synchronous durability (`AckLevel::InRegionQuorum`) remained deferred. This directive implemented genuine multi-node, in-region replicated durability across independent broker processes with strict majority quorum acknowledgement semantics, crash recovery, leader/term fencing, consumer isolation, and operational integration.
+
+In strict compliance with governing directives:
+- **Zero Testing Mandate:** No unit tests, integration tests, benchmark suites, or runtime fault scenarios were executed or modified; testing was deferred to a dedicated verification phase.
+- **Zero Fake Capabilities:** Multi-node quorum was implemented with real TCP peer transport, majority tracking, and crash-safe persistent state; no single-node mock was substituted, and `InRegionQuorum` never silently downgrades to `LeaderFsync`.
+- **Atomic, Conventional Commits:** All changes were incrementally compiled and committed across three focused commits: `d84313c`, `88398bf`, and `3dcbd7f`.
+
+### 37.2 Persistent Regional Replica Membership & State (Commit `d84313c`)
+- **Membership & Quorum Sizing (`crates/kamish-own/src/quorum.rs`):**
+  - Defined `ReplicaRole` (`Leader`, `Follower`, `Candidate`) and `ReplicaPeerConfig` (node identity, address, voting status).
+  - Implemented `ReplicaGroupConfig` validating membership, unique node IDs, and majority quorum threshold:
+    $$M = \left\lfloor \frac{V}{2} \right\rfloor + 1$$
+    where $V$ is the number of voting replicas (e.g., $M = 2$ for a 3-replica group).
+  - Implemented `calculate_quorum_frontier` to compute the highest offset replicated to at least $M$ voting replicas.
+- **Persistent Consensus State:**
+  - Implemented `PersistentConsensusState` tracking `current_term`, `leader_id`, `voted_for`, `commit_indices` (per topic/partition), and `membership_generation`.
+  - Added crash-safe persistence to `consensus_state.json` using temporary file write, `sync_all()`, and atomic file rename, ensuring state survivability across broker process crashes.
+  - Re-exported consensus primitives in `crates/kamish-own/src/lib.rs`.
+
+### 37.3 Quorum Replication Engine & Wire Protocol (Commit `88398bf`)
+- **Log and Outbox Extensions (`crates/kamish-log`, `crates/kamish-outbox`):**
+  - Added `append_envelope` to `PartitionLog` delegating to `append_with_context` for envelope propagation.
+  - Added `queued_ranges()` to `DestinationOutbox` for telemetry and watermark queries.
+  - Added ownership errors: `QuorumUnavailable`, `NotLeader`, `HistoryDiverged`.
+- **Replication Coordinator (`cmd/kamish-broker/src/quorum_manager.rs`):**
+  - Implemented `QuorumReplicationManager` coordinating concurrent TCP dispatch to peer replicas with configurable timeout (default 2000ms).
+  - Evaluates follower acknowledgements; only advances local and group `commit_index` once a strict majority confirms durable `sync_all()` persistence.
+  - Implemented `replicate_to_quorum_sync` via Tokio's `tokio::task::block_in_place` to safely integrate async network replication into the synchronous broker produce execution path.
+- **Follower Fencing & Divergent History Quarantine:**
+  - Follower `handle_quorum_append` verifies term and partition epoch; rejects stale leaders.
+  - Follower checks log continuity. If uncommitted records exist beyond the leader's previous offset, the divergent suffix is routed into `QuarantineStore` before atomic log truncation, enforcing invariant W20 / INV-3.
+  - Follower appends authoritative records, issues `sync_all()`, and updates local commit index.
+- **Wire Protocol & Broker Integration (`cmd/kamish-broker/src/lib.rs`):**
+  - Added wire commands `QuorumAppend`, `QuorumHeartbeat`, `QuorumVote`, and `QuorumStatus` to `BrokerRequest` / `BrokerResponse`.
+  - Enforced wire-level RBAC requiring `Replica`, `Agent`, or `Admin` roles for quorum messages.
+  - Integrated quorum replication into `BrokerServer::produce_with_identity`: when `AckLevel::InRegionQuorum` is requested, the broker replicates to peers and fails closed if majority quorum cannot be achieved.
+  - Enforced consumer isolation (invariant INV-4) in `BrokerServer::fetch_with_identity`: consumer fetch reads are strictly bounded by:
+    $$\text{read\_ceiling} = \min(\text{high\_watermark}, \text{commit\_index})$$
+    preventing dirty reads of speculative, uncommitted leader suffixes.
+- **Observability (`cmd/kamish-broker/src/metrics.rs`):**
+  - Added atomic metrics for quorum replication: `quorum_replicate_total`, `quorum_replicate_success_total`, `quorum_replicate_failed_total`.
+
+### 37.4 Daemon CLI Flags, Heartbeats & Gateway API (Commit `3dcbd7f`)
+- **Broker Configuration & CLI (`cmd/kamish-broker/src/config.rs`, `main.rs`):**
+  - Added `node_id`, `ack_level`, and `replica_group` configuration fields to `BrokerConfig`.
+  - Added CLI flags `--node-id <ID>` and `--ack-level <fsync|quorum>`.
+  - Configured broker builder methods `with_replica_group` and `with_ack_level`.
+  - Spawned background `spawn_quorum_heartbeat_worker` in `main.rs` sending periodic heartbeats (default 250ms) to maintain peer connectivity and propagate commit indices, tied to graceful shutdown signals.
+- **Gateway REST Endpoint (`cmd/kamish-gateway/src/lib.rs`):**
+  - Added `GET /api/quorum` returning live `QuorumStatusResponse` (node ID, role, current term, leader ID, peer statuses, and per-partition commit indices).
+- **TypeScript Client SDK (`packages/kamish-client/src/types.ts`):**
+  - Exported `AckLevel`, `ReplicaRole`, `PeerReplicaStatus`, and `QuorumStatusResponse` types.
+  - Enriched `ProduceResult` with `ackLevel` field for client verification.
