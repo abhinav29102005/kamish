@@ -24,15 +24,15 @@
 | Current phase | **Frontend/backend integration & release evidence reconciliation (Branch: `audit/evidence-contract-frontend-reconciliation-2026-11-01` / PR #1)** |
 
 **FRONTEND/BACKEND INTEGRATION & RELEASE EVIDENCE RECONCILIATION (Branch: `audit/evidence-contract-frontend-reconciliation-2026-11-01` / PR #1):**
-- Resolved deployed gateway URL configuration with `resolveGatewayConfig()` in `frontend/src/utils/gatewayClient.ts` reading `VITE_KAMISH_GATEWAY_URL`, validating `http://`/`https://` protocol, normalizing trailing slashes, and identifying topology mode (`same-origin-proxy`, `separate-origin`, `local-dev`).
+- Implemented configurable gateway URL resolution with `VITE_KAMISH_GATEWAY_URL`; full URL parsing now rejects unsupported schemes, missing hosts, credentials, query strings, and fragments. Local development defaults to relative paths through the Vite same-origin proxy.
 - Added Vite development server proxy in `frontend/vite.config.ts` and `frontend/vite.config.js` forwarding `/api` and `/metrics` to `127.0.0.1:3001`. Created `frontend/.env.example`.
 - Created production reverse-proxy template `frontend/nginx.conf.example` configuring same-origin deployment with SSE streaming (`proxy_buffering off`), REST proxying, and SPA fallback routing.
-- Added `--allowed-origins` CLI flag and `KAMISH_GATEWAY_ALLOWED_ORIGINS` environment variable in `cmd/kamish-gateway`, strictly validating incoming `Origin` headers and disallowing wildcard CORS with credentials.
+- Added `--allowed-origins` CLI flag and `KAMISH_GATEWAY_ALLOWED_ORIGINS` environment variable. Credentialed CORS now requires exact configured-origin matching; local development defaults to the Vite same-origin proxy.
 - Added typed `ConnectionStatus` (`"connecting" | "connected" | "auth_required" | "unavailable" | "config_error"`) to `useKamish.ts` and `KamishContext.tsx`. Replaced static node count in `Header.jsx` and `Navbar.jsx` with real `connectionStatus`, eliminating false-green indicators when offline.
-- Separated Live vs Demo data boundaries: In Live mode, `produceCustomEvent` and `verifyAuditLedgerIntegrity` dispatch real gateway calls, and 10Hz synthetic ticker is suppressed. In Demo mode, in-memory WebCrypto SHA-256 hash chains and chaos scenario simulations are explicitly labeled `[DEMO]`.
+- Separated Live vs Demo data boundaries: Live produce/audit operations call the gateway; Demo mode uses browser-local WebCrypto and chaos simulations. The UI mode switch no longer mutates broker server-side mode. Live dashboard aggregate decisions, throughput, and p99 latency show `N/A` where the gateway exposes no corresponding metric; gateway outbox depth is shown only while connected.
 - Gated dev credentials and quick preset buttons on `SignInPage.jsx` behind `isDevLoginEnabled` (`import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true"`).
 - Reconciled documentation across `docs/CONTRACT.md`, `IMPLEMENTATION_INVENTORY.md`, `REMAINING_WORK_BACKLOG.md`, `FINAL_FUNCTIONAL_COMPLETION_REPORT.md`, `frontend/README.md`, and `audit/release_verification_20261101/RECONCILIATION_REPORT.md`.
-- Test execution status for this pass: **TEST SUITES NOT RUN** per user instructions (preserving tested baseline at `3bab180` and compiling cleanly with `cargo check` and `npm run build`).
+- Follow-up functionality pass: **NO TESTS, `cargo check`, or frontend build commands were run**. Earlier compile results belong to the previously reported revision and do not verify these latest edits. Runtime browser-to-gateway smoke verification remains pending.
 
 **LOCAL VERIFICATION RESULT (Run ID: `run-verification-20261101-113645`; source revision `3bab180`):**
 - Completed exhaustive workspace verification across all 15 crates and integration test suites.
