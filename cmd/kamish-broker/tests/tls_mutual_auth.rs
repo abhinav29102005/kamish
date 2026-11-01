@@ -378,6 +378,7 @@ async fn test_per_client_roles_producer_and_consumer_authorization() {
             to_offset: 1,
             payload: vec![],
             is_sealed: false,
+            ..Default::default()
         }))
         .await
         .unwrap();

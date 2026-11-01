@@ -149,6 +149,7 @@ fn test_record_size_exceeding_estimate_retains_durable_wal_obligation() {
         is_sealed: false,
         source_generation: 1,
         envelope_payload: None,
+        ..Default::default()
     };
     assert!(!reservation.is_infallible(&actual_range));
 
@@ -227,6 +228,7 @@ fn test_exact_preallocation_guarantees_infallible_commit() {
         is_sealed: false,
         source_generation: 1,
         envelope_payload: None,
+        ..Default::default()
     };
 
     assert!(reservation.is_infallible(&range));
@@ -323,6 +325,7 @@ fn test_reservation_accounting_lifecycle_exhaustive() {
         is_sealed: false,
         source_generation: 1,
         envelope_payload: None,
+        ..Default::default()
     };
     res1.commit(r1).unwrap();
     assert_eq!(outbox.queued_bytes(), 164);
@@ -353,6 +356,7 @@ fn test_reservation_accounting_lifecycle_exhaustive() {
         is_sealed: false,
         source_generation: 1,
         envelope_payload: None,
+        ..Default::default()
     };
     assert!(res3.commit(r3_oversized).is_err());
     assert_eq!(

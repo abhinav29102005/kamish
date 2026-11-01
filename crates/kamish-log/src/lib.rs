@@ -316,7 +316,7 @@ impl RecordEnvelope {
             .is_some_and(|computed| computed == self.checksum)
     }
 
-    fn expected_checksum(&self) -> Option<u32> {
+    pub fn expected_checksum(&self) -> Option<u32> {
         match (self.magic, &self.context) {
             (RECORD_MAGIC_V1, None) => Some(Self::compute_checksum(
                 self.epoch,

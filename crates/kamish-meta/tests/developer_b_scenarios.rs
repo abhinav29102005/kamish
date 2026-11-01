@@ -97,6 +97,7 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         });
     }
     let _local_duration_healthy = start_local.elapsed();
@@ -130,6 +131,7 @@ async fn test_scenario_b_slow_link_and_backpressure_demo() {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         });
     }
     let local_duration_degraded = start_degraded.elapsed();
@@ -187,6 +189,7 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             })
             .unwrap();
 
@@ -220,6 +223,7 @@ async fn test_scenario_c_regional_outage_and_recovery_demo() {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             })
             .unwrap();
     }

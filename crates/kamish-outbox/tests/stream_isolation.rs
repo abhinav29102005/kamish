@@ -12,6 +12,7 @@ fn range(partition: u32) -> OutboxRange {
         is_sealed: false,
         source_generation: 1,
         envelope_payload: None,
+        ..Default::default()
     }
 }
 

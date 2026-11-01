@@ -9,6 +9,7 @@
 //! - INV-5: Destination log is prefix of source log, offsets match exactly.
 //! - INV-6: Retrying an applied range is a no-op.
 
+use kamish_log::RecordContext;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
@@ -50,13 +51,93 @@ pub struct OutboxRange {
     pub source_generation: u64,
     #[serde(default)]
     pub envelope_payload: Option<Vec<u8>>,
+    #[serde(default)]
+    pub context: Option<RecordContext>,
+    #[serde(default = "default_generation")]
+    pub policy_version: u64,
+    #[serde(default)]
+    pub checksum: Option<u32>,
 }
 
 fn default_generation() -> u64 {
     1
 }
 
+impl Default for OutboxRange {
+    fn default() -> Self {
+        Self {
+            topic: String::new(),
+            partition: 0,
+            epoch: 0,
+            start_offset: 0,
+            end_offset: 0,
+            class_id: String::new(),
+            payload: Vec::new(),
+            is_sealed: false,
+            source_generation: 1,
+            envelope_payload: None,
+            context: None,
+            policy_version: 1,
+            checksum: None,
+        }
+    }
+}
+
 impl OutboxRange {
+    pub fn new(
+        topic: impl Into<String>,
+        partition: u32,
+        epoch: u64,
+        start_offset: u64,
+        end_offset: u64,
+        class_id: impl Into<String>,
+        payload: Vec<u8>,
+        is_sealed: bool,
+    ) -> Self {
+        Self {
+            topic: topic.into(),
+            partition,
+            epoch,
+            start_offset,
+            end_offset,
+            class_id: class_id.into(),
+            payload,
+            is_sealed,
+            source_generation: 1,
+            envelope_payload: None,
+            context: None,
+            policy_version: 1,
+            checksum: None,
+        }
+    }
+
+    pub fn with_context(mut self, context: Option<RecordContext>) -> Self {
+        if let Some(ref ctx) = context {
+            self.source_generation = ctx.source_generation;
+        }
+        self.context = context;
+        self
+    }
+
+    pub fn with_source_generation(mut self, generation: u64) -> Self {
+        self.source_generation = generation;
+        self
+    }
+
+    pub fn with_policy_version(mut self, policy_version: u64) -> Self {
+        self.policy_version = policy_version;
+        self
+    }
+
+    pub fn with_checksum(mut self, checksum: u32) -> Self {
+        self.checksum = Some(checksum);
+        self
+    }
+
+    pub fn with_envelope_payload(mut self, envelope_payload: Option<Vec<u8>>) -> Self {
+        self.envelope_payload = envelope_payload;
+        self
+    }
     pub fn byte_size(&self) -> usize {
         self.payload.len() + 64
     }
@@ -364,6 +445,7 @@ mod tests {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         };
 
         let r2 = OutboxRange {
@@ -377,6 +459,7 @@ mod tests {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         };
 
         outbox.enqueue(r1).unwrap();
@@ -416,6 +499,7 @@ mod tests {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         };
 
         let err = outbox.enqueue(r1).unwrap_err();
@@ -455,6 +539,7 @@ mod tests {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         };
         res3.commit(r).unwrap();
 

@@ -171,6 +171,7 @@ fn test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers() {
         to_offset: 1,
         payload: b"msg-0".to_vec(),
         is_sealed: false,
+        ..Default::default()
     };
     let res0 = harness.broker_us.handle_replication(rep0).unwrap();
     assert!(res0.accepted);
@@ -190,6 +191,7 @@ fn test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers() {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         })
         .unwrap();
     outbox_us
@@ -204,6 +206,7 @@ fn test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers() {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         })
         .unwrap();
 
@@ -239,6 +242,7 @@ fn test_gap_rejection_halts_batch_and_prevents_unnecessary_transfers() {
         to_offset: 2,
         payload: b"msg-1".to_vec(),
         is_sealed: false,
+        ..Default::default()
     };
     let res1 = harness.broker_us.handle_replication(rep1).unwrap();
     assert!(res1.accepted);
@@ -288,6 +292,7 @@ fn test_partial_overlap_halts_batch_without_record_loss() {
             to_offset: i + 1,
             payload: format!("payload-{}", i).into_bytes(),
             is_sealed: false,
+            ..Default::default()
         };
         assert!(harness.broker_us.handle_replication(req).unwrap().accepted);
     }
@@ -349,6 +354,7 @@ fn test_conflicting_duplicate_halts_batch_distinct_from_gap() {
         to_offset: 1,
         payload: b"original-data".to_vec(),
         is_sealed: false,
+        ..Default::default()
     };
     assert!(harness.broker_us.handle_replication(rep0).unwrap().accepted);
 
@@ -364,6 +370,7 @@ fn test_conflicting_duplicate_halts_batch_distinct_from_gap() {
         to_offset: 1,
         payload: b"TAMPERED-DATA".to_vec(),
         is_sealed: false,
+        ..Default::default()
     };
     let res = harness.broker_us.handle_replication(conflict_req).unwrap();
     assert!(!res.accepted);

@@ -261,6 +261,10 @@ async fn test_promotion_success_fences_old_owner_and_quarantines_divergent_suffi
                 to_offset: offset + 1,
                 payload: rec.payload,
                 is_sealed: false,
+                context: rec.context,
+                policy_version: rec.policy_version,
+                checksum: Some(rec.checksum),
+                ..Default::default()
             })
             .unwrap();
     }
@@ -530,6 +534,10 @@ async fn test_promotion_reconciliation_ordering_isolates_suffix_before_cas() {
             to_offset: offset + 1,
             payload: rec.payload,
             is_sealed: false,
+            context: rec.context,
+            policy_version: rec.policy_version,
+            checksum: Some(rec.checksum),
+            ..Default::default()
         }).unwrap();
     }
 

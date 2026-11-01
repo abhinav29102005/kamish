@@ -11,6 +11,7 @@
 //! - INV-8: No payload outside legal set or sealed-only mode.
 
 use kamish_broker::{BrokerClient, BrokerServer, ReplicationRequest};
+use kamish_log::RecordEnvelope;
 use kamish_meta::LocalReplicationTracker;
 use kamish_outbox::OutboxRange;
 use kamish_route::{LinkMetrics, PathCandidate, RouteSelector};
@@ -227,7 +228,48 @@ impl ReplicationAgent {
         }
         Ok(count)
     }
+}
 
+fn build_replication_request(source_region: &str, target_region: &str, range: &OutboxRange) -> ReplicationRequest {
+    let (extracted_ctx, extracted_pv, extracted_cs) = if let Some(ref env_bytes) = range.envelope_payload {
+        if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
+            (env.context, Some(env.policy_version), Some(env.checksum))
+        } else {
+            (None, None, None)
+        }
+    } else {
+        (None, None, None)
+    };
+    let rep_context = range.context.clone().or(extracted_ctx);
+    let policy_version = if range.policy_version > 0 {
+        range.policy_version
+    } else if let Some(pv) = extracted_pv {
+        pv
+    } else {
+        1
+    };
+    let checksum = range.checksum.or(extracted_cs);
+
+    ReplicationRequest {
+        topic: range.topic.clone(),
+        partition: range.partition,
+        source_region: source_region.to_string(),
+        target_region: target_region.to_string(),
+        class_id: range.class_id.clone(),
+        epoch: range.epoch,
+        from_offset: range.start_offset,
+        to_offset: range.end_offset,
+        payload: range.payload.clone(),
+        is_sealed: range.is_sealed,
+        context: rep_context,
+        source_generation: range.source_generation,
+        policy_version,
+        checksum,
+        envelope_payload: range.envelope_payload.clone(),
+    }
+}
+
+impl ReplicationAgent {
     /// Dispatches a single replication task against the target peer (TCP or in-memory) with route validation.
     pub async fn execute_task(&self, task: &ReplicationTask) -> Result<bool, AgentError> {
         let metrics = self
@@ -255,18 +297,7 @@ impl ReplicationAgent {
             });
         }
 
-        let rep_req = ReplicationRequest {
-            topic: task.range.topic.clone(),
-            partition: task.range.partition,
-            source_region: self.local_region.clone(),
-            target_region: task.target_region.clone(),
-            class_id: task.range.class_id.clone(),
-            epoch: task.range.epoch,
-            from_offset: task.range.start_offset,
-            to_offset: task.range.end_offset,
-            payload: task.range.payload.clone(),
-            is_sealed: task.range.is_sealed,
-        };
+        let rep_req = build_replication_request(&self.local_region, &task.target_region, &task.range);
 
         // Prefer TCP peer if address is registered
         let tcp_addr = {
@@ -657,18 +688,7 @@ impl ReplicationAgent {
             };
 
             // 2. Transfer range to target broker (E4 send / E5 receive)
-            let rep_req = ReplicationRequest {
-                topic: range.topic.clone(),
-                partition: range.partition,
-                source_region: self.local_region.clone(),
-                target_region: target_region.to_string(),
-                class_id: range.class_id.clone(),
-                epoch: range.epoch,
-                from_offset: range.start_offset,
-                to_offset: range.end_offset,
-                payload: range.payload.clone(),
-                is_sealed: range.is_sealed,
-            };
+            let rep_req = build_replication_request(&self.local_region, target_region, &range);
 
             let rep_res = peer_broker.handle_replication(rep_req)?;
             if rep_res.accepted {
@@ -797,18 +817,7 @@ impl ReplicationAgent {
                 continue;
             }
 
-            let rep_req = ReplicationRequest {
-                topic: range.topic.clone(),
-                partition: range.partition,
-                source_region: self.local_region.clone(),
-                target_region: target_region.to_string(),
-                class_id: range.class_id.clone(),
-                epoch: range.epoch,
-                from_offset: range.start_offset,
-                to_offset: range.end_offset,
-                payload: range.payload.clone(),
-                is_sealed: range.is_sealed,
-            };
+            let rep_req = build_replication_request(&self.local_region, target_region, &range);
 
             let start = std::time::Instant::now();
             let rep_res = client
@@ -1137,6 +1146,7 @@ mod tests {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             },
         );
         let task2 = ReplicationTask::new(
@@ -1152,6 +1162,7 @@ mod tests {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             },
         );
         let task3 = ReplicationTask::new(
@@ -1167,6 +1178,7 @@ mod tests {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             },
         );
 
@@ -1263,6 +1275,7 @@ mod tests {
             to_offset: 1,
             payload: b"order-0".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         let rep1 = ReplicationRequest {
             topic: "orders".to_string(),
@@ -1275,6 +1288,7 @@ mod tests {
             to_offset: 2,
             payload: b"order-1".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         assert!(broker_b.handle_replication(rep0).unwrap().accepted);
         assert!(broker_b.handle_replication(rep1).unwrap().accepted);
@@ -1311,6 +1325,7 @@ mod tests {
             to_offset: 1,
             payload: b"order-0".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         let dup_res = broker_b.handle_replication(dup_req).unwrap();
         assert!(dup_res.accepted);
@@ -1370,6 +1385,7 @@ mod tests {
             to_offset: 1,
             payload: b"payload-0".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         let r_res = broker_b.handle_replication(req0.clone()).unwrap();
         assert!(r_res.accepted);
@@ -1428,6 +1444,7 @@ mod tests {
             to_offset: 6,
             payload: b"premature-message".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
 
         let res = broker_b.handle_replication(gap_req).unwrap();
@@ -1468,6 +1485,7 @@ mod tests {
                 to_offset: i + 1,
                 payload: format!("msg-{}", i).into_bytes(),
                 is_sealed: false,
+                ..Default::default()
             };
             assert!(broker_b.handle_replication(req).unwrap().accepted);
         }
@@ -1484,6 +1502,7 @@ mod tests {
             to_offset: 3,
             payload: b"overlap-payload".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
 
         let res = broker_b.handle_replication(overlap_req).unwrap();
@@ -1508,6 +1527,7 @@ mod tests {
             to_offset: 1,
             payload: b"epoch-2-record".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         assert!(broker_b.handle_replication(req_epoch2).unwrap().accepted);
 
@@ -1523,6 +1543,7 @@ mod tests {
             to_offset: 2,
             payload: b"stale-write".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         let response = broker_b.handle_replication(req_stale).unwrap();
         assert!(!response.accepted);

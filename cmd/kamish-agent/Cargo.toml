@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 kamish-audit = { path = "../../crates/kamish-audit" }
+kamish-log = { path = "../../crates/kamish-log" }
 kamish-policy = { path = "../../crates/kamish-policy" }
 kamish-enforce = { path = "../../crates/kamish-enforce" }
 kamish-outbox = { path = "../../crates/kamish-outbox" }
@@ -22,7 +23,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-kamish-log = { path = "../../crates/kamish-log" }
 kamish-own = { path = "../../crates/kamish-own" }
 tempfile = "3.17"
 chrono = { workspace = true }

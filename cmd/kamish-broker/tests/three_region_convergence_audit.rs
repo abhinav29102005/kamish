@@ -349,6 +349,11 @@ fn test_broker_restart_recovery_and_watermark_advancement() {
                 to_offset: range.end_offset,
                 payload: range.payload.clone(),
                 is_sealed: false,
+                context: range.context.clone(),
+                source_generation: range.source_generation,
+                policy_version: range.policy_version,
+                checksum: range.checksum,
+                envelope_payload: range.envelope_payload.clone(),
             })
             .unwrap();
         assert!(rep_resp.accepted);
@@ -391,6 +396,7 @@ fn test_receiver_offset_gap_detection_and_watermark_preservation() {
             to_offset: 1,
             payload: vec![1, 2, 3],
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(rep0.accepted);
@@ -410,6 +416,7 @@ fn test_receiver_offset_gap_detection_and_watermark_preservation() {
             to_offset: 3,
             payload: vec![7, 8, 9],
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(!rep2_gap.accepted);
@@ -450,6 +457,7 @@ fn test_receiver_offset_gap_detection_and_watermark_preservation() {
             to_offset: 2,
             payload: vec![4, 5, 6],
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(rep1.accepted);
@@ -469,6 +477,7 @@ fn test_receiver_offset_gap_detection_and_watermark_preservation() {
             to_offset: 3,
             payload: vec![7, 8, 9],
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(rep2_ok.accepted);
@@ -497,6 +506,7 @@ fn test_receiver_idempotent_deduplication_and_conflict_rejection() {
             to_offset: 1,
             payload: vec![42; 32],
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(rep0.accepted);
@@ -516,6 +526,7 @@ fn test_receiver_idempotent_deduplication_and_conflict_rejection() {
             to_offset: 1,
             payload: vec![42; 32],
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(rep0_retry.accepted);
@@ -536,6 +547,7 @@ fn test_receiver_idempotent_deduplication_and_conflict_rejection() {
             to_offset: 1,
             payload: vec![99; 32], // Conflicting data!
             is_sealed: false,
+            ..Default::default()
         })
         .unwrap();
     assert!(!rep0_conflict.accepted);

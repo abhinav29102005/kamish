@@ -3170,3 +3170,59 @@ multi-region production guarantees.
 - **W32 Version-Pinned Baseline Topologies**: Recorded version-pinned comparative configurations for Apache Kafka 3.9.0 + MirrorMaker 2 and Apache Pulsar 4.0.0 in `benchmarks/baselines/` with parity of durability settings (3 replicas in-region, 2-of-3 persist ACK, unclean leader election disabled).
 - **One-Command Scenario Runner (`scripts/run_scenario.sh`)**: Implemented reproducible scenario executor reproducing runs from recorded configs (`scenarios/three_region_evidence.json`), including starting/stopping 3-node external etcd 3.7.3 members with mTLS, executing all invariant verifications, and outputting structured JSON and Markdown audit reports linking every metric to a specific run ID.
 - **W26/W27 Routing Signals, Breakers & Bounded Retries**: Implemented EWMA signal smoothing ($S_t = \alpha X_t + (1-\alpha) S_{t-1}$), 3-state Circuit Breaker (`Closed`, `Open`, `HalfOpen`) with hysteresis dwell and route skipping, and fair bounded exponential retry policy.
+
+
+---
+
+## 29. Milestone FN-03: End-to-End Replication Context Propagation (2026-11-01)
+
+### 29.1 Implemented Functionality
+
+Milestone FN-03 closes the replication metadata and context preservation gap identified across the broker, outbox, and replication agent pipelines:
+
+1. **First-Class Context Fields in Replication Wire Envelopes (`ReplicationRequest`):**
+   - Extended `ReplicationRequest` in `cmd/kamish-broker` to carry `context: Option<RecordContext>`, `source_generation: u64`, `policy_version: u64`, `checksum: Option<u32>`, and `envelope_payload: Option<Vec<u8>>`.
+   - Annotated all new fields with `#[serde(default)]` and deterministic defaults (`source_generation = 1`, `policy_version = 1`), preserving backward and forward wire compatibility with legacy brokers and framed JSON-line TCP clients.
+   - Provided ergonomic constructor `ReplicationRequest::new(...)` and builder methods (`with_context`, `with_source_generation`, `with_policy_version`, `with_checksum`, `with_envelope_payload`).
+
+2. **Durable Outbox Context Retention (`OutboxRange`):**
+   - Extended `OutboxRange` in `crates/kamish-outbox` with typed fields: `context: Option<RecordContext>`, `policy_version: u64`, and `checksum: Option<u32>`.
+   - Implemented `Default` and non-destructive builder methods on `OutboxRange`.
+   - Preserved existing `byte_size()` and `required_capacity()` capacity-accounting bounds without alteration.
+
+3. **Originating Broker Produce Path (`BrokerServer::produce_at_epoch`):**
+   - Preserved `RecordContext` creation during admission (containing `producer_id`, `producer_epoch`, `sequence`, `origin_region`, `request_policy`, `replication_targets`, and cluster `source_generation`).
+   - Populated `OutboxRange` in `produce_at_epoch` with the full `context`, `policy_version`, computed V2 `checksum`, and serialized `RecordEnvelope` in `envelope_payload`.
+
+4. **Disk-to-Outbox Recovery Path (`BrokerServer::repopulate_outbox_from_log`):**
+   - When staging unreplicated records from physical log segments (`partition.data`), extracts `record.context`, `record.policy_version`, `record.checksum`, and serialized `RecordEnvelope`.
+   - Avoids dropping admission context when queues are repopulated following broker restarts or backlog refills.
+
+5. **Replication Agent Transmission (`cmd/kamish-agent`):**
+   - Unified replication request building across `execute_task`, `step_replication`, and `step_replication_tcp` via `build_replication_request`.
+   - Transparently extracts context and metadata from either typed fields or fallback `envelope_payload`, ensuring zero loss across both in-memory channel dispatch and TCP client serialization.
+
+6. **Follower Ingestion & Checksum Verification (`BrokerServer::handle_replication`):**
+   - Reconstructs `RecordEnvelope` on the receiving follower and validates incoming `checksum` against `candidate_env.expected_checksum()` prior to disk append, rejecting corrupted or tampered wire transfers with `"replication_checksum_mismatch"`.
+   - Deduplication check (Case 1) now rigorously compares `checksum` and `RecordContext` against locally committed records, rejecting diverged payloads with `"replication_history_conflict"`.
+   - Appends records using `log.append_with_context(...)`, persisting `RECORD_MAGIC_V2` envelopes with dense offsets and exact checksums.
+   - Follower replicas now retain full provenance, ensuring subsequent promotion, quarantine, or outbox repopulation paths possess complete admission context.
+
+### 29.2 Replication Path and Affected Components
+
+- **Storage Layer (`crates/kamish-log`):** Exposed `RecordEnvelope::expected_checksum()` publicly for receiver verification.
+- **Outbox Queue (`crates/kamish-outbox`):** Added `RecordContext`, `policy_version`, and `checksum` to `OutboxRange`.
+- **Broker Daemon (`cmd/kamish-broker`):** Re-exported `RecordContext` and `RecordEnvelope`; updated `ReplicationRequest`, `produce_at_epoch`, `repopulate_outbox_from_log`, and `handle_replication`.
+- **Replication Agent (`cmd/kamish-agent`):** Centralized envelope construction via `build_replication_request` in `execute_task`, `step_replication`, and `step_replication_tcp`.
+
+### 29.3 Wire-Format Changes & Compatibility
+
+- **Transport:** JSON-lines framed TCP / mTLS protocol (`BrokerRequest::Replicate(ReplicationRequest)`).
+- **Format:** New keys (`context`, `source_generation`, `policy_version`, `checksum`, `envelope_payload`) are serialized in JSON payloads.
+- **Compatibility:** `#[serde(default)]` guarantees that messages omitting these fields are deserialized with default legacy parameters without serialization errors.
+
+### 29.4 Remaining Gaps & Assumptions
+
+- Transporting provenance across the replication pipeline preserves record identity, but does not by itself establish multi-region consensus or cryptographic non-repudiation.
+- Sealed replication mode remains intentionally disabled until verified encryption/key custody is completed.
+- Quorum acknowledgments currently require 2-of-3 in-region replica confirmations; cross-region replication remains asynchronous via the bounded outbox queue.

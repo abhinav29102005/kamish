@@ -135,6 +135,7 @@ fn test_reservation_lifecycle_and_accounting_invariants() {
         is_sealed: false,
         source_generation: 1,
         envelope_payload: None,
+        ..Default::default()
     };
     res2.commit(range).unwrap();
 
@@ -179,6 +180,7 @@ async fn test_producer_cancellation_releases_reservation() {
             is_sealed: false,
             source_generation: 1,
             envelope_payload: None,
+            ..Default::default()
         };
         reservation.commit(range).unwrap();
     });
@@ -307,6 +309,7 @@ fn test_multi_partition_restart_reconciliation_isolation() {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             })
             .unwrap();
     }
@@ -323,6 +326,7 @@ fn test_multi_partition_restart_reconciliation_isolation() {
                 is_sealed: false,
                 source_generation: 1,
                 envelope_payload: None,
+                ..Default::default()
             })
             .unwrap();
     }

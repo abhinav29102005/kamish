@@ -15,8 +15,9 @@
 
 use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
+pub use kamish_log::{RecordContext, RecordEnvelope};
 use kamish_log::{
-    LogError, PartitionLog, RecordContext, RecordEnvelope, SessionError, SessionManager,
+    LogError, PartitionLog, SessionError, SessionManager,
 };
 use kamish_meta::{
     DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, MonotonicClock,
@@ -136,7 +137,7 @@ pub struct FetchResponse {
 }
 
 /// Cross-region replication request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReplicationRequest {
     pub topic: String,
     pub partition: u32,
@@ -148,6 +149,107 @@ pub struct ReplicationRequest {
     pub to_offset: u64,
     pub payload: Vec<u8>,
     pub is_sealed: bool,
+    #[serde(default)]
+    pub context: Option<RecordContext>,
+    #[serde(default = "default_source_generation")]
+    pub source_generation: u64,
+    #[serde(default = "default_policy_version")]
+    pub policy_version: u64,
+    #[serde(default)]
+    pub checksum: Option<u32>,
+    #[serde(default)]
+    pub envelope_payload: Option<Vec<u8>>,
+}
+
+fn default_source_generation() -> u64 {
+    1
+}
+
+fn default_policy_version() -> u64 {
+    1
+}
+
+impl Default for ReplicationRequest {
+    fn default() -> Self {
+        Self {
+            topic: String::new(),
+            partition: 0,
+            source_region: String::new(),
+            target_region: String::new(),
+            class_id: String::new(),
+            epoch: 0,
+            from_offset: 0,
+            to_offset: 0,
+            payload: Vec::new(),
+            is_sealed: false,
+            context: None,
+            source_generation: 1,
+            policy_version: 1,
+            checksum: None,
+            envelope_payload: None,
+        }
+    }
+}
+
+impl ReplicationRequest {
+    pub fn new(
+        topic: impl Into<String>,
+        partition: u32,
+        source_region: impl Into<String>,
+        target_region: impl Into<String>,
+        class_id: impl Into<String>,
+        epoch: u64,
+        from_offset: u64,
+        to_offset: u64,
+        payload: Vec<u8>,
+        is_sealed: bool,
+    ) -> Self {
+        Self {
+            topic: topic.into(),
+            partition,
+            source_region: source_region.into(),
+            target_region: target_region.into(),
+            class_id: class_id.into(),
+            epoch,
+            from_offset,
+            to_offset,
+            payload,
+            is_sealed,
+            context: None,
+            source_generation: 1,
+            policy_version: 1,
+            checksum: None,
+            envelope_payload: None,
+        }
+    }
+
+    pub fn with_context(mut self, context: Option<RecordContext>) -> Self {
+        if let Some(ref ctx) = context {
+            self.source_generation = ctx.source_generation;
+        }
+        self.context = context;
+        self
+    }
+
+    pub fn with_source_generation(mut self, generation: u64) -> Self {
+        self.source_generation = generation;
+        self
+    }
+
+    pub fn with_policy_version(mut self, policy_version: u64) -> Self {
+        self.policy_version = policy_version;
+        self
+    }
+
+    pub fn with_checksum(mut self, checksum: u32) -> Self {
+        self.checksum = Some(checksum);
+        self
+    }
+
+    pub fn with_envelope_payload(mut self, envelope_payload: Option<Vec<u8>>) -> Self {
+        self.envelope_payload = envelope_payload;
+        self
+    }
 }
 
 /// Response for replication transfer.
@@ -1332,12 +1434,13 @@ impl BrokerServer {
                 }
             }
         }
+        let source_gen = context.source_generation;
         let offset = log.append_with_context(
             epoch,
             &req.class_id,
             decision.policy_version,
             req.payload.clone(),
-            Some(context),
+            Some(context.clone()),
         )?;
 
         // Update session state
@@ -1347,6 +1450,19 @@ impl BrokerServer {
             req.sequence_base,
             offset,
         );
+
+        let mut committed_env = RecordEnvelope::new(
+            epoch,
+            &req.class_id,
+            decision.policy_version,
+            offset,
+            req.payload.clone(),
+        );
+        committed_env.magic = kamish_log::RECORD_MAGIC_V2;
+        committed_env.context = Some(context.clone());
+        let committed_checksum = committed_env.expected_checksum().unwrap_or(committed_env.checksum);
+        committed_env.checksum = committed_checksum;
+        let envelope_bytes = serde_json::to_vec(&committed_env).ok();
 
         // 5. Commit all reserved outbox ranges (§3.B)
         for (peer, reservation, is_sealed) in reservations {
@@ -1359,11 +1475,11 @@ impl BrokerServer {
                 class_id: req.class_id.clone(),
                 payload: req.payload.clone(),
                 is_sealed,
-                source_generation: self
-                    .meta
-                    .issue_source_identity(&format!("cluster-{}", self.region), &self.region)
-                    .map_or(1, |g| g.generation),
-                envelope_payload: None,
+                source_generation: source_gen,
+                envelope_payload: envelope_bytes.clone(),
+                context: Some(context.clone()),
+                policy_version: decision.policy_version,
+                checksum: Some(committed_checksum),
             };
             if let Err(e) = reservation.commit(range) {
                 tracing::warn!(
@@ -1530,14 +1646,87 @@ impl BrokerServer {
             });
         }
 
+        // Extract context, policy_version, checksum
+        let (extracted_ctx, extracted_pv, extracted_cs) = if let Some(ref env_bytes) = req.envelope_payload {
+            if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
+                (env.context, Some(env.policy_version), Some(env.checksum))
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
+
+        let mut record_context = req.context.or(extracted_ctx);
+        if let Some(ref mut ctx) = record_context {
+            if ctx.source_generation == 1 && req.source_generation > 1 {
+                ctx.source_generation = req.source_generation;
+            }
+        }
+
+        let policy_version = if req.policy_version > 0 {
+            req.policy_version
+        } else if let Some(pv) = extracted_pv {
+            pv
+        } else {
+            decision.policy_version
+        };
+
+        let incoming_checksum = req.checksum.or(extracted_cs);
+
+        // Verify incoming record checksum if provided
+        if let Some(expected_cs) = incoming_checksum {
+            let candidate_magic = if record_context.is_some() {
+                kamish_log::RECORD_MAGIC_V2
+            } else {
+                kamish_log::RECORD_MAGIC_V1
+            };
+            let mut candidate_env = RecordEnvelope::new(
+                req.epoch,
+                &req.class_id,
+                policy_version,
+                req.from_offset,
+                req.payload.clone(),
+            );
+            candidate_env.magic = candidate_magic;
+            candidate_env.context = record_context.clone();
+            if let Some(computed) = candidate_env.expected_checksum() {
+                if computed != expected_cs {
+                    tracing::error!(
+                        topic = %req.topic,
+                        partition = req.partition,
+                        offset = req.from_offset,
+                        computed = computed,
+                        expected = expected_cs,
+                        "Replication checksum mismatch on incoming record"
+                    );
+                    return Ok(ReplicationResponse {
+                        accepted: false,
+                        applied_watermark: local_next,
+                        reason: "replication_checksum_mismatch".into(),
+                    });
+                }
+            }
+        }
+
         // Deduplication upon reconnect (INV-5, INV-6):
         // Case 1: Entire range is already committed locally -> Idempotent no-op ACK
         if req.to_offset <= local_next {
             let same_record = log.read(req.from_offset, 1).first().is_some_and(|record| {
-                record.epoch == req.epoch
+                let base_match = record.epoch == req.epoch
                     && record.class_id == req.class_id
                     && record.payload == req.payload
-                    && record.verify_checksum()
+                    && record.verify_checksum();
+                let checksum_match = match incoming_checksum {
+                    Some(cs) => record.checksum == cs,
+                    None => true,
+                };
+                let context_match = match (&record.context, &record_context) {
+                    (Some(existing), Some(incoming)) => existing == incoming,
+                    (None, None) => true,
+                    _ => false,
+                };
+                base_match && checksum_match && context_match
             });
             if !same_record {
                 return Ok(ReplicationResponse {
@@ -1555,11 +1744,12 @@ impl BrokerServer {
 
         // Case 2: Exact next contiguous offset -> Append and advance watermark (INV-5)
         if req.from_offset == local_next {
-            let applied_offset = log.append(
+            let applied_offset = log.append_with_context(
                 req.epoch,
                 &req.class_id,
-                decision.policy_version,
+                policy_version,
                 req.payload,
+                record_context,
             )?;
             let new_watermark = applied_offset + 1;
             self.local_tracker.update_watermark(
@@ -1686,6 +1876,7 @@ impl BrokerServer {
                     if send_decision.mode != DestinationMode::Cleartext {
                         continue; // Never reconstruct plaintext as a sealed range.
                     }
+                    let envelope_bytes = serde_json::to_vec(&record).ok();
                     let range = OutboxRange {
                         topic: topic.to_string(),
                         partition,
@@ -1699,7 +1890,10 @@ impl BrokerServer {
                             .context
                             .as_ref()
                             .map_or(1, |c| c.source_generation),
-                        envelope_payload: None,
+                        envelope_payload: envelope_bytes,
+                        context: record.context.clone(),
+                        policy_version: record.policy_version,
+                        checksum: Some(record.checksum),
                     };
                     match outbox.enqueue(range) {
                         Ok(()) => staged_count += 1,
@@ -2664,6 +2858,7 @@ mod tests {
                     to_offset: 1,
                     payload: b"sensitive".to_vec(),
                     is_sealed,
+                    ..Default::default()
                 })
                 .unwrap();
             assert!(!response.accepted);
@@ -2730,6 +2925,7 @@ mod tests {
             to_offset: 1,
             payload: b"original".to_vec(),
             is_sealed: false,
+            ..Default::default()
         };
         assert!(
             receiver
@@ -2924,6 +3120,11 @@ mod tests {
                 to_offset: range.end_offset,
                 payload: range.payload,
                 is_sealed: range.is_sealed,
+                context: range.context,
+                source_generation: range.source_generation,
+                policy_version: range.policy_version,
+                checksum: range.checksum,
+                envelope_payload: range.envelope_payload,
             };
             let rep_res = broker_b.handle_replication(rep_req).unwrap();
             assert!(rep_res.accepted);
@@ -2992,6 +3193,11 @@ mod tests {
                 to_offset: range.end_offset,
                 payload: range.payload,
                 is_sealed: range.is_sealed,
+                context: range.context,
+                source_generation: range.source_generation,
+                policy_version: range.policy_version,
+                checksum: range.checksum,
+                envelope_payload: range.envelope_payload,
             };
             let rep_res = broker_b.handle_replication(rep_req).unwrap();
             assert!(rep_res.accepted);
