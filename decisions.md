@@ -514,3 +514,36 @@ Under multi-region operation (Item 1.3, §2.2, §6.2), when partition ownership 
 3. **Multi-Region Fail-Closed Admission:**
    - In `DeploymentMode::MultiRegion`, any partition without an active, authoritative ownership grant in consensus fails closed (`unregistered_stream_in_multi_region_mode`).
    - Ownership changes and epoch claims MUST execute via atomic consensus CAS (`compare_and_swap_epoch`). Competing or superseded claimants are rejected with `BrokerError::EpochFenced`.
+
+
+---
+
+## ADR-0019: Phase 5 Gateway Service Architecture and Security Protocol (Rust Axum)
+
+**Status:** Decided. **Date:** 1 November 2026.
+
+### Context
+
+Browsers run in sandboxed JavaScript environments and cannot directly open raw TCP sockets or establish direct mutual-TLS socket connections with the Kamish broker daemon. An intermediary gateway service is required to translate web standards (REST and Server-Sent Events/WebSocket) into authenticated broker operations.
+
+The gateway may be built either in Node.js (leveraging `packages/kamish-sdk`) or in Rust (leveraging `crates/kamish-client` and `cmd/kamish-broker`).
+
+### Decision
+
+**We recommend and adopt a Rust-based Gateway (`cmd/kamish-gateway`) built on Axum and Tower:**
+
+1. **Protocol and SDK Parity:**
+   - The Rust client SDK (`crates/kamish-client`) supports full TLS 1.3 mutual authentication, client identity propagation, lease status inspection, outbox watermarks, and cryptographic checkpoint validation.
+   - The Node.js SDK (`packages/kamish-sdk`) remains an experimental local prototype with plaintext TCP sockets and lacks TLS client-auth and multi-region metadata authority integration.
+   - Building the gateway in Rust allows direct in-process or mTLS socket bridging using the production Rust client SDK.
+
+2. **Security & Session Management:**
+   - **Authentication:** Cryptographic password verification using PBKDF2-HMAC-SHA256 with per-user 16-byte random salt and 100,000 iterations.
+   - **Session Storage:** Server-side authenticated sessions identified by high-entropy 256-bit cryptographically random tokens (`rand::thread_rng`).
+   - **Cookie Protection:** Session tokens stored in `httpOnly`, `SameSite=Strict`, `Path=/`, `Secure` (in TLS mode) cookies.
+   - **CSRF Defense:** Double-submit CSRF protection requiring matching `X-CSRF-Token` headers on all state-changing operations (`POST`, `PUT`, `DELETE`).
+   - **Role-Based Access Control (RBAC):** Hierarchical roles (`Admin`, `Operator`, `Auditor`, `Producer`, `Consumer`) enforced at router middleware before request dispatch.
+   - **Rate Limiting:** Sliding-window rate limiter per IP and session (100 req/min for general API, 10 req/min for `/api/auth/login`).
+
+3. **Real-Time Event Streaming (SSE):**
+   - High-throughput, low-overhead Server-Sent Events (`GET /api/events`) broadcasting live broker state, per-stream replication lag, outbox depth, and audit events to browser frontends.

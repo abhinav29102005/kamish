@@ -1,12 +1,13 @@
-import React from 'react';
+import React from "react";
 
 export default function Navbar({ currentRoute, onNavigate }) {
   const navItems = [
-    { id: 'home', label: 'Home' },
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'new', label: 'New' },
-    { id: 'contact', label: 'Contact' },
+    { id: "home", label: "Home" },
+    { id: "dashboard", label: "Dashboard" },
+    { id: "topics", label: "Topics Catalog" },
+    { id: "console", label: "Produce/Fetch" },
+    { id: "authority", label: "Authority & Policy" },
+    { id: "audit", label: "Audit & Checkers" },
   ];
 
   return (
@@ -14,7 +15,8 @@ export default function Navbar({ currentRoute, onNavigate }) {
       {navItems.map((item) => (
         <button
           key={item.id}
-          className={`dock-pill ${currentRoute === item.id ? 'active' : ''}`}
+          id={`nav-${item.id}`}
+          className={`dock-pill ${currentRoute === item.id ? "active" : ""}`}
           onClick={() => onNavigate(item.id)}
         >
           {item.label}

@@ -7,6 +7,7 @@ export default function KamishDragon3D({ isFlameOn }) {
   const flameRef = useRef(isFlameOn);
   const [loadProgress, setLoadProgress] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isWebGlError, setIsWebGlError] = useState(false);
 
   useEffect(() => { flameRef.current = isFlameOn; }, [isFlameOn]);
 
@@ -24,14 +25,21 @@ export default function KamishDragon3D({ isFlameOn }) {
     const camera = new THREE.PerspectiveCamera(38, width / height, 0.1, 1000);
     camera.position.set(0, 0.05, 3.8);
 
-    // 3. Renderer with HDR & Filmic Tone Mapping
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.48;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    container.appendChild(renderer.domElement);
+    // 3. Renderer with HDR & Filmic Tone Mapping with WebGL fallback
+    let renderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.48;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      container.appendChild(renderer.domElement);
+    } catch (err) {
+      console.warn("WebGL renderer creation failed:", err);
+      setIsWebGlError(true);
+      return;
+    }
 
     // 4. Atmospheric Sovereign Lighting
     const ambientLight = new THREE.AmbientLight(0x281245, 2.3);

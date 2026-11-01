@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useKamish } from '../context/useKamish';
-import KamishDragon3D from '../components/KamishDragon3D';
+import { lazy, Suspense } from 'react';
+const KamishDragon3D = lazy(() => import('../components/KamishDragon3D'));
 
 export default function HomePage({ onNavigate }) {
   const [isFlameOn, setIsFlameOn] = useState(false);
@@ -40,16 +41,50 @@ export default function HomePage({ onNavigate }) {
         textAlign: 'center',
       }}
     >
-      {/* Living 3D Animated Dragon Container (Moving Wings, Neck/Head, Hands/Claws, Tail) */}
+      {/* Living 3D Animated Dragon Container with WebGL / prefers-reduced-motion fallback */}
       <div
         style={{
           width: '100%',
           maxWidth: '1240px',
+          minHeight: '380px',
           position: 'relative',
           marginBottom: '0.5rem',
         }}
       >
-        <KamishDragon3D isFlameOn={isFlameOn} />
+        {typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches ? (
+          <div
+            style={{
+              width: '100%',
+              height: '380px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <img
+              src="/logo.png"
+              alt="Kamish Dragon Crest"
+              style={{
+                width: '240px',
+                height: '240px',
+                objectFit: 'contain',
+                filter: 'drop-shadow(0 0 30px rgba(168, 85, 247, 0.7))',
+              }}
+            />
+            <span style={{ marginTop: '1rem', fontSize: '0.8rem', fontFamily: 'var(--font-mono)', color: '#a855f7' }}>
+              [PREFERS-REDUCED-MOTION: 2D STATIC SCHEMATIC]
+            </span>
+          </div>
+        ) : (
+          <Suspense fallback={
+            <div style={{ height: '380px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', fontFamily: 'var(--font-mono)' }}>
+              INITIALIZING WEBGL 3D MESH...
+            </div>
+          }>
+            <KamishDragon3D isFlameOn={isFlameOn} />
+          </Suspense>
+        )}
       </div>
 
       {/* Subtitle matching Mockup Page 1: HUMANITY'S GREATEST CALAMITY */}
