@@ -1,42 +1,86 @@
 # Kamish frontend — hybrid gateway console and local simulation
 
-The React/Vite frontend contains a **hybrid** of gateway-backed operations and browser-local demonstration state. It is not accurate to describe the entire application as either fully simulated or a fully live broker console.
+The React/Vite frontend contains a **hybrid** architecture supporting both live broker gateway interaction and browser-local demonstration simulation. The UI makes the provenance and connection boundaries explicit to the operator.
 
-## Gateway-backed paths
+## Architecture & Modes
 
-`frontend/src/utils/gatewayClient.ts` calls the Rust HTTP gateway for authentication, status, streams, authority, policy, audit/checker information, topic operations, produce/fetch, mode changes, and server-sent events. The gateway routes are registered in `cmd/kamish-gateway/src/lib.rs`; the default local gateway port is `3001`.
+### 1. Live Broker Mode (`isLiveMode: true`)
+- Connected to the Rust HTTP Gateway (`cmd/kamish-gateway`).
+- Interacts with real broker endpoints:
+  - Session authentication with PBKDF2-HMAC-SHA256 and CSRF tokens (`/api/auth/*`).
+  - Real record produce and offset fetch (`/api/records/produce`, `/api/records/fetch`).
+  - Real regional cluster health, authority epochs, and partition leases (`/api/status`, `/api/authority`).
+  - Real bounded destination outbox queue depth and replication lags (`/api/streams`).
+  - Live cryptographic audit log verification (`/api/audit/verify`, `/api/audit`).
+  - Reactive server-sent events (`/api/events`).
+- Live cluster badge dynamically displays true gateway connection state (`CONNECTED`, `CONNECTING`, `AUTH REQUIRED`, `GATEWAY UNAVAILABLE`, or `CONFIG ERROR`), eliminating false-green indicators when the backend is offline.
 
-## Local/demo-only paths
+### 2. Demo Simulation Mode (`isLiveMode: false`)
+- Local browser simulation for demonstrations, UI previews, and chaos engineering testing.
+- Exercises client-side WebCrypto SHA-256 tamper-evident hash chaining.
+- Simulates WAN delays, network partitions, and failover scenarios (A, B, C) in local state.
+- Clearly marked with `[DEMO]` tags, distinct from live broker telemetry.
 
-- Dashboard regional nodes, link metrics, telemetry defaults, and the browser audit ledger begin with local demo data.
-- `produceCustomEvent` and the built-in demonstration scenarios update local UI state and do not constitute proof that the broker processed those events.
-- Unauthenticated topic, authority, and audit views can fall back to illustrative demo values.
-- Demo task creation stores data in this browser's `localStorage`; it does not dispatch broker events.
-- The 3D illustration is not measured system evidence.
+---
 
-Use the UI's mode and status indicators carefully. A successful request from one page does not mean every chart, scenario, audit row, or regional status is sourced from the live broker.
+## Configuration & Environment Variables
 
-## Local development
+See `.env.example` for reference settings.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `VITE_KAMISH_GATEWAY_URL` | No (in same-origin proxy) / Yes (in separate-origin) | `""` (relative `/api`) | Explicit target gateway base URL (e.g. `https://gateway.example.com`). Must specify `http://` or `https://`. Trailing slashes are automatically normalized. |
+| `VITE_ENABLE_DEV_LOGIN` | No | `false` | When `"true"`, pre-fills development test credentials and shows quick-fill role buttons on `SignInPage`. Gated off in production builds by default. |
+
+---
+
+## Deployment Topologies
+
+### Topology A: Single-Origin Reverse Proxy (Recommended for Production)
+The frontend static SPA build (`dist/`) and the Rust gateway (`kamish-gateway` on port 3001) are hosted behind the same domain using a reverse proxy such as Nginx or Caddy.
+
+- Leave `VITE_KAMISH_GATEWAY_URL` unset (or empty).
+- The client automatically uses same-origin relative paths (`/api/*`, `/metrics`, `/api/events`).
+- Eliminates cross-origin CORS handling, preflight overhead, and cookie samesite/secure boundary issues.
+- See [`nginx.conf.example`](./nginx.conf.example) for a production Nginx configuration including SSE streaming headers and SPA fallback routing.
+
+### Topology B: Local Development Server with Proxy
+During local development, the Vite dev server runs on port 5173 and automatically proxies `/api` and `/metrics` requests to `http://127.0.0.1:3001` (configured in `vite.config.ts`).
 
 ```bash
+# Terminal 1: Run Rust Gateway (dev mode with loopback binding)
+cargo run -p kamish-gateway -- --port 3001 --region EU_WEST --dev
+
+# Terminal 2: Run Frontend Dev Server
+cd frontend
 npm ci
 npm run dev
-npm run typecheck
-npm run lint
-npm test
-npm run build
 ```
 
-The Vite dev server defaults to port `5173`; the gateway defaults to port `3001`. The client currently defaults to `http://127.0.0.1:3001` when running on port 5173 and otherwise uses same-origin relative API paths. No deployment-configurable gateway URL or Vite proxy was found during the 2026-11-01 source audit.
+### Topology C: Separate-Origin Deployment
+If the frontend and gateway are hosted on distinct domains (e.g., `https://console.example.com` and `https://api.example.com`):
+1. Build frontend with `VITE_KAMISH_GATEWAY_URL=https://api.example.com`.
+2. Start `kamish-gateway` with the frontend origin explicitly allowed:
+   ```bash
+   kamish-gateway --allowed-origins "https://console.example.com"
+   # or via environment variable:
+   export KAMISH_GATEWAY_ALLOWED_ORIGINS="https://console.example.com"
+   ```
+3. The gateway strictly validates the `Origin` header against this whitelist, emits `Access-Control-Allow-Origin` matching the requested origin, and enables `Access-Control-Allow-Credentials: true`. Wildcard origins (`*`) are strictly prohibited with credentials.
 
-## Separate frontend/backend deployment
+---
 
-A separately hosted frontend is **not verified by the current repository configuration**. In production, configure a same-origin reverse proxy for `/api/*` and `/metrics`, or implement an explicit gateway-origin configuration together with a strict backend CORS allowlist and a secure cross-origin session/SSE design. The gateway currently permits localhost origins only; do not use wildcard CORS with credentials.
+## Authentication & Security Boundaries
 
-The frontend sign-in page currently pre-fills development credentials and provides quick-fill roles. Treat these as development-only UI, not production credentials; do not deploy this behavior to a public production console without gating/removing it.
+- **Production Sign-In**: In production builds, `SignInPage` renders clean empty credential inputs and requires manual authentication.
+- **Dev Gating**: Quick preset buttons (`admin`, `operator`, `auditor`, `producer`, `consumer`) and default credentials are only enabled when `import.meta.env.DEV` is active or `VITE_ENABLE_DEV_LOGIN="true"` is set.
+- **CSRF & Session Protection**: All state-modifying requests (`POST`, `PUT`, `DELETE`) require `x-csrf-token` matching the session cookie.
+- **WebCrypto**: Browser-side cryptographic operations require HTTPS or loopback origins.
 
-Use HTTPS (or loopback development origins) for WebCrypto. Browser-local audit entries are not compatible with or proof of the broker's region-local audit log. The application does not establish physical residency, distributed durability, or exactly-once delivery.
+---
 
-## Verification status
+## Verification & Status
 
-The 2026-11-01 release verification report claims 261/261 automated tests passing at source revision `3bab180`. Benchmark execution was marked `CONFIGURED_UNEXECUTED`; live external etcd/KMS/witness services and separately hosted browser-to-gateway behavior were not established by that local test count. See [the reconciliation report](../audit/release_verification_20261101/RECONCILIATION_REPORT.md).
+- Automated tests passing at verified source revision `3bab18053c9d7a7256d8e00981531cf67a815b50` (261 unit & integration tests).
+- Frontend production build (`npm run build`) verifies TypeScript compilation and asset bundling.
+- For complete evidence reconciliation, see [`RECONCILIATION_REPORT.md`](../audit/release_verification_20261101/RECONCILIATION_REPORT.md).

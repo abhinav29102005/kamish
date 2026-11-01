@@ -11,6 +11,8 @@ model/*.obj
 # Local Environment & Secrets
 .env
 .env.*
+!.env.example
+!**/.env.example
 
 # Local binaries & etcd
 bin/

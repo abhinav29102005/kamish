@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { KamishContext } from './useKamish';
+import { KamishContext, type ConnectionStatus } from './useKamish';
 import type {
   RegionId,
   ResidencyPolicy,
@@ -114,11 +114,14 @@ const INITIAL_LINKS: LinkState[] = [
 export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [nodes, setNodes] = useState<Record<RegionId, RegionNodeState>>(INITIAL_NODES);
   const [links, setLinks] = useState<LinkState[]>(INITIAL_LINKS);
-  const [auditLedger, setAuditLedger] = useState<AuditRecord[]>([]);
+  
+  // Separate Demo and Live Audit Ledgers
+  const [demoAuditLedger, setDemoAuditLedger] = useState<AuditRecord[]>([]);
+  const [liveAuditLedger, setLiveAuditLedger] = useState<AuditRecord[]>([]);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [recentEvents, setRecentEvents] = useState<StreamEvent[]>([]);
   
-  // Chaos & tuning states
+  // Chaos & tuning states (Demo mode)
   const [wanDelayMs, setWanDelayMs] = useState<number>(0);
   const [isPartitioned, setIsPartitioned] = useState<boolean>(false);
   const [adaptiveRoutingActive, setAdaptiveRoutingActive] = useState<boolean>(false);
@@ -152,8 +155,14 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     logs: [],
   });
 
-  // Phase 5 Gateway states
+  // Gateway connectivity & Session states
   const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(() =>
+    gatewayClient.getConfigError() ? "config_error" : "connecting"
+  );
+  const [connectionError, setConnectionError] = useState<string | null>(() =>
+    gatewayClient.getConfigError()
+  );
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayAuthority, setGatewayAuthority] = useState<AuthorityState | null>(null);
   const [currentUser, setCurrentUser] = useState<GatewayUser | null>(() => gatewayClient.getCurrentUser());
@@ -164,7 +173,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const auditQueue = useRef<Promise<void>>(Promise.resolve());
   const initializationStarted = useRef(false);
 
-  // Initialize genesis audit record
+  // Initialize demo genesis audit record
   useEffect(() => {
     if (initializationStarted.current) return;
     initializationStarted.current = true;
@@ -220,14 +229,14 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
 
       ledgerRef.current = [genesisRecord, secondRecord];
-      setAuditLedger(ledgerRef.current);
+      setDemoAuditLedger(ledgerRef.current);
     }
     auditQueue.current = auditQueue.current.then(initAudit).catch(error => {
       setAuditError(error instanceof Error ? error.message : 'Demo audit initialization failed');
     });
   }, []);
 
-  // Helper to record an audit entry
+  // Helper to record an in-memory demo audit entry
   const recordAudit = async (
     action: AuditRecord['action'],
     topic: string,
@@ -237,41 +246,41 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     reason: string
   ): Promise<AuditRecord> => {
     const task = auditQueue.current.then(async () => {
-    const list = ledgerRef.current;
-    const prev = list.length > 0 ? list[list.length - 1] : null;
-    const prevHash = prev ? prev.hash : GENESIS_HASH;
-    const nextSeq = list.length + 1;
+      const list = ledgerRef.current;
+      const prev = list.length > 0 ? list[list.length - 1] : null;
+      const prevHash = prev ? prev.hash : GENESIS_HASH;
+      const nextSeq = list.length + 1;
 
-    const hash = await computeAuditEntryHash(
-      prevHash,
-      nextSeq,
-      action,
-      topic,
-      source,
-      target,
-      1,
-      outcome,
-      reason
-    );
+      const hash = await computeAuditEntryHash(
+        prevHash,
+        nextSeq,
+        action,
+        topic,
+        source,
+        target,
+        1,
+        outcome,
+        reason
+      );
 
-    const record: AuditRecord = {
-      seq: nextSeq,
-      timestamp: new Date().toISOString(),
-      action,
-      topic,
-      sourceRegion: source,
-      targetRegion: target,
-      policyVersion: 1,
-      outcome,
-      reason,
-      prevHash,
-      hash,
-    };
+      const record: AuditRecord = {
+        seq: nextSeq,
+        timestamp: new Date().toISOString(),
+        action,
+        topic,
+        sourceRegion: source,
+        targetRegion: target,
+        policyVersion: 1,
+        outcome,
+        reason,
+        prevHash,
+        hash,
+      };
 
-    ledgerRef.current = [...list, record];
-    setAuditLedger(ledgerRef.current);
-    setAuditError(null);
-    return record;
+      ledgerRef.current = [...list, record];
+      setDemoAuditLedger(ledgerRef.current);
+      setAuditError(null);
+      return record;
     });
     auditQueue.current = task.then(() => {}, error => {
       setAuditError(error instanceof Error ? error.message : 'Demo audit append failed');
@@ -279,8 +288,12 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return task;
   };
 
-  // High-frequency 10Hz tick simulation (Netdata sub-second responsiveness)
+  // High-frequency 10Hz tick simulation (DEMO MODE ONLY: Never run synthetic tick in LIVE mode)
   useEffect(() => {
+    if (isLiveMode) {
+      return;
+    }
+
     const interval = setInterval(() => {
       setNodes((prevNodes) => {
         const eu = { ...prevNodes.EU_WEST };
@@ -304,8 +317,8 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         ap.leaseExpiresInSec = ap.leaseExpiresInSec <= 0.5 ? 10.0 : parseFloat((ap.leaseExpiresInSec - 0.1).toFixed(1));
 
-        // Background traffic ingestion (DEMO MODE ONLY: Never invent synthetic writes in LIVE mode)
-        if (!isLiveMode && trafficRateEps > 0 && scenarioState.status !== 'running') {
+        // Background traffic ingestion in demo mode
+        if (trafficRateEps > 0 && scenarioState.status !== 'running') {
           const delta = trafficRateEps * 0.1; // per 100ms
           const increment = Math.floor(delta) + (Math.random() < delta % 1 ? 1 : 0);
           if (increment > 0) {
@@ -313,12 +326,10 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             if (isPartitioned) {
               eu.outboxQueueSize += increment;
             } else if (wanDelayMs > 0) {
-              // delayed ack: buffer in outbox
               const queueGrowth = Math.min(increment, 2);
               eu.outboxQueueSize = Math.min(eu.outboxQueueSize + queueGrowth, 200);
               us.durableWatermark = Math.max(us.durableWatermark, eu.localCommittedOffset - eu.outboxQueueSize);
             } else {
-              // Healthy instant drain
               if (eu.outboxQueueSize > 0) {
                 eu.outboxQueueSize = Math.max(0, eu.outboxQueueSize - 1);
               }
@@ -357,8 +368,16 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(interval);
   }, [trafficRateEps, wanDelayMs, isPartitioned, adaptiveRoutingActive, scenarioState.status, isLiveMode]);
 
-  // Phase 5 Gateway telemetry refresh
+  // Real Gateway telemetry refresh
   const refreshLiveTelemetry = async () => {
+    const cfgErr = gatewayClient.getConfigError();
+    if (cfgErr) {
+      setConnectionStatus("config_error");
+      setConnectionError(cfgErr);
+      setGatewayError(cfgErr);
+      return;
+    }
+
     try {
       const [status, authority, streams] = await Promise.all([
         gatewayClient.getStatus(),
@@ -369,15 +388,18 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setGatewayStatus(status);
       setGatewayAuthority(authority);
       setGatewayError(null);
+      setConnectionError(null);
       setIsSessionExpired(false);
+      setConnectionStatus("connected");
 
       setNodes((prev) => {
         const updated = { ...prev };
-        if (updated[status.region as RegionId]) {
-          updated[status.region as RegionId] = {
-            ...updated[status.region as RegionId],
+        const primaryRegion = (status.region || "EU_WEST") as RegionId;
+        if (updated[primaryRegion]) {
+          updated[primaryRegion] = {
+            ...updated[primaryRegion],
             status: status.status === "HEALTHY" ? "HEALTHY" : "DEGRADED",
-            activeEpoch: authority.ownerships[0]?.epoch || updated[status.region as RegionId].activeEpoch,
+            activeEpoch: authority.ownerships[0]?.epoch || updated[primaryRegion].activeEpoch,
             leaseExpiresInSec: authority.ownerships[0]?.active_lease ? 30.0 : 0.0,
           };
         }
@@ -385,8 +407,6 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
 
       const outboxPending = streams.outbox_totals?.pending_count ?? 0;
-      const outboxBytes = streams.outbox_totals?.byte_size ?? 0;
-      const oldestAge = streams.outbox_totals?.oldest_entry_age_ms ?? 0;
 
       if (streams.streams.length > 0) {
         const stream0 = streams.streams[0];
@@ -412,33 +432,64 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         };
       });
 
-      if (gatewayClient.isAuthenticated() && !currentUser) {
-        gatewayClient.getMe().then(me => setCurrentUser(me.user)).catch(() => {});
+      // Try fetching recent real audit records if authenticated
+      if (gatewayClient.isAuthenticated()) {
+        gatewayClient.getAudit(20).then((auditRes) => {
+          if (auditRes && Array.isArray(auditRes.entries)) {
+            const mapped: AuditRecord[] = auditRes.entries.map((e: any, idx: number) => ({
+              seq: e.seq ?? idx + 1,
+              timestamp: e.timestamp ?? new Date().toISOString(),
+              action: (e.action as any) || 'BrokerAppend',
+              topic: e.topic || 'kamish-live',
+              sourceRegion: (e.source_region as RegionId) || (status.region as RegionId) || 'EU_WEST',
+              targetRegion: (e.target_region as RegionId) || 'US_EAST',
+              policyVersion: e.policy_version ?? 1,
+              outcome: (e.outcome as any) || 'AllowCleartext',
+              reason: e.reason || 'Live broker audit ledger entry',
+              prevHash: e.prev_hash || '',
+              hash: e.hash || '',
+            }));
+            setLiveAuditLedger(mapped);
+          }
+        }).catch(() => {
+          // Non-fatal if unauthenticated or audit endpoint restricted
+        });
+
+        if (!currentUser) {
+          gatewayClient.getMe().then(me => setCurrentUser(me.user)).catch(() => {});
+        }
       }
     } catch (err: any) {
-      if (err.message && err.message.includes("Session expired")) {
+      const msg = err?.message || String(err);
+      if (msg.includes("Session expired") || msg.includes("Unauthorized") || msg.includes("401")) {
         setIsSessionExpired(true);
+        setConnectionStatus("auth_required");
+        setConnectionError("Gateway session expired or authentication required");
       } else {
-        setGatewayError(err.message || "Gateway disconnected");
+        setConnectionStatus("unavailable");
+        setConnectionError(msg || "Gateway unavailable");
+        setGatewayError(msg || "Gateway unavailable");
       }
     }
   };
 
-  // Telemetry stream sampler (every 500ms): In LIVE mode, refresh real gateway telemetry without synthetic jitter
+  // Telemetry stream sampler: In LIVE mode, refresh real gateway telemetry without synthetic jitter
   const simulationRef = useRef({ nodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode });
   useEffect(() => {
     simulationRef.current = { nodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode };
   }, [nodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode]);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      const { nodes: sampledNodes, wanDelayMs, isPartitioned, trafficRateEps, isLiveMode: inLive } = simulationRef.current;
-      if (inLive) {
-        // LIVE MODE: Do NOT invent numbers or run synthetic generators.
-        refreshLiveTelemetry();
-        return;
-      }
 
-      // DEMO MODE ONLY: Synthetic simulation sampling
+  useEffect(() => {
+    if (isLiveMode) {
+      // Immediate poll on live mode mount
+      refreshLiveTelemetry();
+      const liveTimer = setInterval(refreshLiveTelemetry, 1500);
+      return () => clearInterval(liveTimer);
+    }
+
+    // DEMO MODE ONLY: Synthetic simulation sampling
+    const timer = setInterval(() => {
+      const { nodes: sampledNodes, wanDelayMs, isPartitioned, trafficRateEps } = simulationRef.current;
       const eu = sampledNodes.EU_WEST;
       const us = sampledNodes.US_EAST;
       const lag = Math.max(0, eu.localCommittedOffset - us.durableWatermark);
@@ -469,9 +520,6 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => clearInterval(timer);
   }, [isLiveMode]);
 
-  // Produce a custom event
-  
-
   const toggleMode = async () => {
     const nextMode = isLiveMode ? "DEMO" : "LIVE";
     try {
@@ -489,6 +537,7 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCurrentUser(res.user);
     setIsSessionExpired(false);
     setGatewayError(null);
+    setConnectionError(null);
     await refreshLiveTelemetry();
   };
 
@@ -496,14 +545,65 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     await gatewayClient.logout();
     setCurrentUser(null);
     setIsSessionExpired(false);
+    setConnectionStatus("auth_required");
   };
 
-const produceCustomEvent = async (
+  // Produce an event (Dispatches to real gateway in LIVE mode, or local simulation in DEMO mode)
+  const produceCustomEvent = async (
     topic: string,
     key: string,
     policy: ResidencyPolicy,
     targetRegion: RegionId = 'US_EAST'
   ): Promise<boolean> => {
+    if (isLiveMode) {
+      // Map residency policy to sovereignty class name understood by gateway
+      const residencyClass = policy.type === 'StrictLocal'
+        ? 'sovereign-strict-local'
+        : policy.type === 'RestrictedReplication'
+        ? 'sovereign-restricted'
+        : policy.type === 'SealedCiphertext'
+        ? 'sovereign-sealed'
+        : 'cleartext-public';
+
+      const payload = JSON.stringify({ key, targetRegion, policy, timestamp: Date.now() });
+      try {
+        const res = await gatewayClient.produce(topic, 0, residencyClass, payload);
+        const record: AuditRecord = {
+          seq: res.base_offset,
+          timestamp: new Date().toISOString(),
+          action: 'BrokerAppend',
+          topic,
+          sourceRegion: (gatewayStatus?.region || 'EU_WEST') as RegionId,
+          targetRegion,
+          policyVersion: 1,
+          outcome: res.sovereignty_allowed ? (policy.type === 'SealedCiphertext' ? 'AllowSealed' : 'AllowCleartext') : 'Deny',
+          reason: `Broker committed base_offset=${res.base_offset} epoch=${res.committed_epoch}`,
+          prevHash: '',
+          hash: '',
+        };
+        setLiveAuditLedger((prev) => [record, ...prev]);
+        setRecentEvents((prev) => [
+          {
+            id: Date.now(),
+            topic,
+            partitionKey: key,
+            originRegion: (gatewayStatus?.region || 'EU_WEST') as RegionId,
+            residencyRule: policy,
+            timestampMs: Date.now(),
+            payloadSize: payload.length,
+            status: res.sovereignty_allowed ? 'replicated' : 'blocked',
+          },
+          ...prev.slice(0, 24),
+        ]);
+        await refreshLiveTelemetry();
+        return res.sovereignty_allowed;
+      } catch (err: any) {
+        setGatewayError(err.message || 'Live produce failed');
+        throw err;
+      }
+    }
+
+    // DEMO MODE ONLY: Local simulation
     validateDemoPolicy(policy);
     const id = Date.now();
     const event: StreamEvent = {
@@ -592,7 +692,6 @@ const produceCustomEvent = async (
     if (!id) return;
 
     if (id === 'A') {
-      // Scenario A: Gate 2 / Demo A - Data Residency Enforcement
       setScenarioState({
         id: 'A',
         name: 'Scenario A: Regional Data Residency Enforcement',
@@ -628,7 +727,6 @@ const produceCustomEvent = async (
         ],
       });
 
-      // Step 1
       await new Promise((r) => setTimeout(r, 900));
       await recordAudit(
         'Ingress',
@@ -652,7 +750,6 @@ const produceCustomEvent = async (
         ],
       }));
 
-      // Step 2 & 3
       await new Promise((r) => setTimeout(r, 1200));
       const auditRec = await recordAudit(
         'ReplicationSender',
@@ -678,7 +775,6 @@ const produceCustomEvent = async (
         ],
       }));
     } else if (id === 'B') {
-      // Scenario B: Gate 3 / Demo B - Slow-Link WAN Delay & Dynamic Lag Metrics
       setScenarioState({
         id: 'B',
         name: 'Scenario B: Slow-Link WAN Delay & Dynamic Lag Metrics',
@@ -733,7 +829,6 @@ const produceCustomEvent = async (
 
       await new Promise((r) => setTimeout(r, 1200));
 
-      // Bump local log by 50 while keeping remote watermark un-acked
       setNodes((prev) => ({
         ...prev,
         EU_WEST: {
@@ -761,7 +856,6 @@ const produceCustomEvent = async (
         ],
       }));
     } else if (id === 'C') {
-      // Scenario C: Gate 4 / Demo C - Regional Outage & Resumable Watermark Recovery
       setScenarioState({
         id: 'C',
         name: 'Scenario C: Regional Outage & Resumable Recovery',
@@ -815,7 +909,6 @@ const produceCustomEvent = async (
         ],
       }));
 
-      // Ingest 15 buffered records
       setNodes((prev) => ({
         ...prev,
         EU_WEST: {
@@ -841,7 +934,6 @@ const produceCustomEvent = async (
         ],
       }));
 
-      // Heal partition & reconcile
       setIsPartitioned(false);
       setWanDelayMs(0);
 
@@ -896,12 +988,29 @@ const produceCustomEvent = async (
     });
   };
 
-  // Verify hash-chained cryptographic ledger integrity
+  // Verify cryptographic ledger integrity: Real gateway in LIVE mode, local SHA-256 chain in DEMO mode
   const verifyAuditLedgerIntegrity = async (): Promise<{
     valid: boolean;
     count: number;
     error?: string;
   }> => {
+    if (isLiveMode) {
+      try {
+        const res = await gatewayClient.verifyAudit();
+        return {
+          valid: res.valid,
+          count: res.verified_entries_count,
+          error: res.valid ? undefined : (res.error_message || 'Gateway audit verification failed'),
+        };
+      } catch (err: any) {
+        return {
+          valid: false,
+          count: 0,
+          error: err.message || 'Gateway audit verification request failed',
+        };
+      }
+    }
+
     await auditQueue.current;
     const list = ledgerRef.current;
     if (list.length === 0 || auditError) return { valid: false, count: 0, error: auditError || 'No demo audit entries available' };
@@ -942,6 +1051,8 @@ const produceCustomEvent = async (
     return { valid: true, count: list.length };
   };
 
+  const auditLedger = isLiveMode ? liveAuditLedger : demoAuditLedger;
+
   return (
     <KamishContext.Provider
       value={{
@@ -969,6 +1080,8 @@ const produceCustomEvent = async (
         verifyAuditLedgerIntegrity,
         isLiveMode,
         toggleMode,
+        connectionStatus,
+        connectionError,
         gatewayStatus,
         gatewayAuthority,
         currentUser,

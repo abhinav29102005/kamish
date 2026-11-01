@@ -3,8 +3,13 @@ import { useKamish } from "../context/useKamish";
 
 export default function SignInPage({ onSignedIn }) {
   const { currentUser, loginToGateway, logoutFromGateway, isSessionExpired } = useKamish();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("kamish-admin-2026");
+
+  const isDevLoginEnabled = Boolean(
+    import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true"
+  );
+
+  const [username, setUsername] = useState(isDevLoginEnabled ? "admin" : "");
+  const [password, setPassword] = useState(isDevLoginEnabled ? "kamish-admin-2026" : "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -119,7 +124,9 @@ export default function SignInPage({ onSignedIn }) {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter operator username"
               required
+              autoComplete="username"
               style={{
                 width: "100%",
                 padding: "0.75rem 1rem",
@@ -143,7 +150,9 @@ export default function SignInPage({ onSignedIn }) {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter operator password"
               required
+              autoComplete="current-password"
               style={{
                 width: "100%",
                 padding: "0.75rem 1rem",
@@ -169,38 +178,40 @@ export default function SignInPage({ onSignedIn }) {
           </button>
         </form>
 
-        <div style={{ marginTop: "2rem", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "1.5rem" }}>
-          <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "#94a3b8", marginBottom: "0.75rem" }}>
-            QUICK PRESET CREDENTIALS (ROLE TESTING):
-          </span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            {[
-              { role: "Admin", u: "admin", p: "kamish-admin-2026" },
-              { role: "Operator", u: "operator", p: "kamish-operator-2026" },
-              { role: "Auditor", u: "auditor", p: "kamish-auditor-2026" },
-              { role: "Producer", u: "producer", p: "kamish-producer-2026" },
-              { role: "Consumer", u: "consumer", p: "kamish-consumer-2026" },
-            ].map(({ role, u, p }) => (
-              <button
-                key={role}
-                type="button"
-                onClick={() => handleQuickFill(u, p)}
-                style={{
-                  background: "rgba(168, 85, 247, 0.15)",
-                  border: "1px solid rgba(168, 85, 247, 0.4)",
-                  color: "#d8b4fe",
-                  padding: "4px 10px",
-                  borderRadius: "4px",
-                  fontSize: "0.75rem",
-                  fontFamily: "var(--font-mono)",
-                  cursor: "pointer",
-                }}
-              >
-                {role} ({u})
-              </button>
-            ))}
+        {isDevLoginEnabled && (
+          <div style={{ marginTop: "2rem", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "1.5rem" }}>
+            <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: "0.8rem", color: "#fbbf24", marginBottom: "0.75rem" }}>
+              DEVELOPMENT PRESET CREDENTIALS (VITE_ENABLE_DEV_LOGIN=true):
+            </span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+              {[
+                { role: "Admin", u: "admin", p: "kamish-admin-2026" },
+                { role: "Operator", u: "operator", p: "kamish-operator-2026" },
+                { role: "Auditor", u: "auditor", p: "kamish-auditor-2026" },
+                { role: "Producer", u: "producer", p: "kamish-producer-2026" },
+                { role: "Consumer", u: "consumer", p: "kamish-consumer-2026" },
+              ].map(({ role, u, p }) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => handleQuickFill(u, p)}
+                  style={{
+                    background: "rgba(168, 85, 247, 0.15)",
+                    border: "1px solid rgba(168, 85, 247, 0.4)",
+                    color: "#d8b4fe",
+                    padding: "4px 10px",
+                    borderRadius: "4px",
+                    fontSize: "0.75rem",
+                    fontFamily: "var(--font-mono)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {role} ({u})
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </section>
   );

@@ -29,14 +29,23 @@ export interface StreamTelemetry {
 
 export interface AuthorityState {
   authority_type: string;
+  consensus_backing?: string;
+  quorum_backed?: boolean;
   active_region: string;
   monotonic_clock_ms: number;
+  lease_ttl_ms?: number;
+  renewal_interval_ms?: number;
+  safety_margin_ms?: number;
+  active_leases_count?: number;
+  total_quarantined_records?: number;
   ownerships: Array<{
     topic: string;
     partition: number;
     owner_region: string;
     epoch: number;
     active_lease: boolean;
+    lease_expiry_ns?: number;
+    remaining_lease_ms?: number;
   }>;
 }
 
@@ -49,16 +58,21 @@ export interface OutboxTotals {
 export interface StreamsResponse {
   streams: StreamTelemetry[];
   count: number;
+  by_peer?: Record<string, OutboxTotals>;
   outbox_totals?: OutboxTotals;
 }
 
 export interface AuditVerificationResult {
   verification_result: string;
-  anchored_boundary: boolean;
+  hash_chain_valid?: boolean;
+  tamper_detected?: boolean;
+  zero_tamper_detected?: boolean;
+  total_entries?: number;
+  anchored_boundary: boolean | number;
+  unanchored_tail_count?: number;
   total_streams_audited: number;
   total_checkpoints_verified: number;
   cryptographic_signatures_valid: boolean;
-  zero_tamper_detected: boolean;
 }
 
 export interface ScenarioResult {
@@ -67,19 +81,118 @@ export interface ScenarioResult {
   details: string;
 }
 
+export interface ConsumerGroupsResponse {
+  status: string;
+  consumer_groups: Array<{
+    group_id: string;
+    generation_id: number;
+    protocol_type: string;
+    leader_id: string | null;
+    state: string;
+    members: Record<string, {
+      member_id: string;
+      client_id: string;
+      client_host: string;
+      session_timeout_ms: number;
+      last_heartbeat_ms: number;
+      subscribed_topics: string[];
+      assigned_partitions: Record<string, number[]>;
+    }>;
+  }>;
+  count: number;
+}
+
+export interface RetentionStatusResponse {
+  status: string;
+  active_rules: number;
+  reclaimed_bytes_total: number;
+  reclaimed_records_total: number;
+  last_sweep_timestamp_ms: number;
+}
+
+export interface QuorumStatusResponse {
+  configured: boolean;
+  quorum_size: number;
+  ack_level: string;
+  peers: Array<{
+    node_id: number;
+    region: string;
+    endpoint: string;
+    is_voter: boolean;
+    connected: boolean;
+    last_ack_ms: number;
+  }>;
+  commit_indices: Record<string, number>;
+}
+
+export type GatewayTopologyMode = "same-origin-proxy" | "separate-origin" | "local-dev";
+
+export function resolveGatewayConfig(): { baseUrl: string; configError: string | null; topologyMode: GatewayTopologyMode } {
+  // Check for explicit Vite environment configuration
+  const envUrl = typeof import.meta !== "undefined" && import.meta.env?.VITE_KAMISH_GATEWAY_URL
+    ? String(import.meta.env.VITE_KAMISH_GATEWAY_URL).trim()
+    : "";
+
+  if (envUrl) {
+    // Validate protocol if explicitly set
+    if (!/^https?:\/\//i.test(envUrl)) {
+      return {
+        baseUrl: "",
+        configError: `Invalid VITE_KAMISH_GATEWAY_URL '${envUrl}': must start with http:// or https://`,
+        topologyMode: "separate-origin",
+      };
+    }
+    return {
+      baseUrl: envUrl.replace(/\/+$/, ""),
+      configError: null,
+      topologyMode: "separate-origin",
+    };
+  }
+
+  // Development fallback: when Vite dev server is on port 5173, point directly to standard gateway port 3001
+  const isDev = typeof import.meta !== "undefined" && Boolean(import.meta.env?.DEV);
+  const isPort5173 = typeof window !== "undefined" && window.location.port === "5173";
+  if (isDev && isPort5173) {
+    return {
+      baseUrl: "http://127.0.0.1:3001",
+      configError: null,
+      topologyMode: "local-dev",
+    };
+  }
+
+  // Production default: same-origin reverse-proxy deployment (e.g. nginx forwarding /api and /metrics)
+  return {
+    baseUrl: "",
+    configError: null,
+    topologyMode: "same-origin-proxy",
+  };
+}
+
 class GatewayClient {
   private baseUrl: string;
+  private configError: string | null = null;
+  private topologyMode: GatewayTopologyMode = "same-origin-proxy";
   private csrfToken: string | null = null;
   private sessionToken: string | null = null;
   private user: GatewayUser | null = null;
   private sessionExpiredListeners: Array<() => void> = [];
 
-  constructor(baseUrl: string = "") {
-    this.baseUrl = baseUrl || (window.location.port === "5173" ? "http://127.0.0.1:3001" : "");
+  constructor(customBaseUrl?: string) {
+    if (customBaseUrl !== undefined) {
+      this.baseUrl = customBaseUrl.replace(/\/+$/, "");
+      this.topologyMode = customBaseUrl ? "separate-origin" : "same-origin-proxy";
+      this.configError = null;
+    } else {
+      const resolved = resolveGatewayConfig();
+      this.baseUrl = resolved.baseUrl;
+      this.configError = resolved.configError;
+      this.topologyMode = resolved.topologyMode;
+    }
+
     // Hydrate tokens from sessionStorage if present
-    this.csrfToken = sessionStorage.getItem("kamish_csrf_token");
-    this.sessionToken = sessionStorage.getItem("kamish_session_token");
-    const storedUser = sessionStorage.getItem("kamish_user");
+    this.csrfToken = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("kamish_csrf_token") : null;
+    this.sessionToken = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("kamish_session_token") : null;
+    const storedUser = typeof sessionStorage !== "undefined" ? sessionStorage.getItem("kamish_user") : null;
     if (storedUser) {
       try {
         this.user = JSON.parse(storedUser);
@@ -87,6 +200,18 @@ class GatewayClient {
         this.user = null;
       }
     }
+  }
+
+  public getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  public getConfigError(): string | null {
+    return this.configError;
+  }
+
+  public getTopologyMode(): GatewayTopologyMode {
+    return this.topologyMode;
   }
 
   public onSessionExpired(listener: () => void): () => void {
@@ -100,9 +225,11 @@ class GatewayClient {
     this.csrfToken = null;
     this.sessionToken = null;
     this.user = null;
-    sessionStorage.removeItem("kamish_csrf_token");
-    sessionStorage.removeItem("kamish_session_token");
-    sessionStorage.removeItem("kamish_user");
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("kamish_csrf_token");
+      sessionStorage.removeItem("kamish_session_token");
+      sessionStorage.removeItem("kamish_user");
+    }
     for (const listener of this.sessionExpiredListeners) {
       listener();
     }
@@ -116,8 +243,20 @@ class GatewayClient {
     return Boolean(this.sessionToken);
   }
 
+  private buildUrl(endpoint: string): string {
+    const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    if (!this.baseUrl) {
+      return cleanEndpoint;
+    }
+    return `${this.baseUrl}${cleanEndpoint}`;
+  }
+
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    if (this.configError) {
+      throw new Error(`Gateway Configuration Error: ${this.configError}`);
+    }
+
+    const url = this.buildUrl(endpoint);
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string> || {}),
     };
@@ -315,8 +454,47 @@ class GatewayClient {
     });
   }
 
+  // --- Quorum, Consumer Groups, Retention, & Reconciliation Endpoints ---
+
+  public async getQuorum(): Promise<QuorumStatusResponse> {
+    return this.request<QuorumStatusResponse>("/api/quorum");
+  }
+
+  public async getConsumerGroups(): Promise<ConsumerGroupsResponse> {
+    return this.request<ConsumerGroupsResponse>("/api/consumer-groups");
+  }
+
+  public async getRetention(): Promise<RetentionStatusResponse> {
+    return this.request<RetentionStatusResponse>("/api/retention");
+  }
+
+  public async triggerReconciliation(targetRegion?: string): Promise<{ status: string; total_gaps_scheduled: number; scheduled_records: number }> {
+    return this.request<{ status: string; total_gaps_scheduled: number; scheduled_records: number }>("/api/reconciliation/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_region: targetRegion || null }),
+    });
+  }
+
+  public async getMetrics(): Promise<string> {
+    if (this.configError) {
+      throw new Error(`Gateway Configuration Error: ${this.configError}`);
+    }
+    const url = this.buildUrl("/metrics");
+    const res = await fetch(url, { credentials: "include" });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch /metrics: HTTP ${res.status}`);
+    }
+    return res.text();
+  }
+
   public subscribeEvents(onMessage: (data: string) => void, onError?: (err: any) => void): () => void {
-    const eventSource = new EventSource(`${this.baseUrl}/api/events`, {
+    if (this.configError) {
+      if (onError) onError(new Error(`Gateway Configuration Error: ${this.configError}`));
+      return () => {};
+    }
+
+    const eventSource = new EventSource(this.buildUrl("/api/events"), {
       withCredentials: true,
     });
 

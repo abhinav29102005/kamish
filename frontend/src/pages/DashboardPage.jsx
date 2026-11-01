@@ -11,6 +11,8 @@ export default function DashboardPage({ onNavigate }) {
     currentTelemetry,
     produceCustomEvent,
     verifyAuditLedgerIntegrity,
+    isLiveMode,
+    connectionStatus,
   } = useKamish();
 
   const [verifyResult, setVerifyResult] = useState(null);
@@ -39,11 +41,11 @@ export default function DashboardPage({ onNavigate }) {
     try {
       await produceCustomEvent('kamish-orders', `ORD-${Date.now()}`, policyForSelection('EU_GDPR_STRICT'));
     } catch (error) {
-      setProduceError(error instanceof Error ? error.message : 'Could not create demo event');
+      setProduceError(error instanceof Error ? error.message : 'Could not produce event');
     }
   };
 
-  // Generate dynamic SVG path from telemetryHistory
+  // Dynamic SVG path from telemetryHistory
   const samples = telemetryHistory.slice(-12);
   const maxThroughput = Math.max(...samples.map((s) => s.throughputEps), 1);
   const svgWidth = 540;
@@ -60,10 +62,26 @@ export default function DashboardPage({ onNavigate }) {
     : 'M0,170 Q45,150 90,165 T180,105 T270,135 T360,75 T450,115 T540,85';
 
   const stats = [
-    { label: 'HEALTHY DEMO REGIONS', count: `0${activeNodeCount}`, path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6' },
-    { label: 'ALLOWED DEMO DECISIONS', count: String(acceptedCount).padStart(2, '0'), path: 'M0,18 Q40,16 80,12 T160,8 T240,2' },
-    { label: 'DENIED DEMO DECISIONS', count: String(blockedCount).padStart(2, '0'), path: 'M0,10 Q50,15 100,8 T200,12 T240,14' },
-    { label: 'SIMULATED QUEUE DEPTH', count: String(nodes.EU_WEST.outboxQueueSize).padStart(2, '0'), path: 'M0,14 Q60,12 120,16 T180,11 T240,15' },
+    {
+      label: isLiveMode ? 'ACTIVE REGION NODES' : 'HEALTHY DEMO REGIONS',
+      count: `0${activeNodeCount}`,
+      path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6',
+    },
+    {
+      label: isLiveMode ? 'ACCEPTED BROKER DECISIONS' : 'ALLOWED DEMO DECISIONS',
+      count: String(acceptedCount).padStart(2, '0'),
+      path: 'M0,18 Q40,16 80,12 T160,8 T240,2',
+    },
+    {
+      label: isLiveMode ? 'DENIED BROKER DECISIONS' : 'DENIED DEMO DECISIONS',
+      count: String(blockedCount).padStart(2, '0'),
+      path: 'M0,10 Q50,15 100,8 T200,12 T240,14',
+    },
+    {
+      label: isLiveMode ? 'GATEWAY OUTBOX DEPTH' : 'SIMULATED QUEUE DEPTH',
+      count: String(nodes.EU_WEST.outboxQueueSize).padStart(2, '0'),
+      path: 'M0,14 Q60,12 120,16 T180,11 T240,15',
+    },
   ];
 
   return (
@@ -74,21 +92,26 @@ export default function DashboardPage({ onNavigate }) {
         padding: '2rem 3.5rem 120px',
       }}
     >
-      {/* Header bar matching Mockup Page 2 */}
+      {/* Header bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
-        <h1
-          style={{
-            fontFamily: 'var(--font-main)',
-            fontSize: '3.5rem',
-            fontWeight: 900,
-            letterSpacing: '0.04em',
-            color: '#ffffff',
-            textTransform: 'uppercase',
-            margin: 0,
-          }}
-        >
-          DASHBOARD
-        </h1>
+        <div>
+          <h1
+            style={{
+              fontFamily: 'var(--font-main)',
+              fontSize: '3.5rem',
+              fontWeight: 900,
+              letterSpacing: '0.04em',
+              color: '#ffffff',
+              textTransform: 'uppercase',
+              margin: 0,
+            }}
+          >
+            DASHBOARD
+          </h1>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: isLiveMode ? '#4ade80' : '#facc15', marginTop: '0.35rem' }}>
+            {isLiveMode ? `MODE: LIVE BROKER GATEWAY (${connectionStatus.toUpperCase()})` : 'MODE: LOCAL BROWSER DEMO SIMULATION'}
+          </div>
+        </div>
 
         {/* Action Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
@@ -97,7 +120,7 @@ export default function DashboardPage({ onNavigate }) {
             className="brutal-btn-primary"
             style={{ padding: '0.75rem 1.75rem', fontSize: '0.85rem' }}
           >
-            + SIMULATE EVENT
+            {isLiveMode ? '+ PRODUCE BROKER EVENT' : '+ SIMULATE EVENT'}
           </button>
 
           <button
@@ -110,13 +133,14 @@ export default function DashboardPage({ onNavigate }) {
               cursor: isVerifying ? 'wait' : 'pointer',
             }}
           >
-            {isVerifying ? 'CHECKING...' : 'CHECK LOCAL DEMO AUDIT'}
+            {isVerifying ? (isLiveMode ? 'VERIFYING GATEWAY...' : 'CHECKING...') : (isLiveMode ? 'VERIFY GATEWAY AUDIT' : 'CHECK LOCAL DEMO AUDIT')}
           </button>
         </div>
       </div>
 
-      {auditError && <p role="alert">Demo audit unavailable: {auditError}</p>}
-      {produceError && <p role="alert">{produceError}</p>}
+      {auditError && <p role="alert" style={{ color: '#fca5a5', fontFamily: 'var(--font-mono)', margin: '1rem 0' }}>Audit warning: {auditError}</p>}
+      {produceError && <p role="alert" style={{ color: '#fca5a5', fontFamily: 'var(--font-mono)', margin: '1rem 0' }}>{produceError}</p>}
+
       {/* Verification notification banner */}
       {verifyResult && (
         <div
@@ -132,7 +156,9 @@ export default function DashboardPage({ onNavigate }) {
           }}
         >
           {verifyResult.valid
-            ? `✓ Local demo audit hashes validated: ${verifyResult.count} entries. No broker or hardware verification was performed.`
+            ? isLiveMode
+              ? `✓ Gateway cryptographic audit chain verified: ${verifyResult.count} entries authenticated.`
+              : `✓ Local demo audit hashes validated: ${verifyResult.count} entries. No broker or hardware verification was performed.`
             : `✗ Audit Chain Verification Failed: ${verifyResult.error}`}
         </div>
       )}
@@ -194,7 +220,7 @@ export default function DashboardPage({ onNavigate }) {
           gap: '2rem',
         }}
       >
-        {/* Left: THROUGHPUT LIVE BROKER TELEMETRY */}
+        {/* Left: THROUGHPUT TELEMETRY */}
         <div className="brutal-card-offset" style={{ padding: '2rem' }}>
           <div
             style={{
@@ -213,7 +239,7 @@ export default function DashboardPage({ onNavigate }) {
                 fontWeight: 600,
               }}
             >
-              SIMULATED THROUGHPUT ({(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)
+              {isLiveMode ? 'LIVE BROKER THROUGHPUT' : 'SIMULATED THROUGHPUT'} ({(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)
             </div>
             <span
               style={{
@@ -244,7 +270,7 @@ export default function DashboardPage({ onNavigate }) {
           </svg>
         </div>
 
-        {/* Right: RECENT TASKS / AUDIT LOG */}
+        {/* Right: AUDIT LOG */}
         <div className="brutal-card-offset" style={{ padding: '2rem' }}>
           <div
             style={{
@@ -259,7 +285,7 @@ export default function DashboardPage({ onNavigate }) {
               justifyContent: 'space-between',
             }}
           >
-            <span>DEMO AUDIT EVENTS</span>
+            <span>{isLiveMode ? 'LIVE BROKER AUDIT LOG' : 'DEMO AUDIT EVENTS'}</span>
             <button
               onClick={() => onNavigate('tasks')}
               style={{
@@ -275,39 +301,45 @@ export default function DashboardPage({ onNavigate }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {auditLedger.slice(-4).reverse().map((entry) => (
-              <div
-                key={entry.seq}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '0.88rem',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-                  paddingBottom: '0.75rem',
-                  cursor: 'default',
-                  transition: 'background 0.15s ease',
-                }}
-              >
-                <div>
-                  <span style={{ color: '#ffffff', fontWeight: 700, marginRight: '8px' }}>
-                    #{entry.seq}{' '}
-                  </span>
-                  <span style={{ color: 'var(--text-dim)' }}>
-                    {entry.topic}
-                  </span>
-                </div>
-                <span
+            {auditLedger.length === 0 ? (
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#64748b', fontStyle: 'italic' }}>
+                {isLiveMode ? 'No broker audit records yet in session' : 'No demo events generated yet'}
+              </div>
+            ) : (
+              auditLedger.slice(-4).reverse().map((entry) => (
+                <div
+                  key={`${entry.seq}-${entry.hash || entry.timestamp}`}
                   style={{
-                    color: entry.outcome !== 'Deny' ? '#4ade80' : '#f87171',
-                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '0.88rem',
+                    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                    paddingBottom: '0.75rem',
+                    cursor: 'default',
+                    transition: 'background 0.15s ease',
                   }}
                 >
-                  [{entry.outcome === 'Deny' ? 'DENIED' : 'ALLOWED'} · DEMO]
-                </span>
-              </div>
-            ))}
+                  <div>
+                    <span style={{ color: '#ffffff', fontWeight: 700, marginRight: '8px' }}>
+                      #{entry.seq}{' '}
+                    </span>
+                    <span style={{ color: 'var(--text-dim)' }}>
+                      {entry.topic}
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      color: entry.outcome !== 'Deny' ? '#4ade80' : '#f87171',
+                      fontWeight: 700,
+                    }}
+                  >
+                    [{entry.outcome === 'Deny' ? 'DENIED' : 'ALLOWED'} · {isLiveMode ? 'LIVE' : 'DEMO'}]
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

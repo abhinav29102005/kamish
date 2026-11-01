@@ -21,7 +21,18 @@
 | Automated tests passing | **261 / 261 (100% PASS)** |
 | Development status | **Local automated verification reported passing; external/deployed claims scoped in reconciliation report** |
 | Public-production release status | **Not established by local verification alone** |
-| Current phase | **Evidence/contract reconciliation; deployed frontend/backend integration pending** |
+| Current phase | **Frontend/backend integration & release evidence reconciliation (Branch: `audit/evidence-contract-frontend-reconciliation-2026-11-01` / PR #1)** |
+
+**FRONTEND/BACKEND INTEGRATION & RELEASE EVIDENCE RECONCILIATION (Branch: `audit/evidence-contract-frontend-reconciliation-2026-11-01` / PR #1):**
+- Resolved deployed gateway URL configuration with `resolveGatewayConfig()` in `frontend/src/utils/gatewayClient.ts` reading `VITE_KAMISH_GATEWAY_URL`, validating `http://`/`https://` protocol, normalizing trailing slashes, and identifying topology mode (`same-origin-proxy`, `separate-origin`, `local-dev`).
+- Added Vite development server proxy in `frontend/vite.config.ts` and `frontend/vite.config.js` forwarding `/api` and `/metrics` to `127.0.0.1:3001`. Created `frontend/.env.example`.
+- Created production reverse-proxy template `frontend/nginx.conf.example` configuring same-origin deployment with SSE streaming (`proxy_buffering off`), REST proxying, and SPA fallback routing.
+- Added `--allowed-origins` CLI flag and `KAMISH_GATEWAY_ALLOWED_ORIGINS` environment variable in `cmd/kamish-gateway`, strictly validating incoming `Origin` headers and disallowing wildcard CORS with credentials.
+- Added typed `ConnectionStatus` (`"connecting" | "connected" | "auth_required" | "unavailable" | "config_error"`) to `useKamish.ts` and `KamishContext.tsx`. Replaced static node count in `Header.jsx` and `Navbar.jsx` with real `connectionStatus`, eliminating false-green indicators when offline.
+- Separated Live vs Demo data boundaries: In Live mode, `produceCustomEvent` and `verifyAuditLedgerIntegrity` dispatch real gateway calls, and 10Hz synthetic ticker is suppressed. In Demo mode, in-memory WebCrypto SHA-256 hash chains and chaos scenario simulations are explicitly labeled `[DEMO]`.
+- Gated dev credentials and quick preset buttons on `SignInPage.jsx` behind `isDevLoginEnabled` (`import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEV_LOGIN === "true"`).
+- Reconciled documentation across `docs/CONTRACT.md`, `IMPLEMENTATION_INVENTORY.md`, `REMAINING_WORK_BACKLOG.md`, `FINAL_FUNCTIONAL_COMPLETION_REPORT.md`, `frontend/README.md`, and `audit/release_verification_20261101/RECONCILIATION_REPORT.md`.
+- Test execution status for this pass: **TEST SUITES NOT RUN** per user instructions (preserving tested baseline at `3bab180` and compiling cleanly with `cargo check` and `npm run build`).
 
 **LOCAL VERIFICATION RESULT (Run ID: `run-verification-20261101-113645`; source revision `3bab180`):**
 - Completed exhaustive workspace verification across all 15 crates and integration test suites.
