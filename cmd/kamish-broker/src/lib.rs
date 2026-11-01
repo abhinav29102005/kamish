@@ -15,10 +15,8 @@
 
 use kamish_audit::AuditAction;
 use kamish_enforce::{EnforcementRequest, Enforcer};
+use kamish_log::{LogError, PartitionLog, SessionError, SessionManager};
 pub use kamish_log::{RecordContext, RecordEnvelope};
-use kamish_log::{
-    LogError, PartitionLog, SessionError, SessionManager,
-};
 use kamish_meta::{
     DeploymentMode, LocalReplicationTracker, MetadataAuthority, MetadataStore, MonotonicClock,
     PartitionOwnership, PolicyEngine, RegionId, ResidencyPolicy, StreamEvent, StreamId,
@@ -220,6 +218,7 @@ impl Default for ReplicationRequest {
 }
 
 impl ReplicationRequest {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         topic: impl Into<String>,
         partition: u32,
@@ -1014,13 +1013,15 @@ impl BrokerServer {
 
     /// Sets the local safety margin buffer required beyond prior owner lease expiry for promotion (§2.3.2).
     pub fn with_promotion_safety_margin_ms(self, margin_ms: i64) -> Self {
-        self.promotion_safety_margin_ns.store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
+        self.promotion_safety_margin_ns
+            .store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
         self
     }
 
     /// Dynamically updates the promotion safety margin.
     pub fn set_promotion_safety_margin_ms(&self, margin_ms: i64) {
-        self.promotion_safety_margin_ns.store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
+        self.promotion_safety_margin_ns
+            .store(margin_ms * 1_000_000, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Returns a reference to the local quarantine store (§1.7, §3.1.4).
@@ -1070,12 +1071,15 @@ impl BrokerServer {
 
         // If candidate already holds active valid lease for this partition, return current ownership
         let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-        if current_ownership.owner_region == self.region && current_ownership.is_lease_valid(now_ns) {
+        if current_ownership.owner_region == self.region && current_ownership.is_lease_valid(now_ns)
+        {
             return Ok(current_ownership);
         }
 
         // 3. Lease safety check with local safety margin (§2.3.2, §3.4.4)
-        let safety_margin_ns = self.promotion_safety_margin_ns.load(std::sync::atomic::Ordering::SeqCst);
+        let safety_margin_ns = self
+            .promotion_safety_margin_ns
+            .load(std::sync::atomic::Ordering::SeqCst);
         let safe_expiry_ns = current_ownership.lease_expiry_ns + safety_margin_ns;
         if now_ns < safe_expiry_ns {
             return Err(BrokerError::PolicyDenied(format!(
@@ -1113,9 +1117,7 @@ impl BrokerServer {
         // 5. Authoritative Watermark & Replica Progress Check (INV-3, §3.1.3, §3.4.4)
         let operation = self
             .partition_operations
-            .get_or_insert_with((topic.to_string(), partition), || {
-                Arc::new(Mutex::new(()))
-            });
+            .get_or_insert_with((topic.to_string(), partition), || Arc::new(Mutex::new(())));
         let _operation = operation.lock().unwrap();
 
         let log = self.get_or_create_log(topic, partition, current_ownership.epoch)?;
@@ -1127,12 +1129,12 @@ impl BrokerServer {
         let authoritative_watermark = match required_watermark {
             Some(w) => w,
             None => {
-                let tracked = self.local_tracker.get_watermark(topic, partition, &current_ownership.owner_region);
-                if tracked > 0 {
-                    tracked
-                } else {
-                    local_hwm
-                }
+                let tracked = self.local_tracker.get_watermark(
+                    topic,
+                    partition,
+                    &current_ownership.owner_region,
+                );
+                if tracked > 0 { tracked } else { local_hwm }
             }
         };
 
@@ -1167,7 +1169,8 @@ impl BrokerServer {
         // 7. Commit bumped epoch via atomic CAS on MetadataAuthority (INV-7)
         let new_epoch = current_ownership.epoch + 1;
         let lease_duration_ms = 10_000i64; // Normative 10-second lease (CONTRACT.md §2.3.2)
-        let new_ownership = self.meta
+        let new_ownership = self
+            .meta
             .compare_and_swap_epoch(
                 &stream,
                 current_ownership.epoch,
@@ -1219,9 +1222,7 @@ impl BrokerServer {
     ) -> Result<usize, BrokerError> {
         let operation = self
             .partition_operations
-            .get_or_insert_with((topic.to_string(), partition), || {
-                Arc::new(Mutex::new(()))
-            });
+            .get_or_insert_with((topic.to_string(), partition), || Arc::new(Mutex::new(())));
         let _operation = operation.lock().unwrap();
 
         let log = self.get_or_create_log(topic, partition, 1)?;
@@ -1249,10 +1250,10 @@ impl BrokerServer {
         }
 
         // If this broker was previously renewing this partition, verify if we are still owner
-        if let Some(ownership) = self.meta.get_ownership(topic, partition) {
-            if ownership.owner_region != self.region {
-                self.unregister_owned_partition(topic, partition);
-            }
+        if let Some(ownership) = self.meta.get_ownership(topic, partition)
+            && ownership.owner_region != self.region
+        {
+            self.unregister_owned_partition(topic, partition);
         }
 
         Ok(count)
@@ -1578,24 +1579,23 @@ impl BrokerServer {
                 .issue_source_identity(&format!("cluster-{}", self.region), &self.region)
                 .map_or(1, |g| g.generation),
         };
-        if let Some(first) = log.read(0, 1).first() {
-            if let Some(ref first_ctx) = first.context {
-                if first_ctx.origin_region == self.region {
-                    let mut original = first_ctx.replication_targets.clone();
-                    let mut proposed = context.replication_targets.clone();
-                    original.sort();
-                    proposed.sort();
-                    if original != proposed {
-                        return Ok(ProduceResponse {
-                            base_offset: 0,
-                            count: 0,
-                            committed_epoch: epoch,
-                            sovereignty_allowed: false,
-                            denial_reason: "stream_destinations_changed_requires_new_topic".into(),
-                            ack_level: None,
-                        });
-                    }
-                }
+        if let Some(first) = log.read(0, 1).first()
+            && let Some(ref first_ctx) = first.context
+            && first_ctx.origin_region == self.region
+        {
+            let mut original = first_ctx.replication_targets.clone();
+            let mut proposed = context.replication_targets.clone();
+            original.sort();
+            proposed.sort();
+            if original != proposed {
+                return Ok(ProduceResponse {
+                    base_offset: 0,
+                    count: 0,
+                    committed_epoch: epoch,
+                    sovereignty_allowed: false,
+                    denial_reason: "stream_destinations_changed_requires_new_topic".into(),
+                    ack_level: None,
+                });
             }
         }
         let source_gen = context.source_generation;
@@ -1624,7 +1624,9 @@ impl BrokerServer {
         );
         committed_env.magic = kamish_log::RECORD_MAGIC_V2;
         committed_env.context = Some(context.clone());
-        let committed_checksum = committed_env.expected_checksum().unwrap_or(committed_env.checksum);
+        let committed_checksum = committed_env
+            .expected_checksum()
+            .unwrap_or(committed_env.checksum);
         committed_env.checksum = committed_checksum;
 
         // 5. Commit all reserved outbox ranges (§3.B)
@@ -1835,21 +1837,23 @@ impl BrokerServer {
         }
 
         // Extract context, policy_version, checksum
-        let (extracted_ctx, extracted_pv, extracted_cs) = if let Some(ref env_bytes) = req.envelope_payload {
-            if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
-                (env.context, Some(env.policy_version), Some(env.checksum))
+        let (extracted_ctx, extracted_pv, extracted_cs) =
+            if let Some(ref env_bytes) = req.envelope_payload {
+                if let Ok(env) = serde_json::from_slice::<RecordEnvelope>(env_bytes) {
+                    (env.context, Some(env.policy_version), Some(env.checksum))
+                } else {
+                    (None, None, None)
+                }
             } else {
                 (None, None, None)
-            }
-        } else {
-            (None, None, None)
-        };
+            };
 
         let mut record_context = req.context.or(extracted_ctx);
-        if let Some(ref mut ctx) = record_context {
-            if ctx.source_generation == 1 && req.source_generation > 1 {
-                ctx.source_generation = req.source_generation;
-            }
+        if let Some(ref mut ctx) = record_context
+            && ctx.source_generation == 1
+            && req.source_generation > 1
+        {
+            ctx.source_generation = req.source_generation;
         }
 
         let policy_version = if req.policy_version > 0 {
@@ -1878,22 +1882,22 @@ impl BrokerServer {
             );
             candidate_env.magic = candidate_magic;
             candidate_env.context = record_context.clone();
-            if let Some(computed) = candidate_env.expected_checksum() {
-                if computed != expected_cs {
-                    tracing::error!(
-                        topic = %req.topic,
-                        partition = req.partition,
-                        offset = req.from_offset,
-                        computed = computed,
-                        expected = expected_cs,
-                        "Replication checksum mismatch on incoming record"
-                    );
-                    return Ok(ReplicationResponse {
-                        accepted: false,
-                        applied_watermark: local_next,
-                        reason: "replication_checksum_mismatch".into(),
-                    });
-                }
+            if let Some(computed) = candidate_env.expected_checksum()
+                && computed != expected_cs
+            {
+                tracing::error!(
+                    topic = %req.topic,
+                    partition = req.partition,
+                    offset = req.from_offset,
+                    computed = computed,
+                    expected = expected_cs,
+                    "Replication checksum mismatch on incoming record"
+                );
+                return Ok(ReplicationResponse {
+                    accepted: false,
+                    applied_watermark: local_next,
+                    reason: "replication_checksum_mismatch".into(),
+                });
             }
         }
 
@@ -1941,7 +1945,7 @@ impl BrokerServer {
                 let local_epoch = existing_record.as_ref().map_or(1, |r| r.epoch);
                 let ownership = self.meta.get_ownership(&req.topic, req.partition);
                 let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
-                let sender_is_owner = ownership.as_ref().map_or(false, |o| {
+                let sender_is_owner = ownership.as_ref().is_some_and(|o| {
                     o.owner_region == req.source_region
                         && req.epoch >= o.epoch
                         && o.is_lease_valid(now_ns)
@@ -2061,7 +2065,9 @@ impl BrokerServer {
         for (topic, partition) in streams {
             if let Some(log) = self.logs.get(&(topic.clone(), partition)) {
                 let ownership = self.meta.get_ownership(&topic, partition);
-                let epoch = ownership.as_ref().map_or_else(|| log.current_epoch(), |o| o.epoch);
+                let epoch = ownership
+                    .as_ref()
+                    .map_or_else(|| log.current_epoch(), |o| o.epoch);
                 let hwm = log.high_watermark();
                 states.push(PartitionWatermark {
                     topic,
@@ -2079,7 +2085,10 @@ impl BrokerServer {
     ///
     /// Validates ownership epochs, guards against stale owners, updates tracked watermarks,
     /// advances outboxes, and reports local partition watermarks.
-    pub fn handle_heartbeat(&self, req: HeartbeatRequest) -> Result<HeartbeatResponse, BrokerError> {
+    pub fn handle_heartbeat(
+        &self,
+        req: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, BrokerError> {
         let now = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
         let mut response_partitions = Vec::new();
 
@@ -2096,22 +2105,22 @@ impl BrokerServer {
                     },
                     |o| o.epoch,
                 );
-                let is_local_owner = ownership.as_ref().map_or(false, |o| {
-                    o.owner_region == self.region && now < o.lease_expiry_ns
-                });
+                let is_local_owner = ownership
+                    .as_ref()
+                    .is_some_and(|o| o.owner_region == self.region && now < o.lease_expiry_ns);
 
                 // Epoch fencing validation:
-                if let Some(ref o) = ownership {
-                    if p.epoch < o.epoch {
-                        tracing::warn!(
-                            topic = %p.topic,
-                            partition = p.partition,
-                            sender = %req.sender_region,
-                            peer_epoch = p.epoch,
-                            current_epoch = o.epoch,
-                            "Peer heartbeat received with stale epoch"
-                        );
-                    }
+                if let Some(ref o) = ownership
+                    && p.epoch < o.epoch
+                {
+                    tracing::warn!(
+                        topic = %p.topic,
+                        partition = p.partition,
+                        sender = %req.sender_region,
+                        peer_epoch = p.epoch,
+                        current_epoch = o.epoch,
+                        "Peer heartbeat received with stale epoch"
+                    );
                 }
 
                 let log_opt = self.logs.get(&(p.topic.clone(), p.partition));
@@ -2120,7 +2129,11 @@ impl BrokerServer {
                 // If local broker is the owner and sender made progress, advance outbox and watermark
                 if is_local_owner && p.durable_watermark > 0 {
                     if let Some(outbox) = self.get_outbox(&req.sender_region) {
-                        outbox.advance_partition_watermark(&p.topic, p.partition, p.durable_watermark);
+                        outbox.advance_partition_watermark(
+                            &p.topic,
+                            p.partition,
+                            p.durable_watermark,
+                        );
                     }
                     self.local_tracker.update_watermark(
                         &p.topic,
@@ -2377,13 +2390,13 @@ impl BrokerServer {
 
                 if let Some(id) = identity {
                     let catalog = self.catalog.read().unwrap();
-                    if let Some(topic_meta) = catalog.get_topic(&topic) {
-                        if !id.is_authorized_for_tenant(&topic_meta.owner_tenant) {
-                            return BrokerResponse::Error(format!(
-                                "Tenant authorization mismatch: client tenant '{}' cannot commit checkpoint for topic '{}' owned by '{}'",
-                                id.tenant, topic, topic_meta.owner_tenant
-                            ));
-                        }
+                    if let Some(topic_meta) = catalog.get_topic(&topic)
+                        && !id.is_authorized_for_tenant(&topic_meta.owner_tenant)
+                    {
+                        return BrokerResponse::Error(format!(
+                            "Tenant authorization mismatch: client tenant '{}' cannot commit checkpoint for topic '{}' owned by '{}'",
+                            id.tenant, topic, topic_meta.owner_tenant
+                        ));
                     }
                 }
 
@@ -2400,13 +2413,13 @@ impl BrokerServer {
             BrokerRequest::FetchOffset(f) => {
                 if let Some(id) = identity {
                     let catalog = self.catalog.read().unwrap();
-                    if let Some(topic_meta) = catalog.get_topic(&f.topic) {
-                        if !id.is_authorized_for_tenant(&topic_meta.owner_tenant) {
-                            return BrokerResponse::Error(format!(
-                                "Tenant authorization mismatch: client tenant '{}' cannot fetch checkpoint for topic '{}' owned by '{}'",
-                                id.tenant, f.topic, topic_meta.owner_tenant
-                            ));
-                        }
+                    if let Some(topic_meta) = catalog.get_topic(&f.topic)
+                        && !id.is_authorized_for_tenant(&topic_meta.owner_tenant)
+                    {
+                        return BrokerResponse::Error(format!(
+                            "Tenant authorization mismatch: client tenant '{}' cannot fetch checkpoint for topic '{}' owned by '{}'",
+                            id.tenant, f.topic, topic_meta.owner_tenant
+                        ));
                     }
                 }
 
@@ -2965,7 +2978,9 @@ impl BrokerClient {
             })
             .await?
         {
-            BrokerResponse::SuffixQuarantined { quarantined_count, .. } => Ok(quarantined_count),
+            BrokerResponse::SuffixQuarantined {
+                quarantined_count, ..
+            } => Ok(quarantined_count),
             BrokerResponse::Error(e) => Err(std::io::Error::other(e).into()),
             other => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,

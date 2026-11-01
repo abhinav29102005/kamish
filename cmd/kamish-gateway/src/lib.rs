@@ -76,7 +76,10 @@ pub fn app(state: GatewayState) -> Router {
         .route("/api/fetch", post(fetch_handler))
         .route("/api/partitions/promote", post(promote_partition_handler))
         .route("/api/partitions/quarantine", get(list_quarantine_handler))
-        .route("/api/reconciliation/run", post(trigger_reconciliation_handler))
+        .route(
+            "/api/reconciliation/run",
+            post(trigger_reconciliation_handler),
+        )
         .route("/api/scenarios/run", post(run_scenario_handler))
         .route("/api/mode", get(get_mode_handler).post(set_mode_handler))
         // Server-Sent Events

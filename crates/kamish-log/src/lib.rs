@@ -992,7 +992,10 @@ impl PartitionLog {
     /// 9. ONLY AFTER replacement succeeds on disk does in-memory state transition to truncated prefix.
     /// 10. Any failure before installation leaves original in-memory log intact.
     /// 11. Any ambiguous replacement outcome fences the writer fail-closed.
-    pub fn truncate_to_offset(&self, new_next_offset: u64) -> Result<Vec<RecordEnvelope>, LogError> {
+    pub fn truncate_to_offset(
+        &self,
+        new_next_offset: u64,
+    ) -> Result<Vec<RecordEnvelope>, LogError> {
         let mut writer_guard = self.writer_lock.lock().unwrap();
         let mut inner = self.inner.write().unwrap();
 

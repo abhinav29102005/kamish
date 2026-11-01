@@ -227,14 +227,16 @@ impl QuarantineStore {
         // 1. Interrupted write recovery:
         // If q_file is missing or empty, but a valid tmp_file exists, recover tmp_file
         let q_empty_or_missing = !q_file.exists()
-            || std::fs::metadata(&q_file).map(|m| m.len() == 0).unwrap_or(true);
-        if q_empty_or_missing && tmp_file.exists() {
-            if let Ok(content) = std::fs::read(&tmp_file) {
-                if let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&content) {
-                    let _ = std::fs::rename(&tmp_file, &q_file);
-                    quarantined = records;
-                }
-            }
+            || std::fs::metadata(&q_file)
+                .map(|m| m.len() == 0)
+                .unwrap_or(true);
+        if q_empty_or_missing
+            && tmp_file.exists()
+            && let Ok(content) = std::fs::read(&tmp_file)
+            && let Ok(records) = serde_json::from_slice::<Vec<RecordEnvelope>>(&content)
+        {
+            let _ = std::fs::rename(&tmp_file, &q_file);
+            quarantined = records;
         }
 
         // 2. Normal open and integrity validation
@@ -253,7 +255,9 @@ impl QuarantineStore {
                         let _ = std::fs::copy(&q_file, &corrupt_path);
                         return Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("quarantine.data corrupted: {e}; preserved to {corrupt_path:?}"),
+                            format!(
+                                "quarantine.data corrupted: {e}; preserved to {corrupt_path:?}"
+                            ),
                         ));
                     }
                 }
