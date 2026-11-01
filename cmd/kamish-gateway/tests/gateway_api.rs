@@ -351,6 +351,12 @@ async fn test_real_telemetry_endpoints() {
     assert_eq!(res.status(), StatusCode::OK);
     let json = response_json(res).await;
     assert_eq!(json["active_region"], "EU_WEST");
+    assert_eq!(
+        json["authority_type"],
+        "LOCAL (in-memory; quorum requires etcd)"
+    );
+    assert_eq!(json["consensus_backing"], "LOCAL_IN_MEMORY");
+    assert_eq!(json["quorum_backed"], false);
 
     // 4. /api/policy
     let req = Request::builder()
@@ -439,7 +445,13 @@ async fn test_scenario_execution_and_results() {
     let (app, _dir) = setup_test_gateway();
     let (session, csrf) = login_user(&app, "admin", "kamish-admin-2026").await;
 
-    for scenario in &["residency", "slowlink", "outage", "quorum"] {
+    let scenarios = [
+        ("residency", "SIMULATED", true),
+        ("slowlink", "PASS", false),
+        ("outage", "SIMULATED", true),
+        ("quorum", "NOT_IMPLEMENTED", true),
+    ];
+    for (scenario, expected_status, expected_simulated) in scenarios {
         let req = Request::builder()
             .method(Method::POST)
             .uri("/api/scenarios/run")
@@ -451,8 +463,9 @@ async fn test_scenario_execution_and_results() {
         let res = app.clone().oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
         let json = response_json(res).await;
-        assert_eq!(json["status"], "PASS");
-        assert_eq!(json["scenario"], *scenario);
+        assert_eq!(json["status"], expected_status);
+        assert_eq!(json["scenario"], scenario);
+        assert_eq!(json["simulated"], expected_simulated);
     }
 }
 

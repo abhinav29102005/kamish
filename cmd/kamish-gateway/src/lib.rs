@@ -344,7 +344,7 @@ async fn status_handler(State(state): State<GatewayState>) -> Json<serde_json::V
     }
 
     Json(serde_json::json!({
-        "status": "HEALTHY",
+        "status": if degraded_links.is_empty() { "HEALTHY" } else { "DEGRADED" },
         "version": env!("CARGO_PKG_VERSION"),
         "region": region,
         "mode": if is_demo { "DEMO" } else { "LIVE" },
@@ -464,7 +464,9 @@ async fn authority_handler(State(state): State<GatewayState>) -> Json<serde_json
     let total_quarantined = state.broker.quarantine().count();
 
     Json(serde_json::json!({
-        "authority_type": "etcd 3.7.3 (External with mTLS)",
+        "authority_type": "LOCAL (in-memory; quorum requires etcd)",
+        "consensus_backing": "LOCAL_IN_MEMORY",
+        "quorum_backed": false,
         "active_region": state.broker.region,
         "monotonic_clock_ms": state.broker.clock.now_monotonic_ms(),
         "lease_ttl_ms": 10_000,
@@ -787,8 +789,9 @@ async fn run_scenario_handler(
     match payload.scenario.as_str() {
         "residency" => Ok(Json(serde_json::json!({
             "scenario": "residency",
-            "status": "PASS",
-            "details": "StrictLocal record ingestion verified; cross-border wire egress rejected, cryptographic audit trail generated.",
+            "status": "SIMULATED",
+            "simulated": true,
+            "details": "SIMULATED in gateway: for real multi-broker residency assertions, run integration test developer_b_scenarios::test_scenario_a_residency_enforcement_demo",
         }))),
         "slowlink" => {
             for peer in &state.broker.known_peers {
@@ -797,18 +800,21 @@ async fn run_scenario_handler(
             Ok(Json(serde_json::json!({
                 "scenario": "slowlink",
                 "status": "PASS",
-                "details": "300ms delay injected; backpressure triggered and EWMA metrics updated.",
+                "simulated": false,
+                "details": "300ms delay injected via broker set_wan_degraded; backpressure triggered and EWMA metrics updated.",
             })))
         }
         "outage" => Ok(Json(serde_json::json!({
             "scenario": "outage",
-            "status": "PASS",
-            "details": "Peer outage simulated; outbox buffered unacknowledged records, caught up from durable watermark upon recovery.",
+            "status": "SIMULATED",
+            "simulated": true,
+            "details": "SIMULATED in gateway: for real process crash and recovery assertions, run integration test developer_b_scenarios::test_scenario_c_regional_outage_and_recovery_demo",
         }))),
         "quorum" => Ok(Json(serde_json::json!({
             "scenario": "quorum",
-            "status": "PASS",
-            "details": "In-region 3-replica quorum verified: ACK allowed after 2-of-3 persist; rejected when <2 persist.",
+            "status": "NOT_IMPLEMENTED",
+            "simulated": true,
+            "details": "NOT_IMPLEMENTED: 3-replica quorum requires clustered etcd consensus authority; currently running single-broker in-memory MetadataStore.",
         }))),
         other => Err((
             StatusCode::BAD_REQUEST,

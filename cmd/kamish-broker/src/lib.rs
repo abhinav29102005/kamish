@@ -1372,9 +1372,7 @@ impl BrokerServer {
         if let ResidencyPolicy::SealedCiphertext(ref _allowed_regions) = residency {
             if let Some(ref kp) = self.key_provider {
                 if kp.home_region() != self.region.as_str() {
-                    return Err(BrokerError::PolicyDenied(
-                        "cross_border_key_denied".into(),
-                    ));
+                    return Err(BrokerError::PolicyDenied("cross_border_key_denied".into()));
                 }
             } else {
                 return Err(BrokerError::PolicyDenied(
@@ -1521,7 +1519,8 @@ impl BrokerServer {
             if send_decision.allowed {
                 // Fail closed until an authenticated encryption/key-custody
                 // integration exists. A boolean flag is not encryption.
-                if send_decision.mode == DestinationMode::SealedOnly && self.key_provider.is_none() {
+                if send_decision.mode == DestinationMode::SealedOnly && self.key_provider.is_none()
+                {
                     return Err(BrokerError::PolicyDenied(
                         "sealed_replication_not_configured".into(),
                     ));
@@ -2436,7 +2435,12 @@ impl BrokerServer {
                     let cat = self.catalog.read().unwrap();
                     req.subscribed_topics
                         .iter()
-                        .map(|t| (t.clone(), cat.get_topic(t).map(|m| m.partitions).unwrap_or(1)))
+                        .map(|t| {
+                            (
+                                t.clone(),
+                                cat.get_topic(t).map(|m| m.partitions).unwrap_or(1),
+                            )
+                        })
                         .collect()
                 };
                 match self.consumer_groups.join_group(req, &topic_counts) {
@@ -2444,12 +2448,10 @@ impl BrokerServer {
                     Err(e) => BrokerResponse::Error(e.to_string()),
                 }
             }
-            BrokerRequest::HeartbeatGroup(req) => {
-                match self.consumer_groups.heartbeat(req) {
-                    Ok(res) => BrokerResponse::GroupHeartbeat(res),
-                    Err(e) => BrokerResponse::Error(e.to_string()),
-                }
-            }
+            BrokerRequest::HeartbeatGroup(req) => match self.consumer_groups.heartbeat(req) {
+                Ok(res) => BrokerResponse::GroupHeartbeat(res),
+                Err(e) => BrokerResponse::Error(e.to_string()),
+            },
             BrokerRequest::LeaveGroup(req) => {
                 let topic_counts: HashMap<String, u32> = {
                     let cat = self.catalog.read().unwrap();
