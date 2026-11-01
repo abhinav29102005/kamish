@@ -8,7 +8,7 @@ The React/Vite frontend contains a **hybrid** architecture supporting both live 
 - Connected to the Rust HTTP Gateway (`cmd/kamish-gateway`).
 - Interacts with real broker endpoints:
   - Session authentication with PBKDF2-HMAC-SHA256 and CSRF tokens (`/api/auth/*`).
-  - Real record produce and offset fetch (`/api/records/produce`, `/api/records/fetch`).
+  - Real record produce and offset fetch (`/api/produce`, `/api/fetch`).
   - Real regional gateway health and authority state (`/api/status`, `/api/authority`).
   - Real bounded destination outbox queue depth and replication lags (`/api/streams`).
   - Aggregate accepted/denied decision counts, broker throughput, and p99 latency are **not currently exposed by the gateway API**; the dashboard displays `N/A` instead of substituting demo values.
