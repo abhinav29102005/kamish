@@ -137,7 +137,7 @@ fn apply_security_headers(headers: &mut HeaderMap, req_origin: Option<&str>, is_
     headers.insert("access-control-allow-credentials", "true".parse().unwrap());
     headers.insert(
         "access-control-allow-headers",
-        "content-type, authorization, x-csrf-token".parse().unwrap(),
+        "content-type, authorization, x-csrf-token, x-requested-with, accept, *".parse().unwrap(),
     );
     headers.insert(
         "access-control-allow-methods",
@@ -168,8 +168,11 @@ async fn security_middleware(
         .unwrap_or("127.0.0.1")
         .to_string();
 
-    // 1. Sliding-window rate limit
-    if !state.rate_limiter.check_and_record(&client_ip) {
+    // 1. Sliding-window rate limit (bypassed for dev frontend origin http://localhost:5173)
+    let is_dev_frontend = origin_opt
+        .as_deref()
+        .is_some_and(|o| o.starts_with("http://localhost:") || o.starts_with("http://127.0.0.1:"));
+    if !is_dev_frontend && !state.rate_limiter.check_and_record(&client_ip) {
         let mut resp = (
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({
@@ -951,23 +954,43 @@ async fn list_topics_handler(State(state): State<GatewayState>) -> Json<serde_js
     Json(serde_json::json!({ "topics": topics }))
 }
 
+fn default_general_class() -> String {
+    "general".to_string()
+}
+
+fn default_partition_count() -> u32 {
+    1
+}
+
+fn default_max_records() -> usize {
+    100
+}
+
 #[derive(Deserialize)]
 struct CreateTopicRequest {
     topic: String,
+    #[serde(default = "default_partition_count")]
     partition_count: u32,
+    #[serde(default = "default_general_class")]
     class_id: String,
 }
 
 async fn create_topic_handler(
     State(state): State<GatewayState>,
+    axum::extract::Extension(session): axum::extract::Extension<auth::Session>,
     Json(payload): Json<CreateTopicRequest>,
 ) -> Json<serde_json::Value> {
     {
         let mut classes = HashSet::new();
         classes.insert(payload.class_id.clone());
+        let owner = if session.tenant_id.is_empty() {
+            "tenant-default".to_string()
+        } else {
+            session.tenant_id.clone()
+        };
         let meta = TopicMetadata::new(
             &payload.topic,
-            "tenant-default",
+            owner,
             payload.partition_count,
             classes,
         );
@@ -994,7 +1017,9 @@ async fn create_topic_handler(
 #[derive(Deserialize)]
 struct ProduceMessageRequest {
     topic: String,
+    #[serde(default)]
     partition: u32,
+    #[serde(default = "default_general_class")]
     class_id: String,
     payload: String,
 }
@@ -1057,9 +1082,13 @@ async fn produce_handler(
 #[derive(Deserialize)]
 struct FetchMessageRequest {
     topic: String,
+    #[serde(default)]
     partition: u32,
+    #[serde(default)]
     offset: u64,
+    #[serde(default = "default_max_records")]
     max_records: usize,
+    #[serde(default)]
     class_id: Option<String>,
 }
 

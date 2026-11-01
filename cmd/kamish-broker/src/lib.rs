@@ -1335,7 +1335,7 @@ impl BrokerServer {
         // W10: Catalog & tenant authorization checks (producers cannot choose another tenant's class)
         if let Some(topic_meta) = self.catalog.read().unwrap().get_topic(&req.topic) {
             if let Some(id) = identity {
-                if !id.tenant.is_empty() && id.tenant != topic_meta.owner_tenant {
+                if !id.tenant.is_empty() && !id.is_authorized_for_tenant(&topic_meta.owner_tenant) {
                     return Err(BrokerError::PolicyDenied(format!(
                         "Tenant mismatch: producer tenant '{}' cannot produce to topic '{}' owned by '{}' (W10)",
                         id.tenant, req.topic, topic_meta.owner_tenant
@@ -1778,7 +1778,7 @@ impl BrokerServer {
         // W10 / W13: Catalog & tenant authorization checks
         if let Some(topic_meta) = self.catalog.read().unwrap().get_topic(&req.topic) {
             if let Some(id) = identity {
-                if !id.tenant.is_empty() && id.tenant != topic_meta.owner_tenant {
+                if !id.tenant.is_empty() && !id.is_authorized_for_tenant(&topic_meta.owner_tenant) {
                     return Err(BrokerError::PolicyDenied(format!(
                         "Tenant mismatch: consumer tenant '{}' cannot fetch from topic '{}' owned by '{}' (W10)",
                         id.tenant, req.topic, topic_meta.owner_tenant
