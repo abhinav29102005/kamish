@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-export default function KamishDragon3D({ isFlameOn }) {
+export default function KamishDragon3D({ isFlameOn = false, isShadowForm = false }) {
   const mountRef = useRef(null);
   const flameRef = useRef(isFlameOn);
   const [loadProgress, setLoadProgress] = useState(0);
@@ -314,7 +314,8 @@ export default function KamishDragon3D({ isFlameOn }) {
       style={{
         position: 'relative',
         width: '100%',
-        height: '620px',
+        height: '100%',
+        minHeight: '300px',
         userSelect: 'none',
       }}
     >
@@ -390,7 +391,7 @@ export default function KamishDragon3D({ isFlameOn }) {
       <div
         style={{
           position: 'absolute',
-          top: '38%',
+          top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
           width: '560px',
