@@ -573,6 +573,10 @@ impl AuditLog {
 
     /// Verify existing evidence read-only. Missing files are an error; unlike
     /// open(), this never creates, appends to, or syncs the supplied path.
+    pub fn file_path(&self) -> Option<PathBuf> {
+        self.inner.lock().unwrap().file_path.clone()
+    }
+
     pub fn verify_file<P: AsRef<Path>>(path: P) -> Result<usize, AuditError> {
         Ok(Self::read_verified_entries(path.as_ref())?.len())
     }

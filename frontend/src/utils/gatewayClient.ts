@@ -40,6 +40,18 @@ export interface AuthorityState {
   }>;
 }
 
+export interface OutboxTotals {
+  byte_size: number;
+  pending_count: number;
+  oldest_entry_age_ms: number | null;
+}
+
+export interface StreamsResponse {
+  streams: StreamTelemetry[];
+  count: number;
+  outbox_totals?: OutboxTotals;
+}
+
 export interface AuditVerificationResult {
   verification_result: string;
   anchored_boundary: boolean;
@@ -195,7 +207,7 @@ class GatewayClient {
     return this.request<GatewayStatus>("/api/status");
   }
 
-  public async getStreams(): Promise<{ streams: StreamTelemetry[]; count: number }> {
+  public async getStreams(): Promise<StreamsResponse> {
     return this.request<{ streams: StreamTelemetry[]; count: number }>("/api/streams");
   }
 

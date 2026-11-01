@@ -30,6 +30,18 @@ struct Args {
     /// Known peer regions (comma-separated)
     #[arg(long, default_value = "US_EAST,AP_SOUTH")]
     peers: String,
+
+    /// Host interface to bind to (defaults to loopback for security)
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+
+    /// Allow development mode credentials
+    #[arg(long, default_value_t = false)]
+    dev: bool,
+
+    /// Allow non-loopback binding without TLS (insecure dev mode)
+    #[arg(long, default_value_t = false)]
+    insecure_dev: bool,
 }
 
 #[tokio::main]
@@ -95,10 +107,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = broker.claim_partition_ownership("general-topic", p, 0, 1, 30_000);
     }
 
-    let state = GatewayState::new(broker);
+    if args.host != "127.0.0.1"
+        && args.host != "localhost"
+        && args.host != "::1"
+        && !args.insecure_dev
+    {
+        eprintln!(
+            "Refusing to bind to non-loopback interface '{}' without TLS unless --insecure-dev is explicitly specified",
+            args.host
+        );
+        std::process::exit(1);
+    }
+
+    let user_store = Arc::new(kamish_gateway::auth::UserStore::load_from_env_or_file(
+        args.dev,
+    )?);
+    let state = GatewayState::new_with_store(broker, user_store);
     let app = app(state);
 
-    let bind_addr = format!("0.0.0.0:{}", args.port);
+    let bind_addr = format!("{}:{}", args.host, args.port);
     let listener = TcpListener::bind(&bind_addr).await?;
     tracing::info!(
         region = %args.region,

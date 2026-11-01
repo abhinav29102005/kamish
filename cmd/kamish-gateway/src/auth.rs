@@ -47,6 +47,7 @@ pub struct Session {
     pub csrf_token: String,
     pub username: String,
     pub role: Role,
+    pub tenant_id: String,
     pub created_at: Instant,
     pub expires_at: Instant,
 }
@@ -95,36 +96,119 @@ impl PasswordHash {
     }
 }
 
-/// In-memory authenticated user store.
+/// In-memory authenticated user store with external secrets & tenant binding.
 pub struct UserStore {
-    users: HashMap<String, (PasswordHash, Role)>,
+    users: HashMap<String, (PasswordHash, Role, String)>,
 }
 
 impl UserStore {
     pub fn new_with_defaults() -> Self {
+        Self::load_from_env_or_file(true).expect("defaults always succeed in dev")
+    }
+
+    pub fn load_from_env_or_file(allow_dev_defaults: bool) -> Result<Self, String> {
         let mut store = Self {
             users: HashMap::new(),
         };
-        // Standard preconfigured roles for dashboard verification
-        store.register_user("admin", "kamish-admin-2026", Role::Admin);
-        store.register_user("operator", "kamish-operator-2026", Role::Operator);
-        store.register_user("auditor", "kamish-auditor-2026", Role::Auditor);
-        store.register_user("producer", "kamish-producer-2026", Role::Producer);
-        store.register_user("consumer", "kamish-consumer-2026", Role::Consumer);
-        store
+
+        if let Ok(path) = std::env::var("KAMISH_USERS_FILE") {
+            let data = std::fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read KAMISH_USERS_FILE {path}: {e}"))?;
+            for line in data.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed.starts_with("#") {
+                    continue;
+                }
+                let parts: Vec<&str> = trimmed.split(":").map(|s| s.trim()).collect();
+                if parts.len() >= 4 {
+                    let role = match parts[2].to_lowercase().as_str() {
+                        "admin" => Role::Admin,
+                        "operator" => Role::Operator,
+                        "auditor" => Role::Auditor,
+                        "producer" => Role::Producer,
+                        "consumer" => Role::Consumer,
+                        _ => Role::Consumer,
+                    };
+                    store.register_user(parts[0], parts[1], role, parts[3]);
+                }
+            }
+            return Ok(store);
+        }
+
+        if let Ok(admin_pw) = std::env::var("KAMISH_ADMIN_PASSWORD") {
+            store.register_user("admin", &admin_pw, Role::Admin, "tenant-sovereign");
+            if let Ok(auditor_pw) = std::env::var("KAMISH_AUDITOR_PASSWORD") {
+                store.register_user("auditor", &auditor_pw, Role::Auditor, "tenant-sovereign");
+            }
+            if let Ok(producer_pw) = std::env::var("KAMISH_PRODUCER_PASSWORD") {
+                store.register_user("producer", &producer_pw, Role::Producer, "tenant-default");
+            }
+            if let Ok(consumer_pw) = std::env::var("KAMISH_CONSUMER_PASSWORD") {
+                store.register_user("consumer", &consumer_pw, Role::Consumer, "tenant-default");
+            }
+            return Ok(store);
+        }
+
+        if allow_dev_defaults {
+            store.register_user(
+                "admin",
+                "kamish-admin-2026",
+                Role::Admin,
+                "tenant-sovereign",
+            );
+            store.register_user(
+                "operator",
+                "kamish-operator-2026",
+                Role::Operator,
+                "tenant-sovereign",
+            );
+            store.register_user(
+                "auditor",
+                "kamish-auditor-2026",
+                Role::Auditor,
+                "tenant-sovereign",
+            );
+            store.register_user(
+                "producer",
+                "kamish-producer-2026",
+                Role::Producer,
+                "tenant-sovereign",
+            );
+            store.register_user(
+                "consumer",
+                "kamish-consumer-2026",
+                Role::Consumer,
+                "tenant-sovereign",
+            );
+            store.register_user(
+                "guest_producer",
+                "kamish-guest-2026",
+                Role::Producer,
+                "tenant-guest",
+            );
+            store.register_user(
+                "guest_consumer",
+                "kamish-guest-2026",
+                Role::Consumer,
+                "tenant-guest",
+            );
+            return Ok(store);
+        }
+
+        Err("No credentials configured. Supply KAMISH_USERS_FILE or KAMISH_ADMIN_PASSWORD, or pass --dev for local development".to_string())
     }
 
-    pub fn register_user(&mut self, username: &str, password: &str, role: Role) {
+    pub fn register_user(&mut self, username: &str, password: &str, role: Role, tenant: &str) {
         self.users.insert(
             username.to_lowercase(),
-            (PasswordHash::create(password), role),
+            (PasswordHash::create(password), role, tenant.to_string()),
         );
     }
 
-    pub fn authenticate(&self, username: &str, password: &str) -> Option<Role> {
-        let (pw_hash, role) = self.users.get(&username.to_lowercase())?;
+    pub fn authenticate(&self, username: &str, password: &str) -> Option<(Role, String)> {
+        let (pw_hash, role, tenant) = self.users.get(&username.to_lowercase())?;
         if pw_hash.verify(password) {
-            Some(*role)
+            Some((*role, tenant.clone()))
         } else {
             None
         }
@@ -145,7 +229,12 @@ impl SessionStore {
         }
     }
 
-    pub fn create_session(&self, username: &str, role: Role) -> Session {
+    pub fn create_session(
+        &self,
+        username: &str,
+        role: Role,
+        tenant_id: impl Into<String>,
+    ) -> Session {
         let mut token_bytes = [0u8; 32];
         let mut csrf_bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut token_bytes);
@@ -160,6 +249,7 @@ impl SessionStore {
             csrf_token,
             username: username.to_string(),
             role,
+            tenant_id: tenant_id.into(),
             created_at: now,
             expires_at: now + self.default_ttl,
         };
@@ -167,6 +257,36 @@ impl SessionStore {
         let mut guard = self.sessions.write().unwrap();
         guard.insert(token, session.clone());
         session
+    }
+
+    pub fn rotate_session(&self, old_token: &str, new_role: Option<Role>) -> Option<Session> {
+        let mut guard = self.sessions.write().unwrap();
+        let old_session = guard.remove(old_token)?;
+        if Instant::now() >= old_session.expires_at {
+            return None;
+        }
+
+        let mut token_bytes = [0u8; 32];
+        let mut csrf_bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut token_bytes);
+        rand::thread_rng().fill_bytes(&mut csrf_bytes);
+
+        let new_token = hex::encode(token_bytes);
+        let new_csrf = hex::encode(csrf_bytes);
+        let now = Instant::now();
+
+        let new_session = Session {
+            token: new_token.clone(),
+            csrf_token: new_csrf,
+            username: old_session.username,
+            role: new_role.unwrap_or(old_session.role),
+            tenant_id: old_session.tenant_id,
+            created_at: now,
+            expires_at: now + self.default_ttl,
+        };
+
+        guard.insert(new_token, new_session.clone());
+        Some(new_session)
     }
 
     pub fn validate_session(&self, token: &str) -> Option<Session> {

@@ -168,7 +168,7 @@ pub struct DestinationOutbox {
 }
 
 struct OutboxInner {
-    ranges: VecDeque<OutboxRange>,
+    ranges: VecDeque<(OutboxRange, u64)>,
     queued_bytes: usize,
     durable_watermark: u64,
     watermarks: HashMap<(String, u32), u64>,
@@ -221,7 +221,11 @@ impl OutboxReservation {
             }
         }
         self.committed = true;
-        inner.ranges.push_back(range);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        inner.ranges.push_back((range, now_ms));
         Ok(())
     }
 }
@@ -296,7 +300,7 @@ impl DestinationOutbox {
         inner
             .ranges
             .iter()
-            .filter(|r| {
+            .filter(|(r, _)| {
                 let wm = inner
                     .watermarks
                     .get(&(r.topic.clone(), r.partition))
@@ -304,8 +308,8 @@ impl DestinationOutbox {
                     .unwrap_or(0);
                 r.end_offset > wm
             })
+            .map(|(r, _)| r.clone())
             .take(max_ranges)
-            .cloned()
             .collect()
     }
 
@@ -333,7 +337,7 @@ impl DestinationOutbox {
 
         // Trim strictly ranges belonging to this (topic, partition) whose provenance matches or precedes the ACK
         let mut trimmed_bytes = 0;
-        inner.ranges.retain(|r| {
+        inner.ranges.retain(|(r, _)| {
             if r.topic == topic && r.partition == partition {
                 let provenance_matches =
                     r.epoch <= epoch && r.source_generation <= source_generation;
@@ -369,7 +373,12 @@ impl DestinationOutbox {
             .watermarks
             .keys()
             .cloned()
-            .chain(inner.ranges.iter().map(|r| (r.topic.clone(), r.partition)))
+            .chain(
+                inner
+                    .ranges
+                    .iter()
+                    .map(|(r, _)| (r.topic.clone(), r.partition)),
+            )
             .collect();
         if streams.len() != 1 {
             return Err(OutboxError::AmbiguousStream);
@@ -382,7 +391,7 @@ impl DestinationOutbox {
         inner.watermarks.insert(key.clone(), new_watermark);
         inner.durable_watermark = inner.durable_watermark.max(new_watermark);
         let mut trimmed_bytes = 0;
-        inner.ranges.retain(|r| {
+        inner.ranges.retain(|(r, _)| {
             if r.topic == key.0 && r.partition == key.1 && r.end_offset <= new_watermark {
                 trimmed_bytes += r.byte_size();
                 false
@@ -402,6 +411,19 @@ impl DestinationOutbox {
         self.inner.read().unwrap().ranges.len()
     }
 
+    pub fn pending_count(&self) -> usize {
+        self.inner.read().unwrap().ranges.len()
+    }
+
+    pub fn oldest_entry_age_ms(&self) -> Option<u64> {
+        let inner = self.inner.read().unwrap();
+        let (_, enqueued_at) = inner.ranges.front()?;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        Some(now_ms.saturating_sub(*enqueued_at))
+    }
     pub fn has_capacity(&self, additional_bytes: usize) -> bool {
         let inner = self.inner.read().unwrap();
         additional_bytes <= inner.max_bytes.saturating_sub(inner.queued_bytes)
@@ -441,7 +463,7 @@ impl DestinationOutbox {
         inner
             .ranges
             .iter()
-            .any(|r| r.start_offset <= offset && offset < r.end_offset)
+            .any(|(r, _)| r.start_offset <= offset && offset < r.end_offset)
     }
 
     /// Checks if a given offset for a specific topic/partition has already been queued or acknowledged.
@@ -455,7 +477,7 @@ impl DestinationOutbox {
         if offset < wm {
             return true;
         }
-        inner.ranges.iter().any(|r| {
+        inner.ranges.iter().any(|(r, _)| {
             r.topic == topic
                 && r.partition == partition
                 && r.start_offset <= offset
@@ -607,5 +629,28 @@ mod tests {
         assert_eq!(outbox.queued_bytes(), 150);
         assert_eq!(outbox.next_transfer_batch(10).len(), 1);
         assert!(outbox.contains_offset(0));
+    }
+
+    #[test]
+    fn test_outbox_metrics_age_and_pending_count() {
+        let outbox = DestinationOutbox::new("region-b", 1024, BackpressureRule::Reject);
+        assert_eq!(outbox.pending_count(), 0);
+        assert_eq!(outbox.oldest_entry_age_ms(), None);
+
+        let r = OutboxRange::new(OutboxRangeParams {
+            topic: "test-topic".into(),
+            partition: 0,
+            epoch: 1,
+            start_offset: 0,
+            end_offset: 1,
+            class_id: "class-a".into(),
+            payload: vec![1, 2, 3],
+            is_sealed: false,
+        });
+
+        outbox.enqueue(r).unwrap();
+        assert_eq!(outbox.pending_count(), 1);
+        assert!(outbox.queued_bytes() > 0);
+        assert!(outbox.oldest_entry_age_ms().is_some());
     }
 }

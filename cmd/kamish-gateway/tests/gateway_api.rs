@@ -5,7 +5,7 @@ use kamish_broker::BrokerServer;
 use kamish_broker::catalog::{TenantCatalog, TopicMetadata};
 use kamish_enforce::Enforcer;
 use kamish_gateway::{GatewayState, app};
-use kamish_meta::MetadataStore;
+use kamish_meta::{MetadataAuthority, MetadataStore};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -62,6 +62,7 @@ async fn login_user(app: &axum::Router, username: &str, password: &str) -> (Stri
     let res = app.clone().oneshot(login_req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let json = response_json(res).await;
+
     (
         json["session_token"].as_str().unwrap().to_string(),
         json["csrf_token"].as_str().unwrap().to_string(),
@@ -288,7 +289,7 @@ async fn test_role_based_access_control() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    // Auditor CAN trigger audit verify -> 503 SERVICE_UNAVAILABLE (until real on-disk verification in Step 4)
+    // Auditor CAN trigger audit verify -> 200 OK
     let req = Request::builder()
         .method(Method::POST)
         .uri("/api/audit/verify")
@@ -297,7 +298,7 @@ async fn test_role_based_access_control() {
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.status(), StatusCode::OK);
 
     // Auditor CANNOT produce -> 403
     let req = Request::builder()
@@ -369,16 +370,21 @@ async fn test_real_telemetry_endpoints() {
     let json = response_json(res).await;
     assert_eq!(json["policy_version_floor"], 1);
 
-    // 5. /api/checkers -> 503 SERVICE_UNAVAILABLE (until real in Step 4)
+    // 5. /api/checkers -> 200 OK (live invariant checkers and canary scanner)
     let req = Request::builder()
         .uri("/api/checkers")
         .header(header::COOKIE, format!("kamish_session={session}"))
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.status(), StatusCode::OK);
     let json = response_json(res).await;
-    assert_eq!(json["status"], "UNAVAILABLE");
+    assert_eq!(json["status"], "PASS");
+    assert_eq!(json["scope"]["target"], "live_partition_segments");
+    assert_eq!(json["scope"]["max_records_per_partition"], 100);
+    assert_eq!(json["limits"]["max_bytes_per_partition"], 10485760);
+    assert_eq!(json["limits"]["max_records_total"], 10000);
+    assert_eq!(json["canary_scanner"]["positive_control_verified"], true);
 
     // 6. /api/routing
     let req = Request::builder()
@@ -539,10 +545,317 @@ async fn test_audit_verify_hash_chain() {
         .body(Body::empty())
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.status(), StatusCode::OK);
     let json = response_json(res).await;
-    assert_eq!(json["verification_result"], "UNAVAILABLE");
-    assert_eq!(json["operation"], "checkpoint_existence_check_only");
+    assert_eq!(json["verification_result"], "PASS");
+    assert_eq!(json["hash_chain_valid"], true);
+    assert_eq!(json["zero_tamper_detected"], true);
+}
+
+#[tokio::test]
+async fn test_audit_verification_tamper_and_unanchored_tail() {
+    let dir = tempfile::tempdir().unwrap();
+    let audit_file = dir.path().join("audit.log");
+
+    // 1. Create audit log with 3 valid records
+    {
+        let log = kamish_audit::AuditLog::open(&audit_file).unwrap();
+        log.record(
+            kamish_audit::AuditAction::Ingress,
+            "sovereign-class",
+            "EU_WEST",
+            "EU_WEST",
+            1,
+            kamish_audit::DecisionOutcome::AllowCleartext,
+            "admission-grant-0",
+        )
+        .unwrap();
+        log.record(
+            kamish_audit::AuditAction::Ingress,
+            "sovereign-class",
+            "EU_WEST",
+            "EU_WEST",
+            1,
+            kamish_audit::DecisionOutcome::AllowCleartext,
+            "admission-grant-1",
+        )
+        .unwrap();
+        log.record(
+            kamish_audit::AuditAction::Ingress,
+            "sovereign-class",
+            "EU_WEST",
+            "EU_WEST",
+            1,
+            kamish_audit::DecisionOutcome::AllowCleartext,
+            "admission-grant-2",
+        )
+        .unwrap();
+    }
+
+    let meta = Arc::new(MetadataStore::new());
+    let (policy_cache, _) = kamish_gateway::create_default_policy_cache(&["EU_WEST", "US_EAST"]);
+    let audit_log = kamish_audit::AuditLog::open(&audit_file).unwrap();
+    let _tail_hash_at_2 = audit_log.last_hash(); // at 3 records, but checkpoint will anchor at 2
+
+    // Commit checkpoint at record_count = 2
+    let stream = kamish_meta::StreamId::new("financial-transactions", 0);
+    // Read the entries to get record 1 tail hash
+    let entries = kamish_audit::AuditLog::read_verified_entries(&audit_file).unwrap();
+    assert_eq!(entries.len(), 3);
+    let anchored_tail = entries[1].entry_hash.clone();
+
+    meta.commit_audit_checkpoint(kamish_meta::AuditCheckpoint {
+        stream: stream.clone(),
+        sequence: 1,
+        tail_hash: anchored_tail,
+        record_count: 2,
+        signature_hex: "dummy-sig".to_string(),
+        witness_timestamp_ns: 1234567,
+    })
+    .unwrap();
+
+    let enforcer = Arc::new(Enforcer::new("EU_WEST", policy_cache, audit_log));
+    let mut catalog = TenantCatalog::new();
+    let mut classes = HashSet::new();
+    classes.insert("sovereign-class".to_string());
+    catalog.register_topic(TopicMetadata::new(
+        "financial-transactions",
+        "tenant-sovereign",
+        3,
+        classes,
+    ));
+    let broker = Arc::new(
+        BrokerServer::try_new(
+            "EU_WEST".to_string(),
+            enforcer,
+            meta.clone(),
+            vec!["US_EAST".to_string()],
+            dir.path(),
+        )
+        .unwrap()
+        .with_catalog(catalog),
+    );
+    let _ = broker.claim_partition_ownership("financial-transactions", 0, 0, 1, 30_000);
+
+    let state = GatewayState::new(broker);
+    let app = app(state);
+    let (session, csrf) = login_user(&app, "auditor", "kamish-auditor-2026").await;
+
+    // A. Untouched file passes and reports 2 anchored, 1 unanchored tail
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/audit/verify")
+        .header(header::COOKIE, format!("kamish_session={session}"))
+        .header("x-csrf-token", &csrf)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = response_json(res).await;
+    assert_eq!(json["verification_result"], "PASS");
+    assert_eq!(json["anchored_boundary"], 2);
+    assert_eq!(json["unanchored_tail_count"], 1);
+    assert_eq!(json["total_entries"], 3);
+
+    // B. Tail removal beyond checkpoint reports reduced unanchored tail
+    let raw_lines: Vec<String> = std::fs::read_to_string(&audit_file)
+        .unwrap()
+        .lines()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(raw_lines.len(), 3);
+    // Write back only the first 2 lines (truncating unanchored entry 2)
+    std::fs::write(&audit_file, format!("{}\n{}\n", raw_lines[0], raw_lines[1])).unwrap();
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/audit/verify")
+        .header(header::COOKIE, format!("kamish_session={session}"))
+        .header("x-csrf-token", &csrf)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = response_json(res).await;
+    assert_eq!(json["verification_result"], "PASS");
+    assert_eq!(json["anchored_boundary"], 2);
+    assert_eq!(json["unanchored_tail_count"], 0); // Tail removed beyond checkpoint reported as 0 unanchored!
+
+    // C. Middle edit causes hash chain failure
+    let tampered_line = raw_lines[0].replace("admission-grant-0", "TAMPERED-CONTENT");
+    std::fs::write(
+        &audit_file,
+        format!("{}\n{}\n", tampered_line, raw_lines[1]),
+    )
+    .unwrap();
+
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/audit/verify")
+        .header(header::COOKIE, format!("kamish_session={session}"))
+        .header("x-csrf-token", &csrf)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = response_json(res).await;
+    assert_eq!(json["verification_result"], "FAIL");
+    assert_eq!(json["hash_chain_valid"], false);
+    assert_eq!(json["tamper_detected"], true);
+}
+
+#[tokio::test]
+async fn test_security_headers_csp_hsts_and_cookies() {
+    let (app, _dir) = setup_test_gateway();
+
+    // 1. Regular HTTP request: CSP present, HSTS absent
+    let req = Request::builder()
+        .uri("/api/status")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let headers = res.headers();
+    assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(headers.get("x-frame-options").unwrap(), "DENY");
+    assert!(
+        headers
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("default-src 'self'")
+    );
+    assert!(headers.get("strict-transport-security").is_none());
+
+    // 2. HTTPS request: HSTS present
+    let req = Request::builder()
+        .uri("/api/status")
+        .header("x-forwarded-proto", "https")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    let headers = res.headers();
+    assert!(headers.get("strict-transport-security").is_some());
+    assert!(
+        headers
+            .get("strict-transport-security")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("max-age=31536000")
+    );
+
+    // 3. Login over HTTPS sets Secure cookie
+    let login_req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("x-forwarded-proto", "https")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"username":"admin","password":"kamish-admin-2026"}"#,
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(login_req).await.unwrap();
+    let cookie = res.headers().get("set-cookie").unwrap().to_str().unwrap();
+    assert!(cookie.contains("; Secure"));
+    assert!(cookie.contains("HttpOnly"));
+    assert!(cookie.contains("SameSite=Strict"));
+}
+
+#[tokio::test]
+async fn test_tenant_isolation_and_rbac_denial() {
+    let (app, _dir) = setup_test_gateway();
+
+    // 1. Guest user from "tenant-guest" cannot produce to "financial-transactions" ("tenant-sovereign")
+    let (guest_session, guest_csrf) = login_user(&app, "guest_producer", "kamish-guest-2026").await;
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/produce")
+        .header(header::COOKIE, format!("kamish_session={guest_session}"))
+        .header("x-csrf-token", &guest_csrf)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"topic":"financial-transactions","partition":0,"class_id":"sovereign-class","payload":"unauthorized-tenant-data"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let json = response_json(res).await;
+    assert!(json["error"].as_str().unwrap().contains("Tenant mismatch"));
+
+    // 2. Low-privilege Consumer is denied admin operations (403 Forbidden)
+    let (consumer_session, consumer_csrf) =
+        login_user(&app, "consumer", "kamish-consumer-2026").await;
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/policy/publish")
+        .header(header::COOKIE, format!("kamish_session={consumer_session}"))
+        .header("x-csrf-token", &consumer_csrf)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. Low-privilege Consumer is denied scenario execution (403 Forbidden)
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/scenarios/run")
+        .header(header::COOKIE, format!("kamish_session={consumer_session}"))
+        .header("x-csrf-token", &consumer_csrf)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"scenario_id":"residency"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_session_token_rotation() {
+    let (app, _dir) = setup_test_gateway();
+
+    // 1. Login user -> token 1
+    let (token1, _csrf1) = login_user(&app, "admin", "kamish-admin-2026").await;
+
+    // 2. Token 1 can access protected endpoint
+    let req = Request::builder()
+        .uri("/api/status")
+        .header(header::COOKIE, format!("kamish_session={token1}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 3. Login again passing existing session -> token rotates, old token invalidated
+    let login_req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header(header::COOKIE, format!("kamish_session={token1}"))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"username":"admin","password":"kamish-admin-2026"}"#,
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(login_req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = response_json(res).await;
+    let token2 = json["session_token"].as_str().unwrap();
+    assert_ne!(token1, token2);
+
+    // 4. Token 1 is now invalidated -> 401 Unauthorized
+    let req = Request::builder()
+        .uri("/api/status")
+        .header(header::COOKIE, format!("kamish_session={token1}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 5. Token 2 is valid -> 200 OK
+    let req = Request::builder()
+        .uri("/api/status")
+        .header(header::COOKIE, format!("kamish_session={token2}"))
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }
 
 #[tokio::test]

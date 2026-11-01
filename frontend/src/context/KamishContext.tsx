@@ -384,6 +384,10 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return updated;
       });
 
+      const outboxPending = streams.outbox_totals?.pending_count ?? 0;
+      const outboxBytes = streams.outbox_totals?.byte_size ?? 0;
+      const oldestAge = streams.outbox_totals?.oldest_entry_age_ms ?? 0;
+
       if (streams.streams.length > 0) {
         const stream0 = streams.streams[0];
         const lagUs = stream0.replication_lags["US_EAST"] || 0;
@@ -391,8 +395,22 @@ export const KamishProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ...prev,
           replicationLag: lagUs,
           remoteWatermark: lagUs,
+          outboxDepth: outboxPending,
         }));
       }
+
+      setNodes((prev) => {
+        const currentRegion = (status.region || "EU_WEST") as RegionId;
+        const targetNode = prev[currentRegion];
+        if (!targetNode) return prev;
+        return {
+          ...prev,
+          [currentRegion]: {
+            ...targetNode,
+            outboxQueueSize: outboxPending,
+          },
+        };
+      });
 
       if (gatewayClient.isAuthenticated() && !currentUser) {
         gatewayClient.getMe().then(me => setCurrentUser(me.user)).catch(() => {});

@@ -13,10 +13,8 @@
 use crate::{BrokerClient, BrokerError, BrokerRequest, BrokerResponse, BrokerServer};
 use chrono::Utc;
 use kamish_log::RecordEnvelope;
-use kamish_own::quorum::{
-    PersistentConsensusState, ReplicaGroupConfig, ReplicaRole,
-};
 use kamish_own::OwnershipError;
+use kamish_own::quorum::{PersistentConsensusState, ReplicaGroupConfig, ReplicaRole};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -208,7 +206,10 @@ impl QuorumReplicationManager {
 
     /// Returns the quorum-committed index for the specified partition.
     pub fn get_commit_index(&self, topic: &str, partition: u32) -> u64 {
-        self.state.read().unwrap().get_commit_index(topic, partition)
+        self.state
+            .read()
+            .unwrap()
+            .get_commit_index(topic, partition)
     }
 
     /// Advances the commit index monotonically and persists consensus state to disk.
@@ -514,10 +515,13 @@ impl QuorumReplicationManager {
         for (peer_node_id, peer_addr) in voting_peers {
             let req_clone = append_req.clone();
             let handle = tokio::spawn(async move {
-                let connect_res = timeout(timeout_duration, BrokerClient::connect(&peer_addr)).await;
+                let connect_res =
+                    timeout(timeout_duration, BrokerClient::connect(&peer_addr)).await;
                 let mut client = match connect_res {
                     Ok(Ok(c)) => c,
-                    Ok(Err(e)) => return (peer_node_id, false, 0, Some(format!("Connect error: {e}"))),
+                    Ok(Err(e)) => {
+                        return (peer_node_id, false, 0, Some(format!("Connect error: {e}")));
+                    }
                     Err(_) => return (peer_node_id, false, 0, Some("Connect timeout".into())),
                 };
 
@@ -531,9 +535,12 @@ impl QuorumReplicationManager {
                     Ok(Ok(BrokerResponse::QuorumAppend(resp))) => {
                         (peer_node_id, resp.success, resp.match_offset, resp.error)
                     }
-                    Ok(Ok(other)) => {
-                        (peer_node_id, false, 0, Some(format!("Unexpected response: {other:?}")))
-                    }
+                    Ok(Ok(other)) => (
+                        peer_node_id,
+                        false,
+                        0,
+                        Some(format!("Unexpected response: {other:?}")),
+                    ),
                     Ok(Err(e)) => (peer_node_id, false, 0, Some(format!("RPC error: {e}"))),
                     Err(_) => (peer_node_id, false, 0, Some("Append RPC timeout".into())),
                 }
