@@ -1,0 +1,59 @@
+name: Release Verification & Dry-Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semantic Version to Dry-Run (e.g. 0.1.0-alpha.1)'
+        required: true
+        default: '0.1.0-alpha.1'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release-dry-run:
+    name: Package Dry-Run & Integrity Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22.12.0'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Build Unified Binary
+        run: |
+          cargo build --release -p kamish
+          strip target/release/kamish
+          cp target/release/kamish packages/kamish-linux-x64/bin/kamish
+
+      - name: Generate SHA-256 Checksums
+        run: |
+          mkdir -p dist/checksums
+          sha256sum packages/kamish-linux-x64/bin/kamish > dist/checksums/SHA256SUMS-binaries.txt
+          cat dist/checksums/SHA256SUMS-binaries.txt
+
+      - name: Dry-Run npm Publish (Client SDK)
+        run: |
+          cd packages/kamish-client
+          npm publish --dry-run --provenance
+
+      - name: Dry-Run npm Publish (Native Linux x64)
+        run: |
+          cd packages/kamish-linux-x64
+          npm publish --dry-run --provenance
+
+      - name: Dry-Run npm Publish (Global Wrapper)
+        run: |
+          cd packages/kamish
+          npm publish --dry-run --provenance

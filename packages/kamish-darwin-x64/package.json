@@ -1,0 +1,22 @@
+{
+  "name": "@kamish/kamish-darwin-x64",
+  "version": "0.1.0-alpha.1",
+  "description": "Native darwin x64 binary for Kamish sovereign event streaming broker and CLI",
+  "license": "Apache-2.0",
+  "author": "Kamish Team",
+  "type": "module",
+  "private": true,
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/kamish",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "sideEffects": false
+}

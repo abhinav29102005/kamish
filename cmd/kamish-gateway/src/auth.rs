@@ -106,34 +106,42 @@ impl UserStore {
         Self::load_from_env_or_file(true).expect("defaults always succeed in dev")
     }
 
-    pub fn load_from_env_or_file(allow_dev_defaults: bool) -> Result<Self, String> {
+    pub fn load_from_file(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
         let mut store = Self {
             users: HashMap::new(),
         };
-
-        if let Ok(path) = std::env::var("KAMISH_USERS_FILE") {
-            let data = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read KAMISH_USERS_FILE {path}: {e}"))?;
-            for line in data.lines() {
-                let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed.starts_with("#") {
-                    continue;
-                }
-                let parts: Vec<&str> = trimmed.split(":").map(|s| s.trim()).collect();
-                if parts.len() >= 4 {
-                    let role = match parts[2].to_lowercase().as_str() {
-                        "admin" => Role::Admin,
-                        "operator" => Role::Operator,
-                        "auditor" => Role::Auditor,
-                        "producer" => Role::Producer,
-                        "consumer" => Role::Consumer,
-                        _ => Role::Consumer,
-                    };
-                    store.register_user(parts[0], parts[1], role, parts[3]);
-                }
+        let p = path.as_ref();
+        let data = std::fs::read_to_string(p)
+            .map_err(|e| format!("Failed to read users file {}: {e}", p.display()))?;
+        for line in data.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("#") {
+                continue;
             }
-            return Ok(store);
+            let parts: Vec<&str> = trimmed.split(":").map(|s| s.trim()).collect();
+            if parts.len() >= 4 {
+                let role = match parts[2].to_lowercase().as_str() {
+                    "admin" => Role::Admin,
+                    "operator" => Role::Operator,
+                    "auditor" => Role::Auditor,
+                    "producer" => Role::Producer,
+                    "consumer" => Role::Consumer,
+                    _ => Role::Consumer,
+                };
+                store.register_user(parts[0], parts[1], role, parts[3]);
+            }
         }
+        Ok(store)
+    }
+
+    pub fn load_from_env_or_file(allow_dev_defaults: bool) -> Result<Self, String> {
+        if let Ok(path) = std::env::var("KAMISH_USERS_FILE") {
+            return Self::load_from_file(path);
+        }
+
+        let mut store = Self {
+            users: HashMap::new(),
+        };
 
         if let Ok(admin_pw) = std::env::var("KAMISH_ADMIN_PASSWORD") {
             store.register_user("admin", &admin_pw, Role::Admin, "tenant-sovereign");

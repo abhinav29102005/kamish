@@ -191,7 +191,7 @@ async fn security_middleware(
     }
 
     // Public endpoints that do not require authentication
-    if path == "/api/auth/login" || path == "/metrics" {
+    if !path.starts_with("/api/") || path == "/api/auth/login" || path == "/metrics" {
         let mut resp = next.run(req).await;
         apply_security_headers(resp.headers_mut(), origin_opt.as_deref(), is_https);
         return Ok(resp);

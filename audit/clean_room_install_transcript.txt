@@ -1,0 +1,242 @@
+=== [SDK Test Init] ===
+$ npm init -y
+Exit Code: 0
+Output:
+Wrote to /tmp/kamish_cleanroom/sdk_test/package.json:
+
+{
+  "name": "sdk_test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
+
+
+
+
+
+=== [SDK Install] ===
+$ npm install /tmp/kamish_cleanroom/kamish-client-0.1.0-alpha.1.tgz
+Exit Code: 0
+Output:
+
+added 1 package, and audited 2 packages in 902ms
+
+found 0 vulnerabilities
+
+
+=== [SDK Typecheck] ===
+$ npx -y typescript --noEmit test.ts
+Exit Code: 0
+Output:
+
+
+=== [NPM Global Install] ===
+$ npm install -g --prefix /tmp/kamish_cleanroom/global_prefix /tmp/kamish_cleanroom/kamish-client-0.1.0-alpha.1.tgz /tmp/kamish_cleanroom/kamish-kamish-linux-x64-0.1.0-alpha.1.tgz /tmp/kamish_cleanroom/kamish-0.1.0-alpha.1.tgz
+Exit Code: 0
+Output:
+
+added 3 packages in 2s
+
+
+=== [CLI Help] ===
+$ kamish --help
+Exit Code: 0
+Output:
+Kamish delivers verifiable data sovereignty across hybrid multi-region topologies
+with continuous cryptographic enforcement and zero unsolicited telemetry.
+
+Usage: kamish <COMMAND>
+
+Commands:
+  start         Start the sovereign broker, gateway API, and embedded dashboard in one process
+  doctor        Run comprehensive prerequisite diagnostics (versions, ports, consensus, certificates)
+  init          First-run setup initializing configuration skeletons and administrator credentials
+  status        Query running cluster status, operating mode, and consensus authority model
+  topic         Sovereign topic creation and inspection
+  produce       Produce a record with cryptographic residency enforcement
+  consume       Consume records from a partition beginning at an offset
+  fetch         Fetch records from a partition (alias for consume)
+  policy        Sovereign policy authoring, signature verification, and cluster publication
+  verify-audit  Verify the cryptographic integrity of a hash-chained audit log
+  benchmark     Run real-time performance and latency benchmark across network conditions
+  demo          Execute labelled scenario demonstration walkthrough
+  promote       Request partition failover promotion to a candidate owner
+  watermark     Query durable replication watermark for a source region
+  completion    Generate shell auto-completion scripts
+  help          Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+
+
+=== [CLI Version] ===
+$ kamish --version
+Exit Code: 0
+Output:
+kamish 0.1.0
+
+
+=== [CLI Doctor] ===
+$ kamish doctor
+Exit Code: 0
+Output:
+[1;36m=== Kamish System Diagnostic (kamish doctor) ===[0m
+Version  : 0.1.0 (commit: 0.1.0)
+Platform : linux-x86_64
+--------------------------------------------------
+[1;33m[WARN][0m Configuration File       : No kamish.toml found in current directory or user home
+        -> Run 'kamish init' to create a default configuration skeleton
+[1;32m[PASS][0m Broker TCP Port          : Port 9092 is available for binding
+[1;32m[PASS][0m Gateway HTTP Port        : Port 3001 is available for binding
+[1;33m[WARN][0m Consensus (etcd)         : etcd cluster not reachable at 127.0.0.1:2379
+        -> Multi-region consensus and lease fencing require an etcd cluster.
+        -> To start a 3-member cluster locally, run:
+        -> docker compose -f docker-compose.etcd.yml up -d
+        -> Or download and launch via scripts:
+        -> ./scripts/download_etcd.sh && ./scripts/start_etcd_cluster.sh
+        -> Note: Single-node mode functions without etcd (authority: LOCAL_PERSISTENT_STORAGE).
+[1;32m[PASS][0m TLS Certificates         : Development mode (pass --insecure-dev for non-loopback binding)
+[1;32m[PASS][0m Data Directory           : Data directory 'data' is accessible and writable
+--------------------------------------------------
+[1;32mSystem is ready for operation.[0m
+
+
+
+=== [CLI Init] ===
+$ kamish init --admin-user clean_admin --admin-password CleanroomPw2026! --region EU_CENTRAL
+Exit Code: 0
+Output:
+[1;32m[kamish init][0m Initialized Kamish sovereign cluster in [1;36m'.'[0m
+  Configuration : ./kamish.toml
+  Credentials   : ./users.txt
+  Policy Key    : ./admin.key
+  Public Key    : ./admin.pub
+  Signed Policy : ./policy.signed.json
+  Admin User    : [1;36mclean_admin[0m
+  Admin Password: [configured from secret/flag]
+
+Next steps:
+  1. Run 'kamish doctor' to verify system prerequisites.
+  2. Run 'kamish start' to start the broker, gateway, and dashboard.
+
+
+
+=== [CLI Policy Verify] ===
+$ kamish policy verify --policy policy.signed.json --trusted-keys admin.pub
+Exit Code: 0
+Output:
+[1;32m[PASS][0m Policy 'kamish-default-dev-policy' (version 1) cryptographically verified by authority key '31736d8f36f48b0ac2977c33fce86de98c313b5ac8dca08fb8c5f8afd8826a85'
+
+
+=== [CLI Status] ===
+$ kamish status --gateway-url http://127.0.0.1:3199 --username clean_admin --password CleanroomPw2026!
+Exit Code: 0
+Output:
+[1;36m=== Kamish Cluster Status ===[0m
+Status          : [1;32mHEALTHY[0m
+Version         : 0.1.0
+Active Region   : [1;36mEU_CENTRAL[0m
+Operating Mode  : LIVE
+Known Peers     : ["US_EAST", "AP_SOUTH"]
+Degraded Links  : []
+Max Frame Bytes : 4194304
+--------------------------------------------------
+[1;36m=== Sovereignty & Consensus Authority ===[0m
+Authority Type  : [1;33mLOCAL_PERSISTENT_STORAGE[0m
+Consensus Model : LOCAL_FSYNC
+Quorum Backed   : [1;33mfalse (single-node local storage)[0m
+Monotonic Clock : 202 ms
+Active Leases   : 9
+Quarantined     : 0
+Timestamp (UTC) : 2026-11-01T07:01:18.701333253+00:00
+
+
+
+=== [CLI Topic List] ===
+$ kamish topic list --gateway-url http://127.0.0.1:3199 --username clean_admin --password CleanroomPw2026!
+Exit Code: 0
+Output:
+[1;36m=== Registered Sovereign Topics ===[0m
+TOPIC                    TENANT             PARTITIONS   CLASSES             
+----------------------------------------------------------------------
+financial-transactions   default            1            []
+sovereign-stream         default            1            []
+general-topic            default            1            []
+
+
+
+=== [CLI Produce] ===
+$ kamish produce --addr 127.0.0.1:9192 --topic general-topic --partition 0 --class-id general --payload '{"tx_id":"clean-tx-001","amount":42}' --region EU_CENTRAL
+Exit Code: 0
+Output:
+[1;34m[kamish produce][0m Connecting producer to broker at 127.0.0.1:9192 (Region: Custom("EU_CENTRAL"), Policy: StrictLocal)...
+[1;32m[kamish produce][0m  Record successfully acknowledged! Base Offset: 0, Committed Epoch: 1
+
+
+=== [CLI Fetch] ===
+$ kamish fetch --addr 127.0.0.1:9192 --topic general-topic --partition 0 --class-id general --offset 0 --max-records 1
+Exit Code: 0
+Output:
+[1;34m[kamish consume][0m Connecting consumer to 127.0.0.1:9192 (Topic: general-topic, Partition: 0, Start Offset: 0)...
+[1;32m[kamish consume][0m Fetched 1 records:
+  [Offset 0000] Epoch: 1 | Class: general | Payload: {"tx_id":"clean-tx-001","amount":42}
+
+
+=== [CLI Verify Audit] ===
+$ kamish verify-audit --log-path ./data/kamish/audit.log
+Exit Code: 0
+Output:
+[1;34m[kamish verify-audit][0m Inspecting cryptographic audit log at: ./data/kamish/audit.log
+[1;32m[kamish verify-audit][0m  Audit log internal hash chain verified: 3 entries unbroken in cryptographic chain.
+[1;33m[kamish verify-audit][0m  Notice: verified without external witness. Suffix completeness requires quorum checkpoint anchoring (W08).
+
+
+=== [Daemon Shutdown] ===
+$ kamish start
+Exit Code: -15
+Output:
+[1;33m[kamish start] Running in SINGLE-NODE mode (authority: LOCAL_PERSISTENT_STORAGE).[0m
+[1;33m             Multi-region CAS ownership and lease fencing require etcd quorum (run 'kamish doctor' for guidance).[0m
+
+[1;32m================================================================[0m
+[1;32m  KAMISH SOVEREIGN BROKER & DASHBOARD RUNNING                   [0m
+[1;32m================================================================[0m
+  Dashboard UI    : [1;36mhttp://127.0.0.1:3199[0m
+  REST/SSE API    : [1;36mhttp://127.0.0.1:3199/api[0m
+  Broker TCP Port : [1;36m127.0.0.1:9192[0m
+  Prometheus Metrics: [1;36mhttp://127.0.0.1:3199/metrics[0m
+  Active Region   : [1;36mEU_CENTRAL[0m
+  Data Directory  : ./data/kamish
+  Config File     : kamish.toml
+[1;32m----------------------------------------------------------------[0m
+Press Ctrl+C to shut down cleanly.
+
+
+
+=== [CLI Audit Post-Shutdown Persistence] ===
+$ kamish verify-audit --log-path /tmp/kamish_cleanroom/cluster/data/kamish/audit.log
+Exit Code: 0
+Output:
+[1;34m[kamish verify-audit][0m Inspecting cryptographic audit log at: /tmp/kamish_cleanroom/cluster/data/kamish/audit.log
+[1;32m[kamish verify-audit][0m  Audit log internal hash chain verified: 3 entries unbroken in cryptographic chain.
+[1;33m[kamish verify-audit][0m  Notice: verified without external witness. Suffix completeness requires quorum checkpoint anchoring (W08).
+
+
+=== [NPM Global Uninstall] ===
+$ npm uninstall -g --prefix /tmp/kamish_cleanroom/global_prefix kamish
+Exit Code: 0
+Output:
+
+removed 1 package in 130ms
+
