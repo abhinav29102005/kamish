@@ -164,7 +164,8 @@ fn apply_security_headers(
             }
         }
 
-}
+        }
+    }
 
 async fn security_middleware(
     State(state): State<GatewayState>,
