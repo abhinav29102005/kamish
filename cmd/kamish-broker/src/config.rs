@@ -81,6 +81,26 @@ pub struct TlsConfig {
     pub require_client_auth: bool,
 }
 
+fn default_partition_count() -> u32 {
+    1
+}
+
+/// Declarative topic metadata configuration for the tenant catalog (W10 / W13).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TopicConfig {
+    pub topic: String,
+    pub owner_tenant: String,
+    #[serde(default = "default_partition_count")]
+    pub partitions: u32,
+    pub allowed_classes: Vec<String>,
+    #[serde(default)]
+    pub authorized_producers: Vec<String>,
+    #[serde(default)]
+    pub authorized_consumers: Vec<String>,
+    #[serde(default)]
+    pub allowed_consumer_regions: Vec<String>,
+}
+
 /// Broker daemon configuration loadable from a TOML file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerConfig {
@@ -107,6 +127,18 @@ pub struct BrokerConfig {
 
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    #[serde(default)]
+    pub topics: Vec<TopicConfig>,
+
+    #[serde(default)]
+    pub policy_path: Option<String>,
+
+    #[serde(default)]
+    pub trusted_keys_path: Option<String>,
+
+    #[serde(default)]
+    pub policy_version_floor: Option<u64>,
 }
 
 impl Default for BrokerConfig {
@@ -120,6 +152,10 @@ impl Default for BrokerConfig {
             limits: ServerLimits::default(),
             metadata_endpoints: Vec::new(),
             tls: None,
+            topics: Vec::new(),
+            policy_path: None,
+            trusted_keys_path: None,
+            policy_version_floor: None,
         }
     }
 }
@@ -145,6 +181,24 @@ impl BrokerConfig {
     pub fn to_toml(&self) -> Result<String, ConfigError> {
         let s = toml::to_string_pretty(self)?;
         Ok(s)
+    }
+
+    /// Construct a TenantCatalog from declarative topic configurations (W10 / W13).
+    pub fn build_catalog(&self) -> crate::catalog::TenantCatalog {
+        let mut catalog = crate::catalog::TenantCatalog::new();
+        for t in &self.topics {
+            let meta = crate::catalog::TopicMetadata::new(
+                &t.topic,
+                &t.owner_tenant,
+                t.partitions,
+                t.allowed_classes.iter().cloned().collect(),
+            )
+            .with_producers(t.authorized_producers.iter().cloned().collect())
+            .with_consumers(t.authorized_consumers.iter().cloned().collect())
+            .with_consumer_regions(t.allowed_consumer_regions.iter().cloned().collect());
+            catalog.register_topic(meta);
+        }
+        catalog
     }
 }
 

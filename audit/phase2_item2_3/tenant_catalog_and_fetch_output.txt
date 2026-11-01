@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running tests/tenant_catalog_and_fetch.rs (target/debug/deps/tenant_catalog_and_fetch-28194b0243fde839)
+
+running 1 test
+test test_tenant_catalog_and_fetch_isolation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

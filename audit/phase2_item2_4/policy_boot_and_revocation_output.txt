@@ -1,0 +1,10 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running tests/policy_boot_and_revocation.rs (target/debug/deps/policy_boot_and_revocation-4f0093179902f972)
+
+running 3 tests
+test test_durable_policy_version_floor_persistence ... ok
+test test_daemon_boot_fails_on_untrusted_or_tampered_policy ... ok
+test test_key_revocation_and_rotation_protocol_full ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

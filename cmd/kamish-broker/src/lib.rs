@@ -28,9 +28,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+pub mod catalog;
 pub mod config;
 pub mod tls;
-pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig};
+pub use catalog::{TenantCatalog, TopicMetadata};
+pub use config::{BrokerConfig, ConfigError, ServerLimits, TlsConfig, TopicConfig};
 use std::pin::Pin;
 use thiserror::Error;
 pub use tls::{
@@ -267,6 +269,7 @@ pub struct BrokerServer {
     sessions: Arc<StripedStore<(String, u32), SessionManager>>,
     partition_operations: Arc<StripedStore<(String, u32), PartitionLock>>,
     outboxes: Arc<RwLock<HashMap<String, DestinationOutbox>>>,
+    pub catalog: Arc<RwLock<TenantCatalog>>,
 }
 
 impl BrokerServer {
@@ -342,6 +345,7 @@ impl BrokerServer {
             );
         }
 
+        let catalog = Arc::new(RwLock::new(TenantCatalog::new()));
         let broker = Self {
             region: region_str,
             region_id,
@@ -357,6 +361,7 @@ impl BrokerServer {
             sessions: Arc::new(StripedStore::new()),
             partition_operations: Arc::new(StripedStore::new()),
             outboxes: Arc::new(RwLock::new(outboxes_map)),
+            catalog,
         };
         for entry in std::fs::read_dir(&broker.data_dir)? {
             let entry = entry?;
@@ -387,6 +392,17 @@ impl BrokerServer {
         self.connection_semaphore = Arc::new(tokio::sync::Semaphore::new(limits.max_connections));
         self.limits = limits;
         self
+    }
+
+    /// Attaches an authorized tenant and topic catalog (W10 / W13).
+    pub fn with_catalog(self, catalog: TenantCatalog) -> Self {
+        *self.catalog.write().unwrap() = catalog;
+        self
+    }
+
+    /// Returns a reference-counted handle to the tenant catalog.
+    pub fn catalog(&self) -> Arc<RwLock<TenantCatalog>> {
+        Arc::clone(&self.catalog)
     }
 
     /// Attaches a concrete PolicyEngine instance for ingress and egress policy enforcement (§3.B).
@@ -429,9 +445,18 @@ impl BrokerServer {
             })
     }
 
-    /// Handles record ingestion with Ingress Interceptor Hooks, E1/E2 policy enforcement,
-    /// deduplication, disk persistence, and outbox egress replication planning.
+    /// Handles record ingestion without explicit client identity.
     pub fn produce(&self, req: ProduceRequest) -> Result<ProduceResponse, BrokerError> {
+        self.produce_with_identity(req, None)
+    }
+
+    /// Handles record ingestion with Ingress Interceptor Hooks, E1/E2 policy enforcement,
+    /// tenant/topic catalog checks (W10), deduplication, disk persistence, and outbox egress replication planning.
+    pub fn produce_with_identity(
+        &self,
+        req: ProduceRequest,
+        identity: Option<&ClientIdentity>,
+    ) -> Result<ProduceResponse, BrokerError> {
         Self::validate_topic(&req.topic)?;
         if req.payload.len() > self.limits.max_payload_size {
             return Err(BrokerError::PayloadTooLarge {
@@ -439,6 +464,33 @@ impl BrokerServer {
                 max: self.limits.max_payload_size,
             });
         }
+
+        // W10: Catalog & tenant authorization checks (producers cannot choose another tenant's class)
+        if let Some(topic_meta) = self.catalog.read().unwrap().get_topic(&req.topic) {
+            if let Some(id) = identity {
+                if !id.tenant.is_empty() && id.tenant != topic_meta.owner_tenant {
+                    return Err(BrokerError::PolicyDenied(format!(
+                        "Tenant mismatch: producer tenant '{}' cannot produce to topic '{}' owned by '{}' (W10)",
+                        id.tenant, req.topic, topic_meta.owner_tenant
+                    )));
+                }
+                if !topic_meta.authorized_producers.is_empty()
+                    && !topic_meta.authorized_producers.contains(&id.principal)
+                {
+                    return Err(BrokerError::PolicyDenied(format!(
+                        "Authorization denied: producer principal '{}' is not in authorized producers list for topic '{}' (W10)",
+                        id.principal, req.topic
+                    )));
+                }
+            }
+            if !topic_meta.allowed_classes.contains(&req.class_id) {
+                return Err(BrokerError::PolicyDenied(format!(
+                    "Data class denied: class '{}' is not authorized for topic '{}' owned by tenant '{}' (W10)",
+                    req.class_id, req.topic, topic_meta.owner_tenant
+                )));
+            }
+        }
+
         let operation = self
             .partition_operations
             .get_or_insert_with((req.topic.clone(), req.partition), || {
@@ -753,6 +805,49 @@ impl BrokerServer {
 
     /// Handles consumer fetch requests with E7 policy enforcement, bounded by HWM (INV-4).
     pub fn fetch(&self, req: FetchRequest) -> Result<FetchResponse, BrokerError> {
+        self.fetch_with_identity(req, None)
+    }
+
+    /// Consumer fetch bound to authenticated consumer identity, region, and role (W10 / W13).
+    pub fn fetch_with_identity(
+        &self,
+        req: FetchRequest,
+        identity: Option<&ClientIdentity>,
+    ) -> Result<FetchResponse, BrokerError> {
+        // W10 / W13: Catalog & tenant authorization checks
+        if let Some(topic_meta) = self.catalog.read().unwrap().get_topic(&req.topic) {
+            if let Some(id) = identity {
+                if !id.tenant.is_empty() && id.tenant != topic_meta.owner_tenant {
+                    return Err(BrokerError::PolicyDenied(format!(
+                        "Tenant mismatch: consumer tenant '{}' cannot fetch from topic '{}' owned by '{}' (W10)",
+                        id.tenant, req.topic, topic_meta.owner_tenant
+                    )));
+                }
+                if !topic_meta.allowed_consumer_regions.is_empty()
+                    && !topic_meta.allowed_consumer_regions.contains(&id.region)
+                {
+                    return Err(BrokerError::PolicyDenied(format!(
+                        "Region boundary denied: consumer in region '{}' cannot fetch topic '{}' restricted to regions {:?} (W13)",
+                        id.region, req.topic, topic_meta.allowed_consumer_regions
+                    )));
+                }
+                if !topic_meta.authorized_consumers.is_empty()
+                    && !topic_meta.authorized_consumers.contains(&id.principal)
+                {
+                    return Err(BrokerError::PolicyDenied(format!(
+                        "Authorization denied: consumer principal '{}' is not in authorized consumers list for topic '{}' (W13)",
+                        id.principal, req.topic
+                    )));
+                }
+            }
+            if !topic_meta.allowed_classes.contains(&req.class_id) {
+                return Err(BrokerError::PolicyDenied(format!(
+                    "Data class denied: class '{}' is not authorized for topic '{}' owned by tenant '{}' (W10)",
+                    req.class_id, req.topic, topic_meta.owner_tenant
+                )));
+            }
+        }
+
         // E7: Consumer Fetch Policy Check
         let enf_req = EnforcementRequest::new(
             AuditAction::ConsumerFetch,
@@ -1120,14 +1215,23 @@ impl BrokerServer {
         })
     }
 
-    /// Dispatches a high-level request to the appropriate internal engine handler.
+    /// Dispatches a high-level request without client identity.
     pub fn dispatch(&self, req: BrokerRequest) -> BrokerResponse {
+        self.dispatch_with_identity(req, None)
+    }
+
+    /// Dispatches a high-level request bound to authenticated client identity (W09/W10/W13).
+    pub fn dispatch_with_identity(
+        &self,
+        req: BrokerRequest,
+        identity: Option<&ClientIdentity>,
+    ) -> BrokerResponse {
         match req {
-            BrokerRequest::Produce(p) => match self.produce(p) {
+            BrokerRequest::Produce(p) => match self.produce_with_identity(p, identity) {
                 Ok(res) => BrokerResponse::Produce(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
-            BrokerRequest::Fetch(f) => match self.fetch(f) {
+            BrokerRequest::Fetch(f) => match self.fetch_with_identity(f, identity) {
                 Ok(res) => BrokerResponse::Fetch(res),
                 Err(e) => BrokerResponse::Error(e.to_string()),
             },
@@ -1378,17 +1482,18 @@ impl BrokerServer {
                 }
             }
 
-            // Non-blocking Tokio worker thread dispatch:
+            // Non-blocking Tokio worker thread dispatch with client identity (W09/W10/W13):
+            let server = Arc::clone(&self);
+            let id = client_identity.clone();
             let resp = match req {
                 BrokerRequest::Produce(_)
                 | BrokerRequest::Fetch(_)
-                | BrokerRequest::Replicate(_) => {
-                    let server = Arc::clone(&self);
-                    tokio::task::spawn_blocking(move || server.dispatch(req))
-                        .await
-                        .map_err(|e| std::io::Error::other(e.to_string()))?
-                }
-                _ => self.dispatch(req),
+                | BrokerRequest::Replicate(_) => tokio::task::spawn_blocking(move || {
+                    server.dispatch_with_identity(req, id.as_ref())
+                })
+                .await
+                .map_err(|e| std::io::Error::other(e.to_string()))?,
+                _ => self.dispatch_with_identity(req, client_identity.as_ref()),
             };
 
             let mut serialized = serde_json::to_vec(&resp)?;
