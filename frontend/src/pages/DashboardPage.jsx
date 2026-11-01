@@ -13,6 +13,7 @@ export default function DashboardPage({ onNavigate }) {
     verifyAuditLedgerIntegrity,
     isLiveMode,
     connectionStatus,
+    gatewayStatus,
   } = useKamish();
 
   const [verifyResult, setVerifyResult] = useState(null);
@@ -22,6 +23,7 @@ export default function DashboardPage({ onNavigate }) {
   const activeNodeCount = Object.values(nodes).filter((n) => n.status === 'HEALTHY').length;
   const acceptedCount = auditLedger.filter((a) => a.outcome === 'AllowCleartext' || a.outcome === 'AllowSealed').length;
   const blockedCount = auditLedger.filter((a) => a.outcome === 'Deny').length;
+  const liveConnected = isLiveMode && connectionStatus === 'connected';
 
   const handleVerifyAudit = async () => {
     setIsVerifying(true);
@@ -57,28 +59,51 @@ export default function DashboardPage({ onNavigate }) {
     return `${x},${y}`;
   });
 
-  const pathD = points.length > 1
-    ? `M${points[0]} ` + points.slice(1).map((p) => `L${p}`).join(' ')
-    : 'M0,170 Q45,150 90,165 T180,105 T270,135 T360,75 T450,115 T540,85';
+  const pathD = isLiveMode
+    ? ''
+    : points.length > 1
+      ? `M${points[0]} ` + points.slice(1).map((p) => `L${p}`).join(' ')
+      : 'M0,170 Q45,150 90,165 T180,105 T270,135 T360,75 T450,115 T540,85';
 
-  const stats = [
+  const stats = isLiveMode ? [
     {
-      label: isLiveMode ? 'ACTIVE REGION NODES' : 'HEALTHY DEMO REGIONS',
-      count: `0${activeNodeCount}`,
+      label: 'CONNECTED GATEWAY REGION',
+      count: liveConnected ? (gatewayStatus?.region || '—') : '—',
       path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6',
     },
     {
-      label: isLiveMode ? 'ACCEPTED BROKER DECISIONS' : 'ALLOWED DEMO DECISIONS',
+      label: 'ACCEPTED DECISIONS',
+      count: 'N/A',
+      path: 'M0,18 Q40,16 80,12 T160,8 T240,2',
+    },
+    {
+      label: 'DENIED DECISIONS',
+      count: 'N/A',
+      path: 'M0,10 Q50,15 100,8 T200,12 T240,14',
+    },
+    {
+      label: 'GATEWAY OUTBOX PENDING',
+      count: liveConnected ? String(currentTelemetry?.outboxDepth ?? 0) : '—',
+      path: 'M0,14 Q60,12 120,16 T180,11 T240,15',
+    },
+  ] : [
+    {
+      label: 'HEALTHY DEMO REGIONS',
+      count: String(activeNodeCount).padStart(2, '0'),
+      path: 'M0,15 Q30,5 60,12 T120,8 T180,14 T240,6',
+    },
+    {
+      label: 'ALLOWED DEMO DECISIONS',
       count: String(acceptedCount).padStart(2, '0'),
       path: 'M0,18 Q40,16 80,12 T160,8 T240,2',
     },
     {
-      label: isLiveMode ? 'DENIED BROKER DECISIONS' : 'DENIED DEMO DECISIONS',
+      label: 'DENIED DEMO DECISIONS',
       count: String(blockedCount).padStart(2, '0'),
       path: 'M0,10 Q50,15 100,8 T200,12 T240,14',
     },
     {
-      label: isLiveMode ? 'GATEWAY OUTBOX DEPTH' : 'SIMULATED QUEUE DEPTH',
+      label: 'SIMULATED QUEUE DEPTH',
       count: String(nodes.EU_WEST.outboxQueueSize).padStart(2, '0'),
       path: 'M0,14 Q60,12 120,16 T180,11 T240,15',
     },
@@ -239,7 +264,7 @@ export default function DashboardPage({ onNavigate }) {
                 fontWeight: 600,
               }}
             >
-              {isLiveMode ? 'LIVE BROKER THROUGHPUT' : 'SIMULATED THROUGHPUT'} ({(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)
+              {isLiveMode ? 'LIVE THROUGHPUT METRIC NOT EXPOSED BY GATEWAY' : `SIMULATED THROUGHPUT (${(currentTelemetry?.throughputEps || 0).toLocaleString()} MSG/S)`}
             </div>
             <span
               style={{
@@ -248,7 +273,7 @@ export default function DashboardPage({ onNavigate }) {
                 color: 'var(--text-dim)',
               }}
             >
-              P99: {(currentTelemetry?.p99LatencyMs || 0.4).toFixed(1)}ms
+              {isLiveMode ? 'P99: N/A' : `P99: ${(currentTelemetry?.p99LatencyMs || 0.4).toFixed(1)}ms`}
             </span>
           </div>
 
@@ -331,11 +356,11 @@ export default function DashboardPage({ onNavigate }) {
                   </div>
                   <span
                     style={{
-                      color: entry.outcome !== 'Deny' ? '#4ade80' : '#f87171',
+                      color: entry.outcome === 'Deny' ? '#f87171' : (entry.outcome === 'AllowCleartext' || entry.outcome === 'AllowSealed') ? '#4ade80' : '#facc15',
                       fontWeight: 700,
                     }}
                   >
-                    [{entry.outcome === 'Deny' ? 'DENIED' : 'ALLOWED'} · {isLiveMode ? 'LIVE' : 'DEMO'}]
+                    [{entry.outcome === 'Deny' ? 'DENIED' : (entry.outcome === 'AllowCleartext' || entry.outcome === 'AllowSealed') ? 'ALLOWED' : 'UNKNOWN'} · {isLiveMode ? 'LIVE' : 'DEMO'}]
                   </span>
                 </div>
               ))
