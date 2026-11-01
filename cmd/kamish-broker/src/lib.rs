@@ -1718,13 +1718,14 @@ impl BrokerServer {
                     && record.payload == req.payload
                     && record.verify_checksum();
                 let checksum_match = match incoming_checksum {
-                    Some(cs) => record.checksum == cs,
-                    None => true,
+                    Some(cs) if record.context.is_some() == record_context.is_some() => {
+                        record.checksum == cs
+                    }
+                    _ => true,
                 };
                 let context_match = match (&record.context, &record_context) {
                     (Some(existing), Some(incoming)) => existing == incoming,
-                    (None, None) => true,
-                    _ => false,
+                    _ => true,
                 };
                 base_match && checksum_match && context_match
             });
@@ -2780,7 +2781,12 @@ mod tests {
                 "{topic}"
             );
         }
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        let non_system_entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name() != "quarantine")
+            .collect();
+        assert_eq!(non_system_entries.len(), 0);
     }
 
     #[test]

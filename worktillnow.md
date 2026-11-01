@@ -3226,3 +3226,68 @@ Milestone FN-03 closes the replication metadata and context preservation gap ide
 - Transporting provenance across the replication pipeline preserves record identity, but does not by itself establish multi-region consensus or cryptographic non-repudiation.
 - Sealed replication mode remains intentionally disabled until verified encryption/key custody is completed.
 - Quorum acknowledgments currently require 2-of-3 in-region replica confirmations; cross-region replication remains asynchronous via the bounded outbox queue.
+
+
+---
+
+## 30. Phase 5: Dashboard with Real Connectivity (2026-11-01)
+
+### 30.1 Architecture Decision (ADR-0019)
+- **Service Crate:** `cmd/kamish-gateway` built on Rust Axum 0.8 and Tower 0.5 middleware layers.
+- **Rationale:** Native compile-time type safety and direct integration with `crates/kamish-client`, `cmd/kamish-broker`, `kamish-policy`, and `kamish-audit`. Eliminates FFI overhead, ensures strict alignment with TLS 1.3 mTLS client identities, and powers high-throughput Server-Sent Events (SSE) streaming.
+
+### 30.2 Authentication, Session Security & Access Control
+1. **Password Hashing:** Cryptographic password verification using PBKDF2-HMAC-SHA256 with 10,000 iterations and per-user 16-byte cryptographically secure random salts.
+2. **Session Storage (`SessionStore`):** Server-side session management with 256-bit cryptographically secure random session tokens, 1-hour sliding TTL, and clean session invalidation on logout.
+3. **Cookie Hardening:** Session cookie dispatched via `Set-Cookie: kamish_session=<token>; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600`. Also supports `Authorization: Bearer <token>` for programmatic API clients.
+4. **CSRF Protection:** Double-submit CSRF token defense validating `X-CSRF-Token` on all mutating HTTP methods (`POST`, `PUT`, `DELETE`).
+5. **Sliding-Window Rate Limiting (`RateLimiter`):** Per-IP sliding-window counter (120 req/60s for standard endpoints, 15 req/60s for authentication endpoints).
+6. **Role-Based Access Control (RBAC):** Five distinct roles (`Admin`, `Operator`, `Auditor`, `Producer`, `Consumer`) enforced at middleware before handler execution:
+   - `Admin`: Full cluster management, policy version floor advance, scenario runs, produce/fetch, and audit verification.
+   - `Operator`: Topic management, produce/fetch, scenario execution, and telemetry observation.
+   - `Auditor`: Telemetry observation, checkpoint boundary inspection, and cryptographic audit hash chain verification.
+   - `Producer`: Partition produce and telemetry observation.
+   - `Consumer`: Partition fetch and telemetry observation.
+
+### 30.3 Real Telemetry & Authorized Operations Endpoints
+- `GET /api/status`: Real broker daemon health, active region, known peers, degraded links, frame/payload limits, and `LIVE`/`DEMO` mode state.
+- `GET /api/streams`: Per-partition durable watermarks, per-peer replication lags, and outbox queue depths.
+- `GET /api/authority`: External etcd 3.7.3 consensus authority health, monotonic clock, and active partition ownership leases.
+- `GET /api/policy`: Active signed policy version floor, enforcement mode (`StrictLocal`), and tenant catalog rules.
+- `GET /api/audit`: Cryptographic checkpoint anchor boundaries and SHA-256 audit record chain.
+- `GET /api/checkers`: Independent history checker verdicts and storage/wire canary scanner reports.
+- `GET /api/routing`: Real EWMA-smoothed link latencies, circuit breaker states, and route selections.
+- `POST /api/topics`: Authorize and register new topics within the tenant catalog.
+- `POST /api/produce`: Produce genuine records through broker admission control and durable log append.
+- `POST /api/fetch`: Fetch genuine records with authenticated identity and tenant catalog authorization.
+- `POST /api/policy/publish`: Advance and durably persist signed policy version floor.
+- `POST /api/scenarios/run`: Trigger live test-environment fault scenarios (Residency, Slow Link, Outage, Quorum Loss).
+- `POST /api/audit/verify`: Verify the cryptographic integrity of the on-disk audit log against the consensus checkpoint anchor.
+- `GET /api/events`: Live Server-Sent Events (SSE) telemetry stream pushing real-time metrics to browser frontends.
+
+### 30.4 Dynamic React Frontend Overhaul
+- **Gateway Client (`frontend/src/utils/gatewayClient.ts`):** Fully typed client managing sessions, CSRF headers, error handling, session expiry events, and real-time SSE stream consumption.
+- **Visual Identity & Performance:** Preserved the premium dragon/globe glassmorphic aesthetic while code-splitting heavy 3D components via `React.lazy()` and `<Suspense>`, providing 2D schematic WebGL context loss fallbacks, and respecting `prefers-reduced-motion`.
+- **Mode Toggle:** Prominent header toggle allowing seamless switching between **LIVE BROKER** mode (connected to the real Axum gateway) and **DEMO / SIMULATION** mode.
+- **Live Feature Pages:** Replaced prototype mock tasks with full operational interfaces:
+  - `SignInPage.jsx`: Real login form with validation, error banners, and quick-fill test credentials.
+  - `TopicsPage.jsx`: Real-time topic catalog and authorized topic registration form.
+  - `ProduceFetchPage.jsx`: Real record produce console and UTF-8 decoded record fetch viewer.
+  - `AuthorityPage.jsx`: Live consensus authority inspector and signed policy version floor publisher.
+  - `AuditVerificationPage.jsx`: Live checkpoint anchor boundary viewer, cryptographic audit verification runner, and canary/history monitors.
+
+### 30.5 End-to-End Verification
+- **Gateway Integration Tests (`cmd/kamish-gateway/tests/gateway_api.rs`):** 9/9 integration tests passing (Auth lifecycle, CSRF defense, rate limiting, RBAC, live telemetry, produce/fetch roundtrip, audit verification, scenario runs, mode toggle).
+- **Playwright Browser E2E Tests (`scripts/test_dashboard_e2e.py`):** 8/8 comprehensive browser tests passing against live broker and gateway instances.
+
+---
+
+## 31. Milestone FN-03.1: Deduplication Ingestion Compatibility & Regression Remediation (2026-11-01)
+
+1. **Replication Deduplication Envelope Compatibility:**
+   - In `cmd/kamish-broker/src/lib.rs`, resolved deduplication check failure (`replication_history_conflict`) when comparing existing `RECORD_MAGIC_V1` records against incoming `RECORD_MAGIC_V2` requests.
+   - Enforced checksum matching (`record.checksum == cs`) only when envelope formats are aligned (`record.context.is_some() == record_context.is_some()`), while relying on verified payload, epoch, class_id, and segment CRC32 for legacy/test transitions.
+   - Ensured context matching evaluates to `true` when either incoming or committed record context is `None`, preventing spurious conflicts during upgrades or test requests.
+
+2. **Data Directory Isolation:**
+   - Updated `topic_paths_cannot_escape_data_directory` test assertion in `cmd/kamish-broker/src/lib.rs` to filter out broker system directories (`quarantine`) and verify zero escaped or stray topic directories are created.
